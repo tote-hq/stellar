@@ -252,8 +252,8 @@ the `wasm32v1-none` target and the
 [Stellar CLI](https://developers.stellar.org/docs/tools/developer-tools/cli/stellar-cli).
 
 ```bash
-git clone https://github.com/raptor0929/changuito
-cd changuito
+git clone https://github.com/tote-hq/stellar
+cd stellar
 npm install
 
 cp apps/web/.env.example apps/web/.env.local

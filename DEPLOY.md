@@ -147,7 +147,7 @@ design rather than a gap.
 
 ### 2.2 Import the repository
 
-In Vercel: **Add New → Project**, import `raptor0929/changuito`.
+In Vercel: **Add New → Project**, import `tote-hq/stellar`.
 
 | Setting | Value |
 |---|---|
