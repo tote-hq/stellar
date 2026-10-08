@@ -17,7 +17,7 @@ automated is stated by us, before you find it.
 |---|---|
 | **Live app** | [app.changuito.me](https://app.changuito.me) — signed out is testnet and costs the visitor nothing |
 | **Marketing site** | [www.changuito.me](https://www.changuito.me) |
-| **Repository** | [github.com/raptor0929/changuito](https://github.com/raptor0929/changuito) — MIT |
+| **Repository** | [github.com/tote-hq/stellar](https://github.com/tote-hq/stellar) — MIT. The Solana port lives in [tote-hq/solana](https://github.com/tote-hq/solana); only Stellar work lands here, and PRs labeled `shared` are mirrored between the two |
 | **Built by** | [SimonethG](https://www.linkedin.com/in/simonethg/) and [Fabio](https://www.linkedin.com/in/fabio-laura-yavi/), in Argentina |
 | **Networks** | Stellar **testnet** (preview, and the deployed contracts) and **mainnet** (production, real USDC) |
 | **What is on-chain** | a classic USDC payment with a memo, confirmed by reading Horizon. No contract sits on the money rail, and the deployment holds no signing key on mainnet |
