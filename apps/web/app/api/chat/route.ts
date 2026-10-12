@@ -15,6 +15,7 @@ import { readLoggedInUser, requireLoginOrFreeTurn } from '@/lib/login-gate';
  * confusing way to find out.
  */
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 /** Conversation history, alongside the MCP session it belongs to. */
