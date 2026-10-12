@@ -62,6 +62,8 @@ export const runtime = 'nodejs';
 // Balances change; a cached one is worse than a slow one.
 export const dynamic = 'force-dynamic';
 
+const NO_STORE = { 'cache-control': 'private, no-store' };
+
 export interface BalanceResponse {
   address: string;
   /** Decimal XLM, or null for a smart wallet (a contract holds no Horizon account). */
@@ -92,7 +94,7 @@ export async function GET(req: Request): Promise<Response> {
   const network = networkOrDefault(params.get('network'));
   const kind = addressKind(address);
   if (!kind) {
-    return Response.json({ error: 'not a Stellar address' }, { status: 400 });
+    return Response.json({ error: 'not a Stellar address' }, { status: 400, headers: NO_STORE });
   }
 
   const asset = usdcAsset(network);
@@ -129,9 +131,9 @@ export async function GET(req: Request): Promise<Response> {
       trustline: kind === 'contract' ? 'not-needed' : trustlineFor(balances, asset),
       network,
     };
-    return Response.json(body);
+    return Response.json(body, { headers: NO_STORE });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return Response.json({ error: `could not read balances: ${message}` }, { status: 502 });
+    console.error('[balance]', err instanceof Error ? err.message : String(err));
+    return Response.json({ error: 'No pudimos leer tu saldo ahora.' }, { status: 502, headers: NO_STORE });
   }
 }
