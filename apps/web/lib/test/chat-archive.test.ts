@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import { archiveChat, chatTitle, type ArchiveDeps } from '../chat-archive.ts';
@@ -148,5 +149,14 @@ describe('archiving a conversation', () => {
       ),
       'failed',
     );
+  });
+});
+
+describe('RULE: a chat never changes hands', () => {
+  it('the save upsert only updates a row the same wallet owns', () => {
+    // No database in unit tests, so this pins the SQL itself: a chat id is a
+    // UUID, not a capability, and must not let one wallet overwrite another's.
+    const db = readFileSync(new URL('../db.ts', import.meta.url), 'utf8');
+    assert.match(db, /on conflict \(id\) do update[\s\S]*?where chat\.address = excluded\.address/);
   });
 });
