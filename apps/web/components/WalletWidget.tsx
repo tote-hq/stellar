@@ -7,7 +7,7 @@ import { track, trackLoginStart } from '../lib/analytics';
 import { GRANT_UNITS } from '../lib/faucet-policy.ts';
 import { usdcAmount } from '../lib/faucet-copy.ts';
 import { modeCopy, previewMasthead, trustlineCopy } from '../lib/mode-copy.ts';
-import { pollarEnabled, shortAddress } from '../lib/pollar.ts';
+import { pollarEnabled } from '../lib/pollar.ts';
 import { ensureUserCookie, forgetUserCookie } from '../lib/session-login.ts';
 import { usdcAsset } from '../lib/trustline.ts';
 import type { FaucetProof } from '../lib/faucet-proof.ts';
@@ -235,7 +235,9 @@ function ConnectedWallet() {
           }}
           title={copy.addressTitle(address)}
         >
-          {shortAddress(address)}
+          {/* The whole address, so it can be checked character by
+              character against what a sender sees. CSS wraps it. */}
+          {address}
         </button>
       </div>
 
@@ -244,10 +246,10 @@ function ConnectedWallet() {
         {/* The qualifier is part of the number, not a footnote somewhere
             else: this is the line that says whether the money is real. */}
         <span className="wallet-unit">{mode.balanceUnit}</span>
+        {/* Beside the number it qualifies, not a row below it. */}
+        <ModeBadge network={network} />
         {loading && <span className="wallet-muted">{copy.refreshing}</span>}
       </div>
-
-      <ModeBadge network={network} />
 
       <div className="wallet-sub">
         {/* No fee warning here. Pollar sponsors the fee — see the note on

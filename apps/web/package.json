@@ -9,7 +9,7 @@
     "start": "next start -p 3124",
     "typecheck": "tsc --noEmit",
     "mcp:smoke": "node scripts/mcp-smoke.mjs",
-    "test": "node --experimental-strip-types --test \"lib/test/*.test.ts\""
+    "test": "node --experimental-strip-types --experimental-test-module-mocks --no-warnings --test \"lib/test/*.test.ts\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.127.0",
