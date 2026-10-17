@@ -34,3 +34,6 @@ jobs:
 
       - name: Unit tests
         run: npm test
+
+      - name: Typecheck (web)
+        run: npm run typecheck -w @changuito/web
