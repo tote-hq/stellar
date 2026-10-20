@@ -15,17 +15,15 @@ import { useLang, useSetLang } from './LangProvider';
  * and then never again. The footer is where the "about this site" furniture
  * lives, which is what this is.
  *
- * ## The label is the destination, in the destination's language
+ * ## The visible label is the destination's short code
  *
- * A toggle reading "ES" is ambiguous in the way that matters — is that the
- * language I am in, or the one I would get? So the button says **English**
- * when the page is Spanish, and **Español** when it is English. The word is
- * always in the language it takes you to, so the one person who genuinely
- * needs this control can read it without being able to read anything else on
- * the page. `aria-label` follows the same rule.
+ * The footer row is one line, so the control shows **EN** when the page is
+ * Spanish and **ES** when it is English — the language you would get, not the
+ * one you are in. The accessible name starts with those same letters (so the
+ * visible label is in the name) and then says the destination in full, in
+ * that destination's language: "EN, Switch to English".
  *
- * `lang` on the element tells a screen reader to switch voice for that word,
- * so "Español" inside an English page is not read as English.
+ * `lang` on the element tells a screen reader to switch voice for that name.
  *
  * ## Two things have to move, and only one of them is React state
  *
@@ -46,6 +44,7 @@ export function LangToggle() {
   const setLang = useSetLang();
   const router = useRouter();
   const next = LANG_SWITCH[lang];
+  const short = next.to === 'en' ? 'EN' : 'ES';
 
   const flip = () => {
     setLang(next.to);
@@ -57,12 +56,12 @@ export function LangToggle() {
       type="button"
       className="app-lang"
       lang={next.to}
-      aria-label={next.aria}
+      aria-label={`${short}, ${next.aria}`}
       data-testid="app-lang"
       onClick={flip}
     >
       <GlobeIcon />
-      <span className="app-lang-label">{next.label}</span>
+      <span className="app-lang-label">{short}</span>
     </button>
   );
 }
