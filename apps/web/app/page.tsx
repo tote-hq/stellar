@@ -1,6 +1,7 @@
 import { Chat } from '../components/Chat';
 import { Deck } from '../components/Deck';
 import { HistoryToggle } from '../components/HistoryToggle';
+import { FooterPoweredBy } from '../components/FooterPoweredBy';
 import { FooterSocial } from '../components/FooterSocial';
 import { FounderTrust } from '../components/FounderTrust';
 import { HumanGate } from '../components/HumanGate';
@@ -81,8 +82,12 @@ export default async function Home() {
                 </HumanGate>
                 <footer className="app-footer">
                   <FounderTrust />
-                  <FooterSocial />
-                  <LangToggle />
+                  <FooterPoweredBy />
+                  <div className="app-footer-tools">
+                    <FooterSocial />
+                    <span className="app-footer-divider" aria-hidden="true" />
+                    <LangToggle />
+                  </div>
                 </footer>
               </main>
             </Deck>

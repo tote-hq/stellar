@@ -1255,15 +1255,15 @@ a:hover { color: var(--chg-arcilla); }
 .app-footer {
   flex-shrink: 0;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column-reverse;
   align-items: center;
   justify-content: center;
-  column-gap: 2px;
+  gap: 0;
   margin: 0;
-  padding: 2px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+  padding: 0 8px calc(8px + env(safe-area-inset-bottom, 0px));
   color: var(--muted);
   font-size: 12px;
-  line-height: 1.35;
+  line-height: 16px;
   text-align: center;
   /* The trust sentence used to query its own box. The icons sit beside
      that box now, so the query has to be the footer: a shrink-wrapped
@@ -1272,11 +1272,33 @@ a:hover { color: var(--chg-arcilla); }
   container-name: app-footer;
 }
 
-/* Wide: one sentence, copyright first. Narrow: names, then the copyright line. */
+/* Mobile is three centered rows: tools, then partners, then the credit.
+   column-reverse puts that on screen while the source stays credit, partners,
+   tools — the trust line is first in the footer markup. */
+.app-footer-tools {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding-top: 8px;
+}
+.app-footer-divider {
+  width: 1px;
+  height: 24px;
+  flex: 0 0 1px;
+  background: var(--border);
+}
+
+/* One sentence at every width. On a phone it is the last row and the smallest type. */
 .chg-trust {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 100%;
+  padding-bottom: 8px;
+  /* #6b5a52 on --bg is 6.26:1. Quieter than --muted, still body text. */
+  color: #6b5a52;
+  font-size: 11px;
+  line-height: 16px;
 }
 .chg-trust-line { margin: 0; }
 .chg-trust-link {
@@ -1298,8 +1320,76 @@ a:hover { color: var(--chg-arcilla); }
   border: 0;
 }
 @container app-footer (max-width: 36rem) {
-  .chg-trust-line { display: flex; flex-direction: column-reverse; }
-  .chg-trust-sep { display: none; }
+  .app-powered-link img { height: 16px; }
+  .chg-trust { font-size: 11px; line-height: 16px; }
+}
+
+/* Partner lockups. 16px tall below 768, 18px from there. Mono marks are the
+   muted brown at .75, which still clears 4.5:1 on --bg; Superteam stays in color. */
+.app-powered {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-width: 0;
+}
+.app-powered-label {
+  font-size: 12px;
+  line-height: 16px;
+  color: #6b5a52;
+}
+.app-powered-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 8px;
+}
+.app-powered-link img {
+  display: block;
+  height: 16px;
+  width: auto;
+}
+.app-powered-link.is-mono img { opacity: 0.75; }
+.app-powered-link.is-color img { border-radius: 4px; opacity: 1; }
+.app-powered-link:hover { background: rgba(42, 26, 20, 0.06); }
+.app-powered-link:focus-visible {
+  outline: 3px solid var(--chg-espresso);
+  outline-offset: -3px;
+}
+
+@media (min-width: 768px) {
+  .app-footer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: 16px;
+    padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid rgba(42, 26, 20, 0.08);
+    text-align: initial;
+  }
+  .app-footer-tools {
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: start;
+    padding-top: 0;
+  }
+  .app-powered {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: center;
+  }
+  .chg-trust {
+    grid-column: 3;
+    grid-row: 1;
+    justify-self: end;
+    padding-bottom: 0;
+    text-align: right;
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .app-powered-link img { height: 18px; }
 }
 
 /* Profile icons. 44px is the touch target; the glyph inside is 16 to 18px
@@ -1314,7 +1404,7 @@ a:hover { color: var(--chg-arcilla); }
 .app-social-list {
   display: flex;
   align-items: center;
-  gap: 0;
+  gap: 8px;
   list-style: none;
   margin: 0;
   padding: 0;
@@ -1343,28 +1433,30 @@ a:hover { color: var(--chg-arcilla); }
   outline-offset: -3px;
 }
 
-/* Language switch. Same 44px row height and the same muted/--text pair as
-   the social links beside it, so the footer reads as one strip rather than
-   an icon group with a button bolted on. It carries a word as well as the
-   glyph because the word is the whole affordance (see LangToggle), so it is
-   wider than 44px and that is fine: the footer wraps. */
+/* Language switch. Same 44px row and the same muted/--text pair as the
+   social links beside it. The visible letters are EN / ES; the border is the
+   pill from the footer mock. */
 .app-lang {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 4px;
+  min-width: 44px;
   min-height: 44px;
-  padding: 0 10px;
+  padding: 0 8px;
   color: var(--muted);
   background: none;
-  border: 0;
-  border-radius: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
   font: inherit;
+  font-weight: 600;
   cursor: pointer;
 }
 .app-lang-label {
   font-size: 12px;
-  line-height: 1.35;
+  font-weight: 600;
+  line-height: 16px;
 }
 .app-lang:hover {
   color: var(--text);
