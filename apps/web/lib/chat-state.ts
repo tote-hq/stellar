@@ -95,6 +95,32 @@ export function idNumber(id: string): number {
   return m ? Number(m[1]) : 0;
 }
 
+/**
+ * Drop a finished `get_cart_link` row once this turn has a cart card.
+ *
+ * The row is the wait for that card. `autoRenderCart` draws the card itself,
+ * and the call that produced the link is often over before a tenth of a
+ * second — which the trail used to print as "0.0s", a row that looks like it
+ * never closed. The card is the resolution, so the row goes. A failed call
+ * stays: hiding the ✗ would make a call that did not work look like one that did.
+ *
+ * Same scope as the card. A row from an earlier turn is what happened then,
+ * and a later cart does not get to edit it. An otherwise empty bubble goes
+ * with the row, or the thread keeps a blank agent message.
+ */
+function withoutCartLinkTrail(blocks: Block[], turnStart: number): Block[] {
+  let changed = false;
+  const next = blocks.flatMap((b, i) => {
+    if (i <= turnStart || b.kind !== 'say') return [b];
+    if (!b.tools.some((t) => t.name === 'get_cart_link' && t.ok !== false)) return [b];
+    changed = true;
+    const tools = b.tools.filter((t) => t.name !== 'get_cart_link' || t.ok === false);
+    if (b.text === '' && b.thinking === '' && tools.length === 0) return [];
+    return [{ ...b, tools }];
+  });
+  return changed ? next : blocks;
+}
+
 /** The state with no turn in progress. Removes the key rather than setting it undefined. */
 function settled(state: ChatState): ChatState {
   if (!('progress' in state)) return state;
@@ -206,15 +232,18 @@ export function applyEvent(state: ChatState, e: UiEvent): ChatState {
         handoffUrl: e.handoffUrl ?? prior?.handoffUrl,
       });
 
+      const blocks = prior
+        ? state.blocks.map((b, i) => (i === existing ? block(prior.id) : b))
+        : [...state.blocks, block(nextId())];
+
       return {
         ...state,
         cart: { cart: e.cart, handoffUrl: e.handoffUrl ?? prior?.handoffUrl },
-        blocks:
-          // Reusing the id matters: React keys off it, so the card updates in
-          // place instead of unmounting and animating back in.
-          prior
-            ? state.blocks.map((b, i) => (i === existing ? block(prior.id) : b))
-            : [...state.blocks, block(nextId())],
+        // Reusing the id matters: React keys off it, so the card updates in
+        // place instead of unmounting and animating back in. The cart-link
+        // row is removed in the same step, so it does not sit under the card
+        // it was waiting to draw.
+        blocks: withoutCartLinkTrail(blocks, turnStart),
       };
     }
 

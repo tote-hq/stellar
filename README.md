@@ -295,7 +295,7 @@ The annotated list is `apps/web/.env.example`. The ones that change what works:
 ## Tests
 
 ```bash
-npm test                    # 1178: mcp 520 · trust 2 · web 583 · landing 73
+npm test                    # 1278: mcp 520 · trust 2 · web 682 · landing 74
 npm run contracts:test      #   34: escrow 19 · mock_usdc 15
 npm run typecheck -w @changuito/web
 npm run build
@@ -329,6 +329,21 @@ The contract suite covers what the money depends on: a double open is rejected,
 settling an order that was never opened is rejected, an unauthorized settle is
 rejected, a buyer refunding before the deadline is rejected, after it is allowed,
 and balances reconcile exactly across both `open → settle` and `open → refund`.
+
+### Redis (Testcontainers)
+
+`apps/web/lib/test/kv-stand-in.ts` starts a Redis container behind an
+Upstash-compatible HTTP proxy. That REST shape is what Vercel KV is, so the
+session store can be pointed at the container the same way it is pointed at KV.
+`apps/web/lib/test/turn-store.redis.test.ts` is the integration test that uses
+it. It is part of `npm test` and skips when Docker is not available, so a
+machine or a build without Docker still passes.
+
+To run that test on its own, from `apps/web`, with Docker running:
+
+```bash
+node --experimental-strip-types --experimental-test-module-mocks --no-warnings --test lib/test/turn-store.redis.test.ts
+```
 
 ---
 

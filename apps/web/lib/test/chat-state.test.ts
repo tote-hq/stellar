@@ -137,6 +137,71 @@ describe('applyEvent', () => {
     assert.deepEqual(s.blocks.map((b) => b.kind), ['cart', 'cart']);
   });
 
+  it('drops the get_cart_link trail row once this turn draws the cart', () => {
+    // The row lingered under the card, closed as "0.0s" when the call was
+    // under 50ms. The card is the resolution, so the row does not stay.
+    const s = run([
+      { t: 'tool_start', id: 'search', name: 'search_products' },
+      { t: 'tool_end', id: 'search', ok: true, ms: 900 },
+      { t: 'text', delta: 'Listo.' },
+      { t: 'tool_start', id: 'link', name: 'get_cart_link' },
+      { t: 'tool_end', id: 'link', ok: true, ms: 12 },
+      { t: 'cart', cart: cart('c1'), handoffUrl: 'https://dia/checkout' },
+    ]);
+    const say = s.blocks.find((b) => b.kind === 'say');
+    assert.ok(say?.kind === 'say');
+    assert.equal(say.text, 'Listo.');
+    assert.deepEqual(
+      say.tools.map((t) => t.name),
+      ['search_products'],
+    );
+    assert.equal(s.blocks.some((b) => b.kind === 'cart'), true);
+  });
+
+  it('removes a still-open get_cart_link row when the cart arrives before tool_end', () => {
+    const s = run([
+      { t: 'tool_start', id: 'link', name: 'get_cart_link' },
+      { t: 'cart', cart: cart('c1'), handoffUrl: 'https://dia/checkout' },
+    ]);
+    assert.deepEqual(
+      s.blocks.map((b) => b.kind),
+      ['cart'],
+    );
+    // The late close has nothing to attach to, and must not throw.
+    const after = applyEvent(s, { t: 'tool_end', id: 'link', ok: true, ms: 12 });
+    assert.deepEqual(
+      after.blocks.map((b) => b.kind),
+      ['cart'],
+    );
+  });
+
+  it('keeps a failed get_cart_link row when a cart is also drawn', () => {
+    const s = run([
+      { t: 'tool_start', id: 'link', name: 'get_cart_link' },
+      { t: 'tool_end', id: 'link', ok: false, ms: 40 },
+      { t: 'cart', cart: cart('c1'), handoffUrl: 'https://dia/checkout' },
+    ]);
+    const say = s.blocks.find((b) => b.kind === 'say');
+    assert.ok(say?.kind === 'say');
+    assert.equal(say.tools.length, 1);
+    assert.equal(say.tools[0]?.name, 'get_cart_link');
+    assert.equal(say.tools[0]?.ok, false);
+  });
+
+  it('does not drop a get_cart_link row from an earlier turn', () => {
+    const first = run(
+      [
+        { t: 'tool_start', id: 'link', name: 'get_cart_link' },
+        { t: 'tool_end', id: 'link', ok: true, ms: 20 },
+      ],
+      sendUser(initialState, 'armá un desayuno'),
+    );
+    const s = run([{ t: 'cart', cart: cart('c1'), handoffUrl: 'https://dia/checkout' }], sendUser(first, 'el link'));
+    const old = s.blocks[1];
+    assert.ok(old?.kind === 'say' && old.tools[0]?.name === 'get_cart_link' && old.tools[0]?.ok === true);
+    assert.equal(s.blocks.at(-1)?.kind, 'cart');
+  });
+
   it('done frees the composer and keeps the snapshot for the next turn', () => {
     const sent = sendUser(initialState, 'hola');
     assert.equal(sent.streaming, true);
