@@ -184,6 +184,17 @@ function memoryStore(): TurnStore {
   };
 }
 
+/**
+ * A store aimed at one REST endpoint.
+ *
+ * `turnStore()` reads the environment once and keeps that answer for the
+ * process. A test that starts its own Redis — standing in for Vercel KV —
+ * has to point at that endpoint without changing the one already chosen.
+ */
+export function turnStoreAt(url: string, token: string): TurnStore {
+  return redisStore(url, token);
+}
+
 let store: TurnStore | undefined;
 
 export function turnStore(): TurnStore {

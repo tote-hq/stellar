@@ -1,6 +1,7 @@
 'use client';
 
 import type { ToolRun } from '../lib/chat-state';
+import { formatTrailMs } from '../lib/tool-duration.ts';
 import { toolLabels } from '../lib/tool-labels.ts';
 import { useLang } from './LangProvider';
 
@@ -47,9 +48,7 @@ export function ToolTrail({ tools }: { tools: ToolRun[] }) {
               </span>
             )}
             <span>{labels[t.name] ?? t.name}</span>
-            {t.ms !== undefined ? (
-              <span className="trail-ms">{(t.ms / 1000).toFixed(1)}s</span>
-            ) : null}
+            {t.ms !== undefined ? <span className="trail-ms">{formatTrailMs(t.ms)}</span> : null}
           </li>
         );
       })}
