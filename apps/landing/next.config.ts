@@ -13,6 +13,18 @@ const config: NextConfig = {
   async headers() {
     return [{ source: '/:path*', headers: landingSecurityHeaders() }];
   },
+  // stats.changuito.me serves this app's /stats document at the host root.
+  async rewrites() {
+    return {
+      beforeFiles: [
+        {
+          source: '/',
+          has: [{ type: 'host', value: 'stats.changuito.me' }],
+          destination: '/stats',
+        },
+      ],
+    };
+  },
 };
 
 export default config;

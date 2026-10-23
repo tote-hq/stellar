@@ -33,6 +33,19 @@ const config: NextConfig = {
 
   outputFileTracingRoot: new URL('../..', import.meta.url).pathname,
 
+  // stats.changuito.me serves this app's /stats document at the host root.
+  async rewrites() {
+    return {
+      beforeFiles: [
+        {
+          source: '/',
+          has: [{ type: 'host', value: 'stats.changuito.me' }],
+          destination: '/stats',
+        },
+      ],
+    };
+  },
+
   // Belt and braces. If the boundary above ever slips, this is the second
   // thing that has to fail before a browser engine ships in a lambda.
   outputFileTracingExcludes: {
