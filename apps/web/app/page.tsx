@@ -1,9 +1,6 @@
 import { Chat } from '../components/Chat';
 import { Deck } from '../components/Deck';
 import { HistoryToggle } from '../components/HistoryToggle';
-import { FooterPoweredBy } from '../components/FooterPoweredBy';
-import { FooterSocial } from '../components/FooterSocial';
-import { FounderTrust } from '../components/FounderTrust';
 import { HumanGate } from '../components/HumanGate';
 import { LangProvider } from '../components/LangProvider';
 import { LangToggle } from '../components/LangToggle';
@@ -11,6 +8,7 @@ import { NetworkProvider } from '../components/NetworkProvider';
 import { ShopProvider } from '../components/ShopProvider';
 import { WalletProvider } from '../components/WalletProvider';
 import { WalletWidget } from '../components/WalletWidget';
+import { COPYRIGHT_LINE } from '../lib/founder-trust-copy';
 import { turnstileSiteKey } from '../lib/human-gate';
 import { inLang } from '../lib/lang.ts';
 import { langFromCookie } from '../lib/lang-server.ts';
@@ -81,13 +79,19 @@ export default async function Home() {
                   <Chat />
                 </HumanGate>
                 <footer className="app-footer">
-                  <FounderTrust />
-                  <FooterPoweredBy />
-                  <div className="app-footer-tools">
-                    <FooterSocial />
-                    <span className="app-footer-divider" aria-hidden="true" />
-                    <LangToggle />
-                  </div>
+                  <ul className="app-footer-line">
+                    <li className="app-footer-copy" data-testid="app-copyright">
+                      {COPYRIGHT_LINE}
+                    </li>
+                    <li>
+                      <a className="app-legal" href="/privacidad" data-testid="app-privacy">
+                        {inLang(lang, { es: 'Privacidad', en: 'Privacy' })}
+                      </a>
+                    </li>
+                    <li>
+                      <LangToggle />
+                    </li>
+                  </ul>
                 </footer>
               </main>
             </Deck>

@@ -439,14 +439,84 @@
 .footer {
   border-top: 1px solid var(--line);
   padding: 40px 24px 48px;
+  background: var(--paper);
 }
 
 .footerInner {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 24px 40px;
+  gap: 24px 32px;
+}
+
+/* Partner lockup. The link is the 44px target; the wordmark inside is shorter
+   so the row stays one line next to the nav. Mono marks are the muted brown
+   at .75 (about 5.3:1 on --paper). Superteam stays a color badge. */
+.powered {
+  display: flex;
+  flex: 1 1 280px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.poweredLabel {
+  margin-right: 4px;
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.poweredList {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.poweredList > li {
+  display: flex;
+  margin: 0;
+  padding: 0;
+}
+
+.poweredLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  text-decoration: none;
+}
+
+.poweredLink img {
+  display: block;
+  height: 22px;
+  width: auto;
+}
+
+.mono img {
+  opacity: 0.75;
+}
+
+.color img {
+  height: 32px;
+  width: 32px;
+  border-radius: 6px;
+  opacity: 1;
+}
+
+.poweredLink:hover {
+  background: rgba(42, 26, 20, 0.06);
 }
 
 .footerMeta {
@@ -478,6 +548,14 @@
 .footerLink {
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+.logoLink:focus-visible,
+.footerLink:focus-visible,
+.socialLink:focus-visible,
+.poweredLink:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 3px;
 }
 
 .footerSocial {
@@ -1051,6 +1129,17 @@
     padding: 8px 16px;
   }
 
+  .footerInner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .powered {
+    justify-content: flex-start;
+    width: 100%;
+    flex: none;
+  }
+
   .footerMeta {
     align-items: flex-start;
     width: 100%;
@@ -1149,5 +1238,47 @@
 
   .beatStatus {
     display: none !important;
+  }
+}
+
+/* The page stays on brand light (`color-scheme: light` in globals). When the
+   OS is dark, this band still has to clear WCAG AA on its own canvas:
+   #fafaf7 on #241812 is about 16.5:1, #efe6df about 14:1, and the focus
+   ring #f4b942 about 9.8:1. Mono wordmarks invert to white; the color
+   badge does not. */
+@media (prefers-color-scheme: dark) {
+  .footer {
+    background: #241812;
+    border-top-color: rgba(250, 250, 247, 0.16);
+  }
+
+  .footerLink,
+  .socialLink,
+  .footerBrand .logoWord {
+    color: #fafaf7;
+  }
+
+  .socialLink:hover,
+  .footerLink:hover {
+    color: #e7ddd6;
+  }
+
+  .fine,
+  .poweredLabel {
+    color: #efe6df;
+  }
+
+  .mono img {
+    filter: brightness(0) invert(1);
+    opacity: 0.92;
+  }
+
+  .poweredLink:hover {
+    background: rgba(250, 250, 247, 0.08);
+  }
+
+  .footer :focus-visible {
+    outline: 3px solid #f4b942;
+    outline-offset: 3px;
   }
 }

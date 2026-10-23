@@ -21,6 +21,9 @@ type Props = {
  * Narrow footers stack the founder sentence above the copyright line.
  * The registered mark is printed once either way.
  *
+ * The home footer does not mount this. It prints `COPYRIGHT_LINE` only.
+ * The landing prints the full sentence from `@changuito/trust`.
+ *
  * The accessible name of each link starts with the visible name.
  * Reading order stays copyright, then the names.
  *

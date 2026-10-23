@@ -1,9 +1,10 @@
 /**
- * Public profiles for the shopper footer.
+ * Public profiles.
  *
  * Same accounts as `SOCIAL` in `apps/landing/lib/copy.ts`. Copied here so
- * the shopper can ship without importing the landing app. Href and
- * accessible name stay in lockstep with that list.
+ * the shopper can ship without importing the landing app. The landing footer
+ * is what renders the icons. Href and accessible name stay in lockstep
+ * with that list. The privacy page uses the same hrefs as text links.
  */
 import type { Lang } from './lang.ts';
 
