@@ -15,15 +15,22 @@ import {
   type MessageKey,
 } from '../stats/i18n.ts';
 import {
+  AS_OF,
+  BADGE_INK,
   CART_DAY,
   CART_MONTH,
   ENGINEERING,
   HOME_URL,
   RECENT_TXS,
+  SEEKER_COLOR,
+  SEEKER_COLOR_DARK,
+  SOLANA_COLOR,
   SOLANA_PROGRAM_ID,
   STATS_DESCRIPTION,
   STATS_TITLE,
+  STELLAR_COLOR,
   STELLAR_CONTRACT_ID,
+  STELLAR_TEXT,
   TOTALS,
   TX_DAY,
   TX_MONTH,
@@ -35,8 +42,14 @@ import {
   engineeringTests,
   kpis,
   networkMeters,
+  parseMode,
+  parseNetwork,
+  parseRange,
+  pointsInRange,
   projectSeries,
+  rangeStart,
   recentTxs,
+  statsCsv,
   sumChain,
   sumSeries,
 } from '../stats/view.ts';
@@ -142,6 +155,41 @@ test('breakdown rows and recent transactions follow the network filter', () => {
   assert.equal(recentTxs('all').length, 6);
   assert.equal(recentTxs('solana').length, 4);
   assert.equal(recentTxs('stellar').length, 2);
+  const seeker = kpis('seeker');
+  assert.deepEqual(
+    seeker.map((card) => card.value),
+    [30, 0, 0, 0],
+  );
+  assert.equal(phraseLine(seeker[1].parts, 'en'), 'No published on-chain activity');
+  assert.equal(networkMeters('seeker').length, 1);
+  assert.equal(networkMeters('seeker')[0].value, 0);
+  assert.equal(recentTxs('seeker').length, 0);
+  assert.equal(engineeringTests('seeker'), 0);
+});
+
+test('range windows stay on the published snapshot day and do not invent rows', () => {
+  assert.equal(AS_OF, '2026-10-23');
+  assert.equal(rangeStart('7d'), '2026-10-17');
+  assert.equal(rangeStart('30d'), '2026-09-24');
+  assert.equal(rangeStart('90d'), '2026-07-26');
+  assert.equal(rangeStart('all'), null);
+  assert.equal(sumSeries(pointsInRange(TX_DAY, '7d'), 'all'), 0);
+  assert.equal(sumSeries(pointsInRange(TX_DAY, '30d'), 'solana'), 59);
+  assert.equal(sumSeries(pointsInRange(TX_DAY, '30d'), 'stellar'), 0);
+  assert.equal(sumSeries(pointsInRange(CART_DAY, '30d'), 'solana'), 28);
+  assert.equal(sumSeries(pointsInRange(TX_DAY, '90d'), 'all'), 85);
+  assert.equal(sumSeries(pointsInRange(TX_DAY, 'all'), 'seeker'), 0);
+  const csv = statsCsv('all', '30d', 'daily');
+  assert.match(csv, /^metric,date,label,solana,stellar,seeker\n/);
+  assert.equal(csv.includes('2026-09-21'), false);
+  assert.match(csv, /tx,2026-10-04,10\/04,20,0,0/);
+  assert.equal(statsCsv('seeker', 'all', 'cumulative').includes(',0,0,0'), true);
+  assert.equal(parseNetwork('seeker'), 'seeker');
+  assert.equal(parseNetwork('nope'), 'all');
+  assert.equal(parseRange('30d'), '30d');
+  assert.equal(parseRange(null), 'all');
+  assert.equal(parseMode('cumulative'), 'cumulative');
+  assert.equal(parseMode('daily'), 'daily');
 });
 
 test('explorer links use the public program and contract ids', () => {
@@ -185,10 +233,10 @@ test('english and spanish dictionaries share keys, placeholders and a default', 
   assert.equal(parseLang('es'), 'es');
   assert.equal(parseLang('en'), 'en');
   assert.equal(parseLang('fr'), 'en');
-  assert.equal(parseTheme(null), 'dark');
+  assert.equal(parseTheme(null), 'light');
   assert.equal(parseTheme('light'), 'light');
   assert.equal(parseTheme('dark'), 'dark');
-  assert.equal(parseTheme('blue'), 'dark');
+  assert.equal(parseTheme('blue'), 'light');
   assert.equal(formatInt(1484, 'en'), '1,484');
   assert.equal(formatInt(1484, 'es'), '1.484');
   assert.equal(format(en.delta, { count: 59 }), '+59 last 30d');
@@ -217,17 +265,41 @@ test('the dashboard reads copy from the dictionary and the host rewrite is in pl
   assert.match(view, /data-testid="stats-screen"/);
   assert.equal(view.includes('background-repeat'), false);
   assert.equal(css.includes('background-repeat'), false);
-  assert.match(css, /--bg:\s*#0f172a/);
-  assert.match(css, /--surface:\s*#1e293b/);
-  assert.match(css, /--border:\s*#334155/);
-  assert.match(css, /--text:\s*#f8fafc/);
-  assert.match(css, /--bg:\s*#ffffff/);
-  assert.match(css, /--surface:\s*#f8fafc/);
-  assert.match(css, /--border:\s*#e5e7eb/);
-  assert.match(css, /--text:\s*#0f172a/);
-  assert.match(css, /--bar-solana:\s*#8b5cf6/);
-  assert.match(css, /--bar-stellar:\s*#3b82f6/);
+  assert.match(css, /--bg:\s*#FAFAF7/);
+  assert.match(css, /--bg:\s*#1C120E/);
+  assert.match(css, /--surface:\s*#FFFFFF/);
+  assert.match(css, /--surface:\s*#261914/);
+  assert.match(css, /--surface-2:\s*#F4EFE6/);
+  assert.match(css, /--surface-2:\s*#31201A/);
+  assert.match(css, /--text:\s*#2A1A14/);
+  assert.match(css, /--text:\s*#FAFAF7/);
+  assert.match(css, /--muted:\s*#5C534C/);
+  assert.match(css, /--muted:\s*#D7CEC7/);
+  assert.match(css, /--bar-solana:\s*#F4B942/);
+  assert.match(css, /--bar-stellar:\s*#E07A5F/);
+  assert.match(css, /--bar-seeker:\s*#2A1A14/);
+  assert.match(css, /--bar-seeker:\s*#F3E3C3/);
+  assert.match(css, /#B5482B/);
+  assert.match(css, /border-radius:\s*20px/);
+  assert.match(css, /border-radius:\s*999px/);
+  assert.match(css, /background:\s*#FAFAF7/);
+  assert.match(css, /padding:\s*4px 12px/);
   assert.match(css, /min-height:\s*44px/);
+  assert.equal(css.toLowerCase().includes('#0f172a'), false);
+  assert.equal(css.toLowerCase().includes('#1e293b'), false);
+  assert.equal(css.toLowerCase().includes('#8b5cf6'), false);
+  assert.equal(css.toLowerCase().includes('#3b82f6'), false);
+  assert.match(view, /useState<ThemeName>\('light'\)/);
+  assert.match(view, /mascot-idle\.png/);
+  assert.match(view, /wordmark\.png/);
+  assert.match(view, /data-testid="stats-export"/);
+  assert.match(view, /data-testid="stats-footer"/);
+  assert.match(view, /value: 'stellar'/);
+  assert.ok(view.indexOf("value: 'stellar'") < view.indexOf("value: 'solana'"));
+  assert.ok(view.indexOf("value: 'solana'") < view.indexOf("value: 'seeker'"));
+  const route = readFileSync(join(root, 'app/stats/export/route.ts'), 'utf8');
+  assert.match(route, /statsCsv/);
+  assert.match(route, /content-disposition/);
   assert.match(config, /beforeFiles/);
   assert.match(config, /stats\.changuito\.me/);
   assert.match(config, /destination:\s*'\/stats'/);
@@ -235,23 +307,30 @@ test('the dashboard reads copy from the dictionary and the host rewrite is in pl
   assert.deepEqual(textNodes, []);
 });
 
-test('both themes clear WCAG AA for text and the series colors clear non-text contrast', () => {
-  assert.ok(contrast('#f8fafc', '#0f172a') >= 4.5);
-  assert.ok(contrast('#f8fafc', '#1e293b') >= 4.5);
-  assert.ok(contrast('#94a3b8', '#1e293b') >= 4.5);
-  assert.ok(contrast('#93c5fd', '#1e293b') >= 4.5);
-  assert.ok(contrast('#0f172a', '#f8fafc') >= 4.5);
-  assert.ok(contrast('#0f172a', '#ffffff') >= 4.5);
-  assert.ok(contrast('#475569', '#ffffff') >= 4.5);
-  assert.ok(contrast('#475569', '#f8fafc') >= 4.5);
-  assert.ok(contrast('#1d4ed8', '#f8fafc') >= 4.5);
-  assert.ok(contrast('#ffffff', '#0f172a') >= 4.5);
-  assert.ok(contrast('#7dd3fc', '#0f172a') >= 3);
-  assert.ok(contrast('#1d4ed8', '#ffffff') >= 3);
-  assert.ok(contrast('#8b5cf6', '#1e293b') >= 3);
-  assert.ok(contrast('#8b5cf6', '#f8fafc') >= 3);
-  assert.ok(contrast('#3b82f6', '#1e293b') >= 3);
-  assert.ok(contrast('#3b82f6', '#f8fafc') >= 3);
-  assert.ok(contrast('#94a3b8', '#334155') >= 3);
-  assert.ok(contrast('#64748b', '#e5e7eb') >= 3);
+test('both themes clear WCAG AA for text and the brand badges', () => {
+  assert.equal(SOLANA_COLOR, '#F4B942');
+  assert.equal(STELLAR_COLOR, '#E07A5F');
+  assert.equal(SEEKER_COLOR, '#2A1A14');
+  assert.equal(SEEKER_COLOR_DARK, '#F3E3C3');
+  assert.equal(BADGE_INK, '#2A1A14');
+  assert.equal(STELLAR_TEXT, '#B5482B');
+  assert.ok(contrast('#2A1A14', '#FAFAF7') >= 4.5);
+  assert.ok(contrast('#5C534C', '#FAFAF7') >= 4.5);
+  assert.ok(contrast('#2A1A14', '#FFFFFF') >= 4.5);
+  assert.ok(contrast('#2A1A14', '#F4EFE6') >= 4.5);
+  assert.ok(contrast('#2A1A14', '#F4B942') >= 4.5);
+  assert.ok(contrast('#2A1A14', '#E07A5F') >= 4.5);
+  assert.ok(contrast(STELLAR_TEXT, '#FFFFFF') >= 4.5);
+  assert.ok(contrast(STELLAR_TEXT, '#FAFAF7') >= 4.5);
+  assert.ok(contrast('#FAFAF7', '#1C120E') >= 4.5);
+  assert.ok(contrast('#FAFAF7', '#261914') >= 4.5);
+  assert.ok(contrast('#FAFAF7', '#31201A') >= 4.5);
+  assert.ok(contrast('#D7CEC7', '#261914') >= 4.5);
+  assert.ok(contrast('#D7CEC7', '#1C120E') >= 4.5);
+  assert.ok(contrast('#2A1A14', '#F3E3C3') >= 4.5);
+  assert.ok(contrast('#FAFAF7', '#2A1A14') >= 4.5);
+  assert.ok(contrast('#F4B942', '#261914') >= 3);
+  assert.ok(contrast('#E07A5F', '#261914') >= 3);
+  assert.ok(contrast('#F3E3C3', '#261914') >= 3);
+  assert.ok(contrast('#2A1A14', '#FAFAF7') >= 3);
 });

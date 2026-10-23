@@ -17,6 +17,7 @@ import {
 import { HOME_URL, TOTALS, contractHref, contractId, shortId, txHref } from '../../lib/stats/metrics';
 import {
   barRatio,
+  chartBars,
   engineeringMeters,
   engineeringTests,
   kpiTitleKey,
@@ -26,14 +27,16 @@ import {
   networkNameKey,
   plotTop,
   pointsFor,
-  projectSeries,
+  pointsInRange,
   recentTxs,
   seriesPeak,
   sumSeries,
   visibleChains,
-  type Granularity,
+  type Chain,
+  type ChartMode,
   type Meter,
   type NetworkFilter,
+  type RangeId,
   type SeriesKind,
 } from '../../lib/stats/view';
 import styles from './stats.module.css';
@@ -132,28 +135,33 @@ function ThemeIcon({ theme }: { theme: ThemeName }) {
   );
 }
 
+function chainLabel(chain: Chain, t: ReturnType<typeof messages>): string {
+  if (chain === 'solana') return t.legendSolana;
+  if (chain === 'stellar') return t.legendStellar;
+  return t.legendSeeker;
+}
+
 function ChartCard({
   kind,
   title,
-  granularity,
-  cumulative,
+  range,
+  mode,
   filter,
   lang,
 }: {
   kind: SeriesKind;
   title: string;
-  granularity: Granularity;
-  cumulative: boolean;
+  range: RangeId;
+  mode: ChartMode;
   filter: NetworkFilter;
   lang: Lang;
 }) {
   const t = messages(lang);
   const titleId = useId();
-  const points = pointsFor(kind, granularity);
-  const bars = projectSeries(points, filter, cumulative);
+  const bars = chartBars(kind, range, filter, mode);
   const chains = visibleChains(filter);
   const top = plotTop(seriesPeak(bars, filter));
-  const total = sumSeries(points, filter);
+  const total = sumSeries(pointsInRange(pointsFor(kind, 'day'), range), filter);
   const [active, setActive] = useState<number | null>(null);
   const ticks = [top, Math.round(top / 2), 0];
 
@@ -172,12 +180,10 @@ function ChartCard({
     const chain = chains[0] ?? 'solana';
     return format(t.colTipOne, {
       label: bar.label,
-      name: chain === 'solana' ? t.legendSolana : t.legendStellar,
-      count: formatInt(chain === 'solana' ? bar.solana : bar.stellar, lang),
+      name: chainLabel(chain, t),
+      count: formatInt(bar[chain], lang),
     });
   }
-
-  const activeTip = active === null ? '' : tipFor(active);
 
   return (
     <article className={styles.card} data-testid={`stats-chart-${kind}`} aria-labelledby={titleId}>
@@ -185,56 +191,68 @@ function ChartCard({
         {title}
       </h3>
       <p className={styles.chartTotal}>{formatInt(total, lang)}</p>
-      <div className={styles.plot}>
-        <div className={styles.yAxis} aria-hidden="true">
-          {ticks.map((tick, index) => (
-            <span key={`${index}-${tick}`}>{formatInt(tick, lang)}</span>
-          ))}
-        </div>
-        <div className={styles.canvas}>
-          <div className={styles.grid} aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
-          <div className={styles.columns}>
-            {bars.map((bar, index) => (
-              <div className={styles.column} key={bar.label}>
-                <button
-                  type="button"
-                  className={styles.hit}
-                  aria-label={tipFor(index)}
-                  onMouseEnter={() => setActive(index)}
-                  onMouseLeave={() => setActive(null)}
-                  onFocus={() => setActive(index)}
-                  onBlur={() => setActive(null)}
-                >
-                  {chains.map((chain) => (
-                    <span
-                      key={chain}
-                      className={styles.bar}
-                      style={{
-                        height: `${barRatio(bar[chain], top) * 100}%`,
-                        background: `var(--bar-${chain})`,
-                      }}
-                    />
-                  ))}
-                </button>
-                <span className={styles.xlabel}>{bar.label}</span>
-              </div>
+      {bars.length === 0 ? (
+        <p className={styles.empty}>{t.emptyChart}</p>
+      ) : (
+        <div className={styles.plot}>
+          <div className={styles.yAxis} aria-hidden="true">
+            {ticks.map((tick, index) => (
+              <span key={`${index}-${tick}`}>{formatInt(tick, lang)}</span>
             ))}
           </div>
+          <div className={styles.canvas}>
+            <div className={styles.grid} aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </div>
+            <div className={styles.columns}>
+              {bars.map((bar, index) => (
+                <div className={styles.column} key={bar.label}>
+                  <button
+                    type="button"
+                    className={styles.hit}
+                    aria-label={tipFor(index)}
+                    onMouseEnter={() => setActive(index)}
+                    onMouseLeave={() => setActive(null)}
+                    onFocus={() => setActive(index)}
+                    onBlur={() => setActive(null)}
+                  >
+                    {chains.map((chain) => (
+                      <span
+                        key={chain}
+                        className={styles.bar}
+                        style={{
+                          height: `${barRatio(bar[chain], top) * 100}%`,
+                          background: `var(--bar-${chain})`,
+                          ['--bar-ink' as string]: `var(--bar-${chain}-ink)`,
+                        }}
+                      />
+                    ))}
+                  </button>
+                  <span className={styles.xlabel}>{bar.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
       <ul className={styles.legend}>
         {chains.map((chain) => (
           <li key={chain}>
-            <span className={styles.dot} style={{ background: `var(--bar-${chain})` }} aria-hidden="true" />
-            {chain === 'solana' ? t.legendSolana : t.legendStellar}
+            <span
+              className={styles.dot}
+              style={{
+                background: `var(--bar-${chain})`,
+                ['--bar-ink' as string]: `var(--bar-${chain}-ink)`,
+              }}
+              aria-hidden="true"
+            />
+            {chainLabel(chain, t)}
           </li>
         ))}
       </ul>
-      <p className={styles.readout}>{activeTip}</p>
+      <p className={styles.readout}>{active === null ? '' : tipFor(active)}</p>
     </article>
   );
 }
@@ -270,10 +288,11 @@ function MeterList({ rows, lang }: { rows: readonly Meter[]; lang: Lang }) {
 
 export function StatsDashboard() {
   const [lang, setLang] = useState<Lang>('en');
-  const [theme, setTheme] = useState<ThemeName>('dark');
+  const [theme, setTheme] = useState<ThemeName>('light');
   const [filter, setFilter] = useState<NetworkFilter>('all');
-  const [granularity, setGranularity] = useState<Granularity>('day');
-  const [cumulative, setCumulative] = useState(false);
+  const [range, setRange] = useState<RangeId>('all');
+  const [panel, setPanel] = useState<'overview' | 'transactions'>('overview');
+  const [mode, setMode] = useState<ChartMode>('daily');
   const t = messages(lang);
 
   useEffect(() => {
@@ -301,15 +320,8 @@ export function StatsDashboard() {
 
   const cards = kpis(filter);
   const txs = recentTxs(filter);
-  const networkOptions = [
-    { value: 'all' as const, label: t.netAll },
-    { value: 'solana' as const, label: t.netSolana },
-    { value: 'stellar' as const, label: t.netStellar },
-  ];
-  const bucketOptions = [
-    { value: 'month' as const, label: t.month },
-    { value: 'day' as const, label: t.day },
-  ];
+  const rangeLabel =
+    range === '7d' ? t.range7d : range === '30d' ? t.range30d : range === '90d' ? t.range90d : t.rangeAll;
 
   return (
     <div className={styles.shell} data-theme={theme} data-testid="stats-screen" lang={lang}>
@@ -320,21 +332,44 @@ export function StatsDashboard() {
         <div className={styles.brand}>
           <a className={styles.brandLink} href={HOME_URL} data-testid="stats-brand">
             <img className={styles.logo} src="/brand/mascot-idle.png" alt="" width={397} height={583} />
-            <span>{t.brand}</span>
+            <span className={styles.wordmarkWrap} data-testid="stats-wordmark">
+              <img className={styles.wordmark} src="/brand/wordmark.png" alt={t.brand} width={1024} height={170} />
+            </span>
           </a>
           <span className={styles.badge}>{t.badge}</span>
         </div>
         <div className={styles.tools}>
-          <a className={styles.back} href={HOME_URL} data-testid="stats-home">
-            {t.back}
-          </a>
           <Segmented
             label={t.networkLabel}
             value={filter}
-            options={networkOptions}
+            options={[
+              { value: 'all', label: t.netAll },
+              { value: 'stellar', label: t.netStellar },
+              { value: 'solana', label: t.netSolana },
+              { value: 'seeker', label: t.netSeeker },
+            ]}
             onChange={setFilter}
             testId="stats-network"
           />
+          <Segmented
+            label={t.rangeLabel}
+            value={range}
+            options={[
+              { value: '7d', label: t.range7d },
+              { value: '30d', label: t.range30d },
+              { value: '90d', label: t.range90d },
+              { value: 'all', label: t.rangeAll },
+            ]}
+            onChange={setRange}
+            testId="stats-range"
+          />
+          <a
+            className={styles.export}
+            data-testid="stats-export"
+            href={`/stats/export?network=${filter}&range=${range}&mode=${mode}`}
+          >
+            {t.exportCsv}
+          </a>
           <Segmented
             label={t.langLabel}
             value={lang}
@@ -359,7 +394,7 @@ export function StatsDashboard() {
       </header>
       <main id="metrics" tabIndex={-1} className={styles.main}>
         <p className={styles.srOnly} aria-live="polite">
-          {format(t.filterStatus, { network: t[networkNameKey(filter)] })}
+          {format(t.filterStatus, { network: t[networkNameKey(filter)], range: rangeLabel })}
         </p>
         <section className={styles.hero}>
           <h1>{t.heroTitle}</h1>
@@ -377,128 +412,119 @@ export function StatsDashboard() {
         <section aria-labelledby="stats-growth" data-testid="stats-growth">
           <div className={styles.sectionHead}>
             <h2 id="stats-growth" className={styles.kicker}>
-              {t.growth}
+              {panel === 'overview' ? t.growth : t.recent}
             </h2>
             <div className={styles.sectionTools}>
               <Segmented
-                label={t.granularityLabel}
-                value={granularity}
-                options={bucketOptions}
-                onChange={setGranularity}
-                testId="stats-bucket"
+                label={t.tabLabel}
+                value={panel}
+                options={[
+                  { value: 'overview', label: t.tabOverview },
+                  { value: 'transactions', label: t.tabTransactions },
+                ]}
+                onChange={setPanel}
+                testId="stats-tab"
               />
-              <button
-                type="button"
-                className={styles.pill}
-                data-testid="stats-cumulative"
-                aria-pressed={cumulative}
-                onClick={() => setCumulative((current) => !current)}
-              >
-                {t.cumulative}
-              </button>
+              {panel === 'overview' ? (
+                <Segmented
+                  label={t.modeLabel}
+                  value={mode}
+                  options={[
+                    { value: 'cumulative', label: t.modeCumulative },
+                    { value: 'daily', label: t.modeDaily },
+                  ]}
+                  onChange={setMode}
+                  testId="stats-mode"
+                />
+              ) : null}
             </div>
           </div>
-          <div className={styles.chartGrid}>
-            <ChartCard
-              kind="tx"
-              title={t.chartTx}
-              granularity={granularity}
-              cumulative={cumulative}
-              filter={filter}
-              lang={lang}
-            />
-            <ChartCard
-              kind="carts"
-              title={t.chartCarts}
-              granularity={granularity}
-              cumulative={cumulative}
-              filter={filter}
-              lang={lang}
-            />
-          </div>
-        </section>
-        <section aria-labelledby="stats-breakdown" data-testid="stats-breakdown">
-          <div className={styles.sectionHead}>
-            <h2 id="stats-breakdown" className={styles.kicker}>
-              {t.breakdown}
-            </h2>
-          </div>
-          <div className={styles.split}>
-            <article className={styles.card} data-testid="stats-by-network">
-              <h3 className={styles.cardTitle}>{t.byNetwork}</h3>
-              <MeterList rows={networkMeters(filter)} lang={lang} />
-            </article>
-            <article className={styles.card} data-testid="stats-engineering">
-              <h3 className={styles.cardTitle}>{t.engineering}</h3>
-              <div className={styles.minis}>
-                <div className={styles.mini}>
-                  <p className={styles.miniLabel}>{t.passingTests}</p>
-                  <p className={styles.miniValue}>{formatInt(engineeringTests(filter), lang)}</p>
-                  <p className={styles.miniScope}>{t.testsScope}</p>
+          {panel === 'overview' ? (
+            <div className={styles.overview}>
+              <ChartCard kind="tx" title={t.chartTx} range={range} mode={mode} filter={filter} lang={lang} />
+              <ChartCard kind="carts" title={t.chartCarts} range={range} mode={mode} filter={filter} lang={lang} />
+              <article className={styles.card} data-testid="stats-by-network">
+                <h3 className={styles.cardTitle}>{t.byNetwork}</h3>
+                <MeterList rows={networkMeters(filter)} lang={lang} />
+              </article>
+              <article className={styles.card} data-testid="stats-engineering">
+                <h3 className={styles.cardTitle}>{t.engineering}</h3>
+                <div className={styles.minis}>
+                  <div className={styles.mini}>
+                    <p className={styles.miniLabel}>{t.passingTests}</p>
+                    <p className={styles.miniValue}>{formatInt(engineeringTests(filter), lang)}</p>
+                    <p className={styles.miniScope}>{t.testsScope}</p>
+                  </div>
+                  <div className={styles.mini}>
+                    <p className={styles.miniLabel}>{t.mergedPrs}</p>
+                    <p className={styles.miniValue}>{formatInt(TOTALS.mergedPrs, lang)}</p>
+                    <p className={styles.miniScope}>{t.prsScope}</p>
+                  </div>
                 </div>
-                <div className={styles.mini}>
-                  <p className={styles.miniLabel}>{t.mergedPrs}</p>
-                  <p className={styles.miniValue}>{formatInt(TOTALS.mergedPrs, lang)}</p>
-                  <p className={styles.miniScope}>{t.prsScope}</p>
-                </div>
-              </div>
-              <MeterList rows={engineeringMeters(filter)} lang={lang} />
-            </article>
-          </div>
-        </section>
-        <section aria-labelledby="stats-recent">
-          <div className={styles.sectionHead}>
-            <h2 id="stats-recent" className={styles.kicker}>
-              {t.recent}
-            </h2>
-          </div>
-          <article className={styles.card}>
-            <div className={styles.tableWrap}>
-              <table className={styles.table} data-testid="stats-tx-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">{t.colNetwork}</th>
-                      <th scope="col">{t.colTx}</th>
-                      <th scope="col">{t.colContract}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {txs.map((tx) => {
-                      const id = shortId(tx.hash);
-                      const program = shortId(contractId(tx.network));
-                      const networkLabel = tx.network === 'solana' ? t.chainSolana : t.chainStellar;
-                      return (
-                        <tr key={tx.hash} data-testid={`stats-tx-${tx.hash.slice(0, 8)}`}>
-                          <td>{networkLabel}</td>
-                          <td>
-                            <a
-                              href={txHref(tx)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              aria-label={format(t.linkLabel, { id, hint: t.newTab })}
-                            >
-                              {id}
-                            </a>
-                          </td>
-                          <td>
-                            <a
-                              href={contractHref(tx.network)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              aria-label={format(t.linkLabel, { id: program, hint: t.newTab })}
-                            >
-                              {program}
-                            </a>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-              </table>
+                <MeterList rows={engineeringMeters(filter)} lang={lang} />
+              </article>
             </div>
-          </article>
+          ) : (
+            <article className={styles.card}>
+              {txs.length === 0 ? (
+                <p className={styles.empty}>{t.emptyTx}</p>
+              ) : (
+                <div className={styles.tableWrap}>
+                  <table className={styles.table} data-testid="stats-tx-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">{t.colNetwork}</th>
+                        <th scope="col">{t.colTx}</th>
+                        <th scope="col">{t.colContract}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {txs.map((tx) => {
+                        const id = shortId(tx.hash);
+                        const program = shortId(contractId(tx.network));
+                        const networkLabel = tx.network === 'solana' ? t.chainSolana : t.chainStellar;
+                        return (
+                          <tr key={tx.hash} data-testid={`stats-tx-${tx.hash.slice(0, 8)}`}>
+                            <td>
+                              <span className={styles.netBadge} data-tone={tx.network}>
+                                {networkLabel}
+                              </span>
+                            </td>
+                            <td>
+                              <a
+                                href={txHref(tx)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label={format(t.linkLabel, { id, hint: t.newTab })}
+                              >
+                                {id}
+                              </a>
+                            </td>
+                            <td>
+                              <a
+                                href={contractHref(tx.network)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label={format(t.linkLabel, { id: program, hint: t.newTab })}
+                              >
+                                {program}
+                              </a>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </article>
+          )}
         </section>
       </main>
+      <footer className={styles.footer} data-testid="stats-footer">
+        <img className={styles.footerMark} src="/brand/mascot-idle.png" alt="" width={397} height={583} />
+        <span className={styles.footerWord}>{t.brand}</span>
+      </footer>
     </div>
   );
 }

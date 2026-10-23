@@ -14,8 +14,17 @@ export const STATS_DESCRIPTION =
 
 export const HOME_URL = 'https://www.changuito.me';
 
-export const SOLANA_COLOR = '#8b5cf6';
-export const STELLAR_COLOR = '#3b82f6';
+/** Published snapshot day. Range windows count back from this, never from the clock. */
+export const AS_OF = '2026-10-23';
+
+/** Series fills. Text badges use the ink paired with a fill that clears WCAG AA. */
+export const SOLANA_COLOR = '#F4B942';
+export const STELLAR_COLOR = '#E07A5F';
+export const SEEKER_COLOR = '#2A1A14';
+export const SEEKER_COLOR_DARK = '#F3E3C3';
+/** Espresso on sunflower, and espresso on arcilla, both clear 4.5:1. */
+export const BADGE_INK = '#2A1A14';
+export const STELLAR_TEXT = '#B5482B';
 
 export const SOLANA_PROGRAM_ID = 'BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d';
 export const STELLAR_CONTRACT_ID = 'CCH37422N756N7747422N7';
@@ -44,36 +53,38 @@ export const TOTALS = {
 
 export interface Point {
   label: string;
+  /** Calendar day of the bucket, UTC. Range filters use this. */
+  iso: string;
   solana: number;
   stellar: number;
 }
 
 export const TX_DAY: readonly Point[] = [
-  { label: '09/21', solana: 0, stellar: 24 },
-  { label: '09/23', solana: 0, stellar: 2 },
-  { label: '10/04', solana: 20, stellar: 0 },
-  { label: '10/09', solana: 9, stellar: 0 },
-  { label: '10/10', solana: 6, stellar: 0 },
-  { label: '10/11', solana: 24, stellar: 0 },
+  { label: '09/21', iso: '2026-09-21', solana: 0, stellar: 24 },
+  { label: '09/23', iso: '2026-09-23', solana: 0, stellar: 2 },
+  { label: '10/04', iso: '2026-10-04', solana: 20, stellar: 0 },
+  { label: '10/09', iso: '2026-10-09', solana: 9, stellar: 0 },
+  { label: '10/10', iso: '2026-10-10', solana: 6, stellar: 0 },
+  { label: '10/11', iso: '2026-10-11', solana: 24, stellar: 0 },
 ];
 
 export const TX_MONTH: readonly Point[] = [
-  { label: '09/26', solana: 0, stellar: 26 },
-  { label: '10/26', solana: 59, stellar: 0 },
+  { label: '09/26', iso: '2026-09-26', solana: 0, stellar: 26 },
+  { label: '10/26', iso: '2026-10-26', solana: 59, stellar: 0 },
 ];
 
 export const CART_DAY: readonly Point[] = [
-  { label: '09/21', solana: 0, stellar: 5 },
-  { label: '09/23', solana: 0, stellar: 0 },
-  { label: '10/04', solana: 9, stellar: 0 },
-  { label: '10/09', solana: 4, stellar: 0 },
-  { label: '10/10', solana: 3, stellar: 0 },
-  { label: '10/11', solana: 12, stellar: 0 },
+  { label: '09/21', iso: '2026-09-21', solana: 0, stellar: 5 },
+  { label: '09/23', iso: '2026-09-23', solana: 0, stellar: 0 },
+  { label: '10/04', iso: '2026-10-04', solana: 9, stellar: 0 },
+  { label: '10/09', iso: '2026-10-09', solana: 4, stellar: 0 },
+  { label: '10/10', iso: '2026-10-10', solana: 3, stellar: 0 },
+  { label: '10/11', iso: '2026-10-11', solana: 12, stellar: 0 },
 ];
 
 export const CART_MONTH: readonly Point[] = [
-  { label: '09/26', solana: 0, stellar: 5 },
-  { label: '10/26', solana: 28, stellar: 0 },
+  { label: '09/26', iso: '2026-09-26', solana: 0, stellar: 5 },
+  { label: '10/26', iso: '2026-10-26', solana: 28, stellar: 0 },
 ];
 
 export interface EngineeringRow {
