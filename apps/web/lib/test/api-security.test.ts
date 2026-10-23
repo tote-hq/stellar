@@ -11,9 +11,11 @@ import { before, describe, it } from 'node:test';
  * balance and network are called as handlers.
  */
 
-process.env.NODE_ENV = 'production';
-process.env.TURNSTILE_SECRET_KEY = 'turnstile-test-secret';
-process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY = 'site-test';
+// @types/node marks NODE_ENV readonly. The other route tests write through this cast.
+const env = process.env as Record<string, string | undefined>;
+env.NODE_ENV = 'production';
+env.TURNSTILE_SECRET_KEY = 'turnstile-test-secret';
+env.NEXT_PUBLIC_TURNSTILE_SITE_KEY = 'site-test';
 
 type Handler = (req: Request) => Promise<Response>;
 
