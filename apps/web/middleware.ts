@@ -9,7 +9,6 @@ import {
   turnstileSecret,
   verifyHumanToken,
 } from './lib/human-gate';
-import { isPublicStatsPath } from './lib/stats/access';
 
 /** APIs carry a session, a balance or a payment. Nothing here is reusable. */
 const PRIVATE_NO_STORE = { 'cache-control': 'private, no-store' };
@@ -19,10 +18,6 @@ function humansOnly(message: string) {
 }
 
 export async function middleware(req: NextRequest) {
-  const path = req.nextUrl.pathname;
-  // Public dashboard. The human gate below stays on /api/* only.
-  if (isPublicStatsPath(path)) return NextResponse.next();
-
   const ua = req.headers.get('user-agent') ?? '';
   if (AI_BOT_UA.test(ua)) {
     return new NextResponse('Solo humanos.', {
@@ -30,6 +25,8 @@ export async function middleware(req: NextRequest) {
       headers: { 'content-type': 'text/plain; charset=utf-8', ...PRIVATE_NO_STORE },
     });
   }
+
+  const path = req.nextUrl.pathname;
 
   // Conservative non-browser reject on APIs (keep UI fetch working).
   if (path.startsWith('/api/') && path !== '/api/human') {
