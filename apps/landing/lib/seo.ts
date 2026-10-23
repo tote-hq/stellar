@@ -15,6 +15,7 @@ import {
   SOCIAL,
   STEPS,
 } from './copy.ts';
+import { STATS_DESCRIPTION, STATS_TITLE } from './stats/metrics.ts';
 
 export const TITLE_SUFFIX = ' · Changuito';
 
@@ -65,6 +66,14 @@ export const PUBLIC_PAGES = [
     changeFrequency: 'yearly',
     priority: 0.3,
     navLabel: 'Reportar un bug',
+  },
+  {
+    path: '/stats',
+    title: STATS_TITLE,
+    description: STATS_DESCRIPTION,
+    changeFrequency: 'daily',
+    priority: 0.7,
+    navLabel: 'Stats',
   },
 ] as const;
 
