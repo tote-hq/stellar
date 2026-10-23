@@ -1252,41 +1252,60 @@ a:hover { color: var(--chg-arcilla); }
   color: var(--chg-arcilla);
 }
 
+/* One line under the composer: the mark, the privacy link, the language
+   switch. #6b5a52 on --bg is 6.26:1. The background is explicit so the
+   line does not sit on a transparent strip. */
 .app-footer {
   flex-shrink: 0;
   display: flex;
-  flex-direction: column-reverse;
-  align-items: center;
   justify-content: center;
-  gap: 0;
   margin: 0;
   padding: 0 8px calc(8px + env(safe-area-inset-bottom, 0px));
-  color: var(--muted);
+  background: var(--bg);
+  color: #6b5a52;
   font-size: 12px;
   line-height: 16px;
   text-align: center;
-  /* The trust sentence used to query its own box. The icons sit beside
-     that box now, so the query has to be the footer: a shrink-wrapped
-     sentence is under 36rem even on a wide screen, and would stack. */
-  container-type: inline-size;
-  container-name: app-footer;
+  border-top: 1px solid rgba(42, 26, 20, 0.08);
 }
-
-/* Mobile is three centered rows: tools, then partners, then the credit.
-   column-reverse puts that on screen while the source stays credit, partners,
-   tools — the trust line is first in the footer markup. */
-.app-footer-tools {
+.app-footer-line {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  padding-top: 8px;
+  gap: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
 }
-.app-footer-divider {
-  width: 1px;
-  height: 24px;
-  flex: 0 0 1px;
-  background: var(--border);
+.app-footer-line > li {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  min-height: 44px;
+}
+.app-footer-line > li + li {
+  margin-left: 12px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+.app-legal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 4px;
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.app-legal:hover { color: var(--text); }
+.app-legal:focus-visible {
+  outline: 3px solid var(--chg-espresso);
+  outline-offset: -3px;
 }
 
 /* One sentence at every width. On a phone it is the last row and the smallest type. */
@@ -1319,123 +1338,10 @@ a:hover { color: var(--chg-arcilla); }
   white-space: nowrap;
   border: 0;
 }
-@container app-footer (max-width: 36rem) {
-  .app-powered-link img { height: 16px; }
-  .chg-trust { font-size: 11px; line-height: 16px; }
-}
-
-/* Partner lockups. 16px tall below 768, 18px from there. Mono marks are the
-   muted brown at .75, which still clears 4.5:1 on --bg; Superteam stays in color. */
-.app-powered {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  min-width: 0;
-}
-.app-powered-label {
-  font-size: 12px;
-  line-height: 16px;
-  color: #6b5a52;
-}
-.app-powered-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 44px;
-  min-height: 44px;
-  border-radius: 8px;
-}
-.app-powered-link img {
-  display: block;
-  height: 16px;
-  width: auto;
-}
-.app-powered-link.is-mono img { opacity: 0.75; }
-.app-powered-link.is-color img { border-radius: 4px; opacity: 1; }
-.app-powered-link:hover { background: rgba(42, 26, 20, 0.06); }
-.app-powered-link:focus-visible {
-  outline: 3px solid var(--chg-espresso);
-  outline-offset: -3px;
-}
-
-@media (min-width: 768px) {
-  .app-footer {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-    align-items: center;
-    column-gap: 16px;
-    padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px));
-    border-top: 1px solid rgba(42, 26, 20, 0.08);
-    text-align: initial;
-  }
-  .app-footer-tools {
-    grid-column: 1;
-    grid-row: 1;
-    justify-self: start;
-    padding-top: 0;
-  }
-  .app-powered {
-    grid-column: 2;
-    grid-row: 1;
-    justify-self: center;
-  }
-  .chg-trust {
-    grid-column: 3;
-    grid-row: 1;
-    justify-self: end;
-    padding-bottom: 0;
-    text-align: right;
-    font-size: 12px;
-    line-height: 16px;
-  }
-  .app-powered-link img { height: 18px; }
-}
-
-/* Profile icons. 44px is the touch target; the glyph inside is 16 to 18px
-   so the row stays about as tall as the target and does not cover the
-   composer (the footer is the flex sibling under it). The ring is inset
-   because the shell clips overflow and the empty-state footer padding is
-   only a few pixels. Hover stays on --muted / --text: arcilla on the page
-   background is under 3:1. */
-.app-social {
-  flex: 0 0 auto;
-}
-.app-social-list {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.app-social-list > li {
-  display: flex;
-  margin: 0;
-  padding: 0;
-}
-.app-social-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  color: var(--muted);
-  border-radius: 10px;
-  text-decoration: none;
-}
-.app-social-link:hover {
-  color: var(--text);
-  background: rgba(42, 26, 20, 0.06);
-}
-.app-social-link:focus-visible {
-  outline: 3px solid var(--chg-espresso);
-  outline-offset: -3px;
-}
-
-/* Language switch. Same 44px row and the same muted/--text pair as the
-   social links beside it. The visible letters are EN / ES; the border is the
-   pill from the footer mock. */
+/* Language switch. Same 44px row as the privacy link beside it. The visible
+   letters are EN / ES; the border is the pill. Hover stays on --muted / --text:
+   arcilla on the page background is under 3:1. The ring is inset because the
+   shell clips overflow. */
 .app-lang {
   flex: 0 0 auto;
   display: inline-flex;
@@ -2062,3 +1968,39 @@ a:hover { color: var(--chg-arcilla); }
    not have to shout louder to be noticed. */
 .btn-warn { background: transparent; color: var(--warn-ink); border-color: var(--warn-ink); }
 .btn-warn:hover { background: rgba(122, 46, 18, 0.08); }
+
+/* A document page (privacy) is not the shop shell: the shell locks scroll. */
+html.doc-scroll,
+html.doc-scroll body {
+  height: auto;
+  overflow: auto;
+  background: var(--bg);
+  color: var(--text);
+}
+.legal-page {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 24px 20px 48px;
+  background: var(--bg);
+  color: var(--text);
+}
+.legal-page h1 { font-size: 1.75rem; margin: 0 0 12px; line-height: 1.2; }
+.legal-page h2 { font-size: 1.15rem; margin: 28px 0 8px; line-height: 1.3; }
+.legal-page p,
+.legal-page li { font-size: 16px; line-height: 1.5; }
+.legal-intro { color: var(--muted); }
+.legal-back a,
+.legal-contact a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.legal-page a:focus-visible {
+  outline: 3px solid var(--chg-espresso);
+  outline-offset: 3px;
+}
+.legal-footer { margin-top: 24px; }
