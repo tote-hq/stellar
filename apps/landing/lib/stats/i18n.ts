@@ -90,6 +90,12 @@ const en = {
   linkLabel: '{id}, {hint}',
   newTab: 'opens in a new tab',
   filterStatus: 'Showing {network}. Chart range {range}.',
+  lastKnown: 'last known value',
+  appAccounts: '{count} app accounts',
+  updatedAt: 'Updated {time}',
+  liveNote: 'Live from Solana Devnet and Stellar Testnet. Refreshes every 5 minutes.',
+  snapshotNote: 'Live data is unavailable right now. Showing the last published snapshot.',
+  partialNote: 'Some sources are unavailable. Those figures show their last known value.',
 } as const;
 
 const es: { [K in keyof typeof en]: string } = {
@@ -176,6 +182,12 @@ const es: { [K in keyof typeof en]: string } = {
   linkLabel: '{id}, {hint}',
   newTab: 'se abre en una pestaña nueva',
   filterStatus: 'Mostrando {network}. Rango del gráfico {range}.',
+  lastKnown: 'último valor conocido',
+  appAccounts: '{count} cuentas en la app',
+  updatedAt: 'Actualizado {time}',
+  liveNote: 'En vivo desde Solana Devnet y Stellar Testnet. Se actualiza cada 5 minutos.',
+  snapshotNote: 'Los datos en vivo no están disponibles ahora. Se muestra la última foto publicada.',
+  partialNote: 'Algunas fuentes no están disponibles. Esas cifras muestran su último valor conocido.',
 };
 
 export type MessageKey = keyof typeof en;
@@ -203,6 +215,20 @@ export function phraseLine(
 export function formatInt(value: number, lang: Lang): string {
   const locale = lang === 'es' ? 'es-AR' : 'en-US';
   return new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(value);
+}
+
+/** Date and time in the reader's language, with the zone named so it is unambiguous. */
+export function formatUpdatedAt(iso: string, lang: Lang): string {
+  const locale = lang === 'es' ? 'es-AR' : 'en-US';
+  return new Intl.DateTimeFormat(locale, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'UTC',
+    timeZoneName: 'short',
+  }).format(new Date(iso));
 }
 
 /** Stored choice wins. Anything else, including a first visit, is English. */

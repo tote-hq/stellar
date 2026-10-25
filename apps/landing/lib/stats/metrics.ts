@@ -27,9 +27,15 @@ export const BADGE_INK = '#2A1A14';
 export const STELLAR_TEXT = '#B5482B';
 
 export const SOLANA_PROGRAM_ID = 'BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d';
-export const STELLAR_CONTRACT_ID = 'CCH37422N756N7747422N7';
+/** Escrow and demo USDC on Stellar testnet. Source of truth: deployments.json at the repo root. */
+export const STELLAR_CONTRACT_ID = 'CBCUESHDKRXAH4YAHOKJFRFEOIYBTU2LYJ4LCOFIGMYGNHBCPACXQ557';
+export const STELLAR_USDC_ID = 'CB63C7UVZ3PBALQ7IE37QU2ZX5X3UMTLJOHDRI2EW44JU26YDGLQUBJF';
+/** Public Stellar testnet accounts that sign or receive the app's on-chain actions. */
+export const STELLAR_RESOLVER = 'GBGMPRHU3NW3BCXUNDNC7VSYQKS6FZKWFHSGEHHMR3G3TZOUWEDBHTFK';
+export const STELLAR_TREASURY = 'GAXUICH5DZMB4ZIZVF6ETTE524RCZYRKHWLGG7EOLY6ECVD4IS6TBNZG';
+export const STELLAR_DEMO_WALLET = 'GDFF477UQUWOFIHSOEXPPOD5GPUSEW6OLGZB5FCPS6AFRAOPTMINA55X';
 
-export const TOTALS = {
+export const TOTALS: Totals = {
   endUsers: 30,
   endUsersDelta30d: 30,
   realOrders: 1,
@@ -49,7 +55,61 @@ export const TOTALS = {
   escrowRefund: 13,
   tokenMintInit: 20,
   mergedPrs: 102,
-} as const;
+  appAccounts: null,
+};
+
+export interface Totals {
+  endUsers: number;
+  /** Null when the live source cannot say how many joined in the window. */
+  endUsersDelta30d: number | null;
+  realOrders: number;
+  txSolana: number;
+  txStellar: number;
+  txDelta30d: number;
+  cartsSolana: number;
+  cartsStellar: number;
+  settled: number;
+  settledUsdc: string;
+  stellarMints: number;
+  walletsSolana: number;
+  walletsStellar: number;
+  buyers: number;
+  infra: number;
+  escrowOpen: number;
+  escrowRefund: number;
+  tokenMintInit: number;
+  mergedPrs: number;
+  /** Signed-in app accounts across both apps; null until a database read is configured. */
+  appAccounts: number | null;
+}
+
+/** Which source each number came from. 'snapshot' means the last published value. */
+export type SourceState = 'live' | 'snapshot';
+
+export interface Sources {
+  solana: SourceState;
+  stellar: SourceState;
+  waitlist: SourceState;
+  appDb: SourceState;
+  github: SourceState;
+}
+
+/**
+ * Everything the dashboard and the CSV read. Built server-side; holds only
+ * public aggregates and public transaction hashes, never an address list,
+ * an email or a credential.
+ */
+export interface StatsSnapshot {
+  /** Calendar day the range windows count back from (UTC). */
+  asOf: string;
+  /** ISO time the live read finished, or null for the published snapshot. */
+  updatedAt: string | null;
+  totals: Totals;
+  txDay: readonly Point[];
+  cartDay: readonly Point[];
+  recentTxs: readonly TxRef[];
+  sources: Sources;
+}
 
 export interface Point {
   label: string;
@@ -123,9 +183,32 @@ export const RECENT_TXS: readonly TxRef[] = [
     network: 'solana',
     hash: '5qBwCrxeHhd2ePMRSyYQek5g4sHeJfcANZJQXaxGMF5XYjy9BSqsK1kLWZMRfCEvPvgnfX6b6ty6jKDxu4kmnWeo',
   },
-  { network: 'stellar', hash: '40db5af75356' },
-  { network: 'stellar', hash: '6527e00093' },
+  { network: 'stellar', hash: '240714181f04d8f4c420844dfbf1f0b66edabb87b1539e59c07da7475b8a657e' },
+  { network: 'stellar', hash: '59e5a1655b336401b0be4ef80002ea1e57297e3409b95a61893cb43c6b92577d' },
 ];
+
+export const FALLBACK_SNAPSHOT: StatsSnapshot = {
+  asOf: AS_OF,
+  updatedAt: null,
+  totals: TOTALS,
+  txDay: TX_DAY,
+  cartDay: CART_DAY,
+  recentTxs: RECENT_TXS,
+  sources: { solana: 'snapshot', stellar: 'snapshot', waitlist: 'snapshot', appDb: 'snapshot', github: 'snapshot' },
+};
+
+/** Month buckets (labelled MM/YY, dated the 1st) rolled up from day buckets. */
+export function monthBuckets(days: readonly Point[]): Point[] {
+  const byMonth = new Map<string, Point>();
+  for (const day of days) {
+    const key = day.iso.slice(0, 7);
+    const bucket = byMonth.get(key) ?? { label: `${key.slice(5, 7)}/${key.slice(2, 4)}`, iso: `${key}-01`, solana: 0, stellar: 0 };
+    bucket.solana += day.solana;
+    bucket.stellar += day.stellar;
+    byMonth.set(key, bucket);
+  }
+  return [...byMonth.values()].sort((a, b) => a.iso.localeCompare(b.iso));
+}
 
 export function txHref(tx: TxRef): string {
   if (tx.network === 'solana') return `https://solscan.io/tx/${tx.hash}?cluster=devnet`;

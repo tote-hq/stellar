@@ -200,12 +200,14 @@ test('explorer links use the public program and contract ids', () => {
   );
   assert.equal(
     txHref(RECENT_TXS[4]),
-    'https://stellar.expert/explorer/testnet/tx/40db5af75356',
+    `https://stellar.expert/explorer/testnet/tx/${RECENT_TXS[4].hash}`,
   );
-  assert.equal(
-    txHref(RECENT_TXS[5]),
-    'https://stellar.expert/explorer/testnet/tx/6527e00093',
-  );
+  for (const tx of RECENT_TXS.filter((item) => item.network === 'stellar')) {
+    assert.match(tx.hash, /^[0-9a-f]{64}$/);
+  }
+  assert.match(STELLAR_CONTRACT_ID, /^C[A-Z2-7]{55}$/);
+  const deployments = JSON.parse(readFileSync(join(root, '../../deployments.json'), 'utf8'));
+  assert.equal(STELLAR_CONTRACT_ID, deployments.networks.testnet.contracts.escrow.id);
   assert.equal(contractHref('solana'), `https://solscan.io/account/${SOLANA_PROGRAM_ID}?cluster=devnet`);
   assert.equal(
     contractHref('stellar'),

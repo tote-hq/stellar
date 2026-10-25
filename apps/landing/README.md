@@ -146,3 +146,11 @@ No hace falta ninguna variable de entorno. El HTML sale en `es-AR`. Next genera,
 | `/manifest.webmanifest` | nombre, idioma e íconos |
 
 El shopper (`app.changuito.me`) tiene su propio `robots.txt` y no se toca desde acá. `?estado=` en la lista y en el reporte de bug no se indexa; el canonical queda en la URL limpia.
+
+## Public stats (`/stats`, stats.changuito.me)
+
+The dashboard reads live data on the server and regenerates at most every 5 minutes (ISR); the page and `/stats/export` share one cached read.
+
+- **No secrets needed:** Solana devnet escrow program `BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d` (public RPC), Stellar testnet escrow `CBCUESHDKRXAH4YAHOKJFRFEOIYBTU2LYJ4LCOFIGMYGNHBCPACXQ557` and demo USDC `CB63C7UVZ3PBALQ7IE37QU2ZX5X3UMTLJOHDRI2EW44JU26YDGLQUBJF` (Stellar Expert events + Horizon), merged PRs (GitHub public search).
+- **Optional, server-only:** `KV_REST_API_URL` + `KV_REST_API_READ_ONLY_TOKEN` (or `KV_REST_API_TOKEN`) for the waitlist count; `STATS_STELLAR_DATABASE_URL` and `STATS_SOLANA_DATABASE_URL` (read-only roles) for app accounts and delivered orders.
+- Any source that is missing or down keeps its last published value, and the page says so next to the "Updated" time. Only aggregates and public transaction hashes reach the browser.

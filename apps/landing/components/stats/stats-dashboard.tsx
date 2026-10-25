@@ -7,6 +7,7 @@ import {
   THEME_KEY,
   format,
   formatInt,
+  formatUpdatedAt,
   messages,
   parseLang,
   parseTheme,
@@ -14,7 +15,14 @@ import {
   type Lang,
   type ThemeName,
 } from '../../lib/stats/i18n';
-import { HOME_URL, TOTALS, contractHref, contractId, shortId, txHref } from '../../lib/stats/metrics';
+import {
+  HOME_URL,
+  contractHref,
+  contractId,
+  shortId,
+  txHref,
+  type StatsSnapshot,
+} from '../../lib/stats/metrics';
 import {
   barRatio,
   chartBars,
@@ -148,6 +156,7 @@ function ChartCard({
   mode,
   filter,
   lang,
+  snapshot,
 }: {
   kind: SeriesKind;
   title: string;
@@ -155,13 +164,14 @@ function ChartCard({
   mode: ChartMode;
   filter: NetworkFilter;
   lang: Lang;
+  snapshot: StatsSnapshot;
 }) {
   const t = messages(lang);
   const titleId = useId();
-  const bars = chartBars(kind, range, filter, mode);
+  const bars = chartBars(kind, range, filter, mode, snapshot);
   const chains = visibleChains(filter);
   const top = plotTop(seriesPeak(bars, filter));
-  const total = sumSeries(pointsInRange(pointsFor(kind, 'day'), range), filter);
+  const total = sumSeries(pointsInRange(pointsFor(kind, 'day', snapshot), range, snapshot.asOf), filter);
   const [active, setActive] = useState<number | null>(null);
   const ticks = [top, Math.round(top / 2), 0];
 
@@ -286,7 +296,7 @@ function MeterList({ rows, lang }: { rows: readonly Meter[]; lang: Lang }) {
   );
 }
 
-export function StatsDashboard() {
+export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
   const [lang, setLang] = useState<Lang>('en');
   const [theme, setTheme] = useState<ThemeName>('light');
   const [filter, setFilter] = useState<NetworkFilter>('all');
@@ -318,8 +328,15 @@ export function StatsDashboard() {
     writeStorage(THEME_KEY, next);
   }
 
-  const cards = kpis(filter);
-  const txs = recentTxs(filter);
+  const cards = kpis(filter, snapshot);
+  const txs = recentTxs(filter, snapshot);
+  const states = Object.values(snapshot.sources);
+  const freshness =
+    snapshot.updatedAt === null || (snapshot.sources.solana !== 'live' && snapshot.sources.stellar !== 'live')
+      ? t.snapshotNote
+      : states.every((state) => state === 'live')
+        ? t.liveNote
+        : `${t.liveNote} ${t.partialNote}`;
   const rangeLabel =
     range === '7d' ? t.range7d : range === '30d' ? t.range30d : range === '90d' ? t.range90d : t.rangeAll;
 
@@ -399,6 +416,17 @@ export function StatsDashboard() {
         <section className={styles.hero}>
           <h1>{t.heroTitle}</h1>
           <p>{t.heroSubtitle}</p>
+          <p className={styles.updated} data-testid="stats-updated">
+            {snapshot.updatedAt ? (
+              <time dateTime={snapshot.updatedAt}>
+                {format(t.updatedAt, { time: formatUpdatedAt(snapshot.updatedAt, lang) })}
+              </time>
+            ) : (
+              <time dateTime={snapshot.asOf}>{format(t.updatedAt, { time: snapshot.asOf })}</time>
+            )}
+            {t.sep}
+            {freshness}
+          </p>
         </section>
         <section className={styles.kpis} aria-label={t.kpiRegion} data-testid="stats-kpis">
           {cards.map((card) => (
@@ -441,11 +469,11 @@ export function StatsDashboard() {
           </div>
           {panel === 'overview' ? (
             <div className={styles.overview}>
-              <ChartCard kind="tx" title={t.chartTx} range={range} mode={mode} filter={filter} lang={lang} />
-              <ChartCard kind="carts" title={t.chartCarts} range={range} mode={mode} filter={filter} lang={lang} />
+              <ChartCard kind="tx" title={t.chartTx} range={range} mode={mode} filter={filter} lang={lang} snapshot={snapshot} />
+              <ChartCard kind="carts" title={t.chartCarts} range={range} mode={mode} filter={filter} lang={lang} snapshot={snapshot} />
               <article className={styles.card} data-testid="stats-by-network">
                 <h3 className={styles.cardTitle}>{t.byNetwork}</h3>
-                <MeterList rows={networkMeters(filter)} lang={lang} />
+                <MeterList rows={networkMeters(filter, snapshot)} lang={lang} />
               </article>
               <article className={styles.card} data-testid="stats-engineering">
                 <h3 className={styles.cardTitle}>{t.engineering}</h3>
@@ -457,7 +485,7 @@ export function StatsDashboard() {
                   </div>
                   <div className={styles.mini}>
                     <p className={styles.miniLabel}>{t.mergedPrs}</p>
-                    <p className={styles.miniValue}>{formatInt(TOTALS.mergedPrs, lang)}</p>
+                    <p className={styles.miniValue}>{formatInt(snapshot.totals.mergedPrs, lang)}</p>
                     <p className={styles.miniScope}>{t.prsScope}</p>
                   </div>
                 </div>

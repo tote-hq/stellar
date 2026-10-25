@@ -7,16 +7,12 @@
 
 import type { MessageKey } from './i18n.ts';
 import {
-  AS_OF,
-  CART_DAY,
-  CART_MONTH,
   ENGINEERING,
-  RECENT_TXS,
-  TOTALS,
-  TX_DAY,
-  TX_MONTH,
+  FALLBACK_SNAPSHOT,
+  monthBuckets,
   type EngineeringRow,
   type Point,
+  type StatsSnapshot,
   type TxRef,
 } from './metrics.ts';
 
@@ -69,23 +65,31 @@ export function sumSeries(points: readonly Point[], filter: NetworkFilter): numb
   }, 0);
 }
 
-export function pointsFor(kind: SeriesKind, granularity: Granularity): readonly Point[] {
-  if (kind === 'tx') return granularity === 'month' ? TX_MONTH : TX_DAY;
-  return granularity === 'month' ? CART_MONTH : CART_DAY;
+export function pointsFor(
+  kind: SeriesKind,
+  granularity: Granularity,
+  snap: StatsSnapshot = FALLBACK_SNAPSHOT,
+): readonly Point[] {
+  const days = kind === 'tx' ? snap.txDay : snap.cartDay;
+  return granularity === 'month' ? monthBuckets(days) : days;
 }
 
 /** Inclusive start of a window ending on the published snapshot day. */
-export function rangeStart(range: RangeId): string | null {
+export function rangeStart(range: RangeId, asOf: string = FALLBACK_SNAPSHOT.asOf): string | null {
   if (range === 'all') return null;
   const span = range === '7d' ? 6 : range === '30d' ? 29 : 89;
-  const start = Date.parse(`${AS_OF}T00:00:00Z`) - span * DAY_MS;
+  const start = Date.parse(`${asOf}T00:00:00Z`) - span * DAY_MS;
   return new Date(start).toISOString().slice(0, 10);
 }
 
-export function pointsInRange(points: readonly Point[], range: RangeId): Point[] {
-  const start = rangeStart(range);
+export function pointsInRange(
+  points: readonly Point[],
+  range: RangeId,
+  asOf: string = FALLBACK_SNAPSHOT.asOf,
+): Point[] {
+  const start = rangeStart(range, asOf);
   if (!start) return [...points];
-  return points.filter((point) => point.iso >= start && point.iso <= AS_OF);
+  return points.filter((point) => point.iso >= start && point.iso <= asOf);
 }
 
 /** Running totals when cumulative is on. A hidden chain, including Seeker, stays at zero. */
@@ -102,8 +106,14 @@ export function projectSeries(points: readonly Point[], filter: NetworkFilter, c
   });
 }
 
-export function chartBars(kind: SeriesKind, range: RangeId, filter: NetworkFilter, mode: ChartMode): Bar[] {
-  return projectSeries(pointsInRange(pointsFor(kind, 'day'), range), filter, mode === 'cumulative');
+export function chartBars(
+  kind: SeriesKind,
+  range: RangeId,
+  filter: NetworkFilter,
+  mode: ChartMode,
+  snap: StatsSnapshot = FALLBACK_SNAPSHOT,
+): Bar[] {
+  return projectSeries(pointsInRange(pointsFor(kind, 'day', snap), range, snap.asOf), filter, mode === 'cumulative');
 }
 
 export function seriesPeak(bars: readonly Bar[], filter: NetworkFilter): number {
@@ -134,15 +144,14 @@ export function visibleChains(filter: NetworkFilter): Chain[] {
 
 const SEEKER_PARTS: Phrase[] = [{ key: 'seekerEmpty' }];
 
-export function kpis(filter: NetworkFilter): Kpi[] {
-  const endUsers: Kpi = {
-    id: 'endUsers',
-    value: TOTALS.endUsers,
-    parts: [
-      { key: 'delta', vars: { count: TOTALS.endUsersDelta30d } },
-      { key: 'realOrder', vars: { count: TOTALS.realOrders } },
-    ],
-  };
+export function kpis(filter: NetworkFilter, snap: StatsSnapshot = FALLBACK_SNAPSHOT): Kpi[] {
+  const TOTALS = snap.totals;
+  const userParts: Phrase[] = [];
+  if (TOTALS.endUsersDelta30d !== null) userParts.push({ key: 'delta', vars: { count: TOTALS.endUsersDelta30d } });
+  userParts.push({ key: 'realOrder', vars: { count: TOTALS.realOrders } });
+  if (TOTALS.appAccounts !== null) userParts.push({ key: 'appAccounts', vars: { count: TOTALS.appAccounts } });
+  if (snap.updatedAt !== null && snap.sources.waitlist !== 'live') userParts.push({ key: 'lastKnown' });
+  const endUsers: Kpi = { id: 'endUsers', value: TOTALS.endUsers, parts: userParts };
 
   const transactions: Kpi =
     filter === 'seeker'
@@ -213,19 +222,23 @@ export function kpis(filter: NetworkFilter): Kpi[] {
   return [endUsers, transactions, carts, wallets];
 }
 
-const INSTRUCTION_ROWS: readonly { id: string; count: number; label: MessageKey }[] = [
-  { id: 'open', count: TOTALS.escrowOpen, label: 'rowOpen' },
-  { id: 'settle', count: TOTALS.settled, label: 'rowSettle' },
-  { id: 'refund', count: TOTALS.escrowRefund, label: 'rowRefund' },
-  { id: 'mint', count: TOTALS.tokenMintInit, label: 'rowMint' },
-];
+function instructionRows(snap: StatsSnapshot): { id: string; count: number; label: MessageKey }[] {
+  const t = snap.totals;
+  return [
+    { id: 'open', count: t.escrowOpen, label: 'rowOpen' },
+    { id: 'settle', count: t.settled, label: 'rowSettle' },
+    { id: 'refund', count: t.escrowRefund, label: 'rowRefund' },
+    { id: 'mint', count: t.tokenMintInit, label: 'rowMint' },
+  ];
+}
 
 /**
  * Network rows follow the filter. Instruction totals are not split by chain
  * in the snapshot, so they stay on All rather than being attributed to one rail.
  * Seeker has no published instruction split.
  */
-export function networkMeters(filter: NetworkFilter): Meter[] {
+export function networkMeters(filter: NetworkFilter, snap: StatsSnapshot = FALLBACK_SNAPSHOT): Meter[] {
+  const TOTALS = snap.totals;
   if (filter === 'seeker') {
     return [
       {
@@ -266,7 +279,7 @@ export function networkMeters(filter: NetworkFilter): Meter[] {
     });
   }
   if (filter === 'all') {
-    for (const row of INSTRUCTION_ROWS) {
+    for (const row of instructionRows(snap)) {
       rows.push({
         id: row.id,
         label: { key: row.label },
@@ -303,8 +316,8 @@ export function meterPeak(rows: readonly Meter[]): number {
   return rows.reduce((peak, row) => Math.max(peak, row.value), 0);
 }
 
-export function recentTxs(filter: NetworkFilter): readonly TxRef[] {
-  return RECENT_TXS.filter((tx) => filter === 'all' || tx.network === filter);
+export function recentTxs(filter: NetworkFilter, snap: StatsSnapshot = FALLBACK_SNAPSHOT): readonly TxRef[] {
+  return snap.recentTxs.filter((tx) => filter === 'all' || tx.network === filter);
 }
 
 export function networkNameKey(filter: NetworkFilter): MessageKey {
@@ -342,10 +355,15 @@ function csvCell(value: string | number): string {
 }
 
 /** Chart rows for the current network, range and mode. No account data. */
-export function statsCsv(filter: NetworkFilter, range: RangeId, mode: ChartMode): string {
+export function statsCsv(
+  filter: NetworkFilter,
+  range: RangeId,
+  mode: ChartMode,
+  snap: StatsSnapshot = FALLBACK_SNAPSHOT,
+): string {
   const lines = ['metric,date,label,solana,stellar,seeker'];
   for (const kind of ['tx', 'carts'] as const) {
-    const points = pointsInRange(pointsFor(kind, 'day'), range);
+    const points = pointsInRange(pointsFor(kind, 'day', snap), range, snap.asOf);
     const bars = projectSeries(points, filter, mode === 'cumulative');
     points.forEach((point, index) => {
       const bar = bars[index];

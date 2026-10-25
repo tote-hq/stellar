@@ -239,6 +239,12 @@
   line-height: 1.45;
 }
 
+.hero p.updated {
+  margin-top: 8px;
+  font-size: 0.875rem;
+  max-width: 48rem;
+}
+
 .kpis {
   display: grid;
   grid-template-columns: 1fr 1fr;
