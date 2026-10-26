@@ -40,14 +40,12 @@ Analytics es opcional y gratis. Si estas variables quedan vacías, la landing no
 
 `NEXT_PUBLIC_TURNSTILE_SITE_KEY` entra en el bundle del cliente: un valor vacío deja el formulario sin widget. `TURNSTILE_SECRET_KEY`, `WAITLIST_WEBHOOK_URL` y `WAITLIST_WEBHOOK_SECRET` son de servidor. Los tres ids de analytics también son públicos y, vacíos, no cargan scripts. Un cambio de env se aplica en el próximo deploy.
 
-Elegí **uno** de estos destinos. Si están los dos, Redis es el registro y el webhook recibe una copia. El alta en vivo va a Apps Script, así que las dos variables del webhook hacen falta.
+El alta en vivo va a Apps Script, así que las dos variables del webhook hacen falta.
 
 | Variable | Obligatoria | Para qué |
 |---|---|---|
-| `WAITLIST_WEBHOOK_URL` | en producción, salvo que haya Redis | `POST` JSON `{ kind, name, email, source, otherDetail, whatsapp, whatsappGroup, userAgent, createdAt }` y, si hay secreto, `webhookSecret`. HTTPS (Apps Script, Notion, Sheets, Slack, Make). `http` solo en `localhost`. |
+| `WAITLIST_WEBHOOK_URL` | en producción | `POST` JSON `{ kind, name, email, source, otherDetail, whatsapp, whatsappGroup, userAgent, createdAt }` y, si hay secreto, `webhookSecret`. HTTPS (Apps Script, Notion, Sheets, Slack, Make). `http` solo en `localhost`. |
 | `WAITLIST_WEBHOOK_SECRET` | junto con el webhook en producción | `Authorization: Bearer …` y el mismo valor en el cuerpo como `webhookSecret`. Apps Script no entrega `Authorization` ni headers custom en `e.headers`; `doPost` tiene que leer el secreto del body y no guardarlo en la hoja. Un HTTP 200 con `{ "ok": false }` es un fallo, no un alta. |
-| `KV_REST_API_URL` o `UPSTASH_REDIS_REST_URL` | la otra vía | El mismo Redis REST que ya usa el shopper. La landing es otro proyecto de Vercel: hay que conectar la integración ahí, no se hereda sola. |
-| `KV_REST_API_TOKEN` o `UPSTASH_REDIS_REST_TOKEN` | junto con la URL | Token REST. Nunca commitearlo. |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | en producción | Site key pública de Cloudflare Turnstile (widget en el formulario). Tiene que estar en este proyecto, no solo en el del shopper. |
 | `TURNSTILE_SECRET_KEY` | en producción | Secret key de Turnstile (solo servidor; verifica el token antes de guardar). Nunca commitearla. Si falta esta o la site key, producción rechaza el alta. |
 
@@ -76,8 +74,6 @@ El formulario de `/whitelist` manda un token de Turnstile con el alta. El servid
 - **Local / no-production:** si las keys no están, el submit se acepta sin widget (se loguea un aviso una vez) para que `next dev` siga funcionando.
 
 Creá un widget en el [dashboard de Turnstile](https://dash.cloudflare.com/?to=/:account/turnstile) (o reusá el de `app.changuito.me` si el hostname `www.changuito.me` está permitido) y pegá las dos keys en el proyecto de Vercel de la landing.
-
-La clave de Redis es `changuito:landing:waitlist` (hash por email, `HSETNX`), para no pisar las sesiones del shopper si comparten base.
 
 ## Reportar un bug
 
@@ -146,3 +142,11 @@ No hace falta ninguna variable de entorno. El HTML sale en `es-AR`. Next genera,
 | `/manifest.webmanifest` | nombre, idioma e íconos |
 
 El shopper (`app.changuito.me`) tiene su propio `robots.txt` y no se toca desde acá. `?estado=` en la lista y en el reporte de bug no se indexa; el canonical queda en la URL limpia.
+
+## Public stats (`/stats`, stats.changuito.me)
+
+The dashboard reads live data on the server and regenerates at most every 5 minutes (ISR); the page and `/stats/export` share one cached read.
+
+- **No secrets needed:** Solana devnet escrow program `BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d` (public RPC), Stellar testnet escrow `CBCUESHDKRXAH4YAHOKJFRFEOIYBTU2LYJ4LCOFIGMYGNHBCPACXQ557` and demo USDC `CB63C7UVZ3PBALQ7IE37QU2ZX5X3UMTLJOHDRI2EW44JU26YDGLQUBJF` (Stellar Expert events + Horizon), merged PRs (GitHub public search).
+- **Optional, server-only:** `STATS_STELLAR_DATABASE_URL` and `STATS_SOLANA_DATABASE_URL` (read-only roles) for app accounts and delivered orders. The waitlist figure stays on the last published value.
+- Any source that is missing or down keeps its last published value, and the page says so next to the "Updated" time. Only aggregates and public transaction hashes reach the browser.

@@ -447,8 +447,8 @@ test('a non-json webhook response still counts as saved', async () => {
   assert.deepEqual(result, { ok: true, sink: 'webhook' });
 });
 
-test('redis sink writes one hash field and treats an existing email as saved', async () => {
-  const commands: unknown[] = [];
+test('a database URL in the environment does not store the signup', async () => {
+  let called = false;
   const result = await saveWaitlistEntry(
     {
       name: 'Martina López',
@@ -461,21 +461,16 @@ test('redis sink writes one hash field and treats an existing email as saved', a
     {
       env: {
         NODE_ENV: 'production',
-        KV_REST_API_URL: 'https://ejemplo.upstash.io',
-        KV_REST_API_TOKEN: 'token',
+        DATABASE_URL: 'postgres://landing',
       },
-      fetch: async (_url: RequestInfo | URL, init?: RequestInit) => {
-        commands.push(JSON.parse(String(init?.body)));
-        return Response.json({ result: 0 });
+      fetch: async () => {
+        called = true;
+        return Response.json({ ok: true });
       },
     },
   );
-  assert.deepEqual(result, { ok: true, sink: 'redis' });
-  assert.equal(commands.length, 1);
-  const command = commands[0] as string[];
-  assert.equal(command[0], 'HSETNX');
-  assert.equal(command[1], 'changuito:landing:waitlist');
-  assert.equal(command[2], 'martina@ejemplo.com');
+  assert.deepEqual(result, { ok: false, reason: 'unconfigured' });
+  assert.equal(called, false);
 });
 
 test('production without a sink does not pretend the signup was stored', async () => {
