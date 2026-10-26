@@ -18,7 +18,6 @@ import {
   STELLAR_RESOLVER,
   STELLAR_USDC_ID,
 } from '../stats/metrics.ts';
-import { formatUpdatedAt } from '../stats/i18n.ts';
 import { kpis, statsCsv } from '../stats/view.ts';
 
 const NOW = new Date('2026-10-25T12:00:00Z');
@@ -233,9 +232,4 @@ test('the waitlist figure is not read from the database', async () => {
     }),
   );
   assert.equal(broken, null);
-});
-
-test('the updated-at stamp is localised and names its zone', () => {
-  assert.match(formatUpdatedAt('2026-10-25T12:05:00Z', 'en'), /Oct 25, 2026.*12:05.*UTC/);
-  assert.match(formatUpdatedAt('2026-10-25T12:05:00Z', 'es'), /25.*oct.*2026.*12:05.*UTC/);
 });

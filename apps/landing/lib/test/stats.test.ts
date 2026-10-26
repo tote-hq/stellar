@@ -9,7 +9,6 @@ import {
   format,
   formatInt,
   messages,
-  parseLang,
   parseTheme,
   phraseLine,
   type MessageKey,
@@ -120,7 +119,6 @@ test('network filter moves chain metrics and leaves the waitlist in place', () =
   assert.equal(phraseLine(stellar[1].parts, 'en'), 'Stellar Testnet');
   assert.equal(phraseLine(solana[2].parts, 'en'), 'Solana Devnet · $206.99 USDC');
   assert.equal(phraseLine(stellar[2].parts, 'en'), '10 USDC mints');
-  assert.equal(phraseLine(all[0].parts, 'es'), '+30 últimos 30d · 1 pedido real entregado');
 });
 
 test('cumulative is a running total and raw day buckets stay put', () => {
@@ -218,29 +216,21 @@ test('explorer links use the public program and contract ids', () => {
   assert.equal(HOME_URL, 'https://www.changuito.me');
 });
 
-test('english and spanish dictionaries share keys, placeholders and a default', () => {
+test('english copy is the dashboard default', () => {
   const en = messages('en');
-  const es = messages('es');
   const keys = Object.keys(en).sort();
-  assert.deepEqual(keys, Object.keys(es).sort());
   for (const key of keys) {
     const name = key as MessageKey;
     assert.ok(en[name].length > 0, name);
-    assert.ok(es[name].length > 0, name);
-    assert.deepEqual(placeholders(en[name]), placeholders(es[name]), name);
+    assert.equal(en[name].includes('{'), placeholders(en[name]).length > 0, name);
   }
   assert.equal(en.heroTitle, 'Growth, in the open.');
-  assert.notEqual(en.heroTitle, es.heroTitle);
-  assert.equal(parseLang(null), 'en');
-  assert.equal(parseLang('es'), 'es');
-  assert.equal(parseLang('en'), 'en');
-  assert.equal(parseLang('fr'), 'en');
+  assert.equal(en.exportCsv, 'Export CSV');
   assert.equal(parseTheme(null), 'light');
   assert.equal(parseTheme('light'), 'light');
   assert.equal(parseTheme('dark'), 'dark');
   assert.equal(parseTheme('blue'), 'light');
   assert.equal(formatInt(1484, 'en'), '1,484');
-  assert.equal(formatInt(1484, 'es'), '1.484');
   assert.equal(format(en.delta, { count: 59 }), '+59 last 30d');
 });
 

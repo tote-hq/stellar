@@ -3,13 +3,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
 
 import {
-  LANG_KEY,
   THEME_KEY,
   format,
   formatInt,
-  formatUpdatedAt,
   messages,
-  parseLang,
   parseTheme,
   phraseLine,
   type Lang,
@@ -21,6 +18,7 @@ import {
   contractId,
   shortId,
   txHref,
+  type SourceState,
   type StatsSnapshot,
 } from '../../lib/stats/metrics';
 import {
@@ -33,6 +31,9 @@ import {
   meterPeak,
   networkMeters,
   networkNameKey,
+  parseMode,
+  parseNetwork,
+  parseRange,
   plotTop,
   pointsFor,
   pointsInRange,
@@ -42,12 +43,17 @@ import {
   visibleChains,
   type Chain,
   type ChartMode,
+  type Kpi,
   type Meter,
   type NetworkFilter,
   type RangeId,
   type SeriesKind,
 } from '../../lib/stats/view';
 import styles from './stats.module.css';
+
+type Panel = 'overview' | 'transactions';
+
+const lang: Lang = 'en';
 
 function readStorage(key: string): string | null {
   try {
@@ -65,14 +71,20 @@ function writeStorage(key: string, value: string): void {
   }
 }
 
+function parsePanel(value: string | null | undefined): Panel {
+  return value === 'transactions' ? 'transactions' : 'overview';
+}
+
 function Segmented<T extends string>({
   label,
+  labelId,
   value,
   options,
   onChange,
   testId,
 }: {
-  label: string;
+  label?: string;
+  labelId?: string;
   value: T;
   options: readonly { value: T; label: string }[];
   onChange: (next: T) => void;
@@ -80,7 +92,13 @@ function Segmented<T extends string>({
 }) {
   const refs = useRef<Partial<Record<T, HTMLButtonElement | null>>>({});
   return (
-    <div role="radiogroup" aria-label={label} className={styles.segment} data-testid={testId}>
+    <div
+      role="radiogroup"
+      aria-label={labelId ? undefined : label}
+      aria-labelledby={labelId}
+      className={styles.segment}
+      data-testid={testId}
+    >
       {options.map((option) => {
         const checked = option.value === value;
         return (
@@ -89,6 +107,7 @@ function Segmented<T extends string>({
             type="button"
             role="radio"
             aria-checked={checked}
+            tabIndex={checked ? 0 : -1}
             data-testid={`${testId}-${option.value}`}
             ref={(node) => {
               refs.current[option.value] = node;
@@ -143,10 +162,45 @@ function ThemeIcon({ theme }: { theme: ThemeName }) {
   );
 }
 
+function DownloadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+      <path d="M12 4v10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path d="M8 10l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M5 19h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function chainLabel(chain: Chain, t: ReturnType<typeof messages>): string {
   if (chain === 'solana') return t.legendSolana;
   if (chain === 'stellar') return t.legendStellar;
   return t.legendSeeker;
+}
+
+/** A chain figure is stale only when a live read fell back for a chain on screen. */
+function chainState(filter: NetworkFilter, snapshot: StatsSnapshot): SourceState | null {
+  if (snapshot.updatedAt === null || filter === 'seeker') return null;
+  if (filter === 'solana') return snapshot.sources.solana;
+  if (filter === 'stellar') return snapshot.sources.stellar;
+  return snapshot.sources.solana === 'live' && snapshot.sources.stellar === 'live' ? 'live' : 'snapshot';
+}
+
+function cardStale(id: Kpi['id'], filter: NetworkFilter, snapshot: StatsSnapshot): boolean {
+  if (id === 'endUsers') return false;
+  return chainState(filter, snapshot) === 'snapshot';
+}
+
+function StaleMark({ label }: { label: string }) {
+  return (
+    <span className={styles.stale}>
+      <span className={styles.staleDot} aria-hidden="true" />
+      <span className={styles.srOnly}>{label}</span>
+      <span className={styles.tooltip} role="tooltip" aria-hidden="true">
+        {label}
+      </span>
+    </span>
+  );
 }
 
 function ChartCard({
@@ -155,16 +209,16 @@ function ChartCard({
   range,
   mode,
   filter,
-  lang,
   snapshot,
+  staleLabel,
 }: {
   kind: SeriesKind;
   title: string;
   range: RangeId;
   mode: ChartMode;
   filter: NetworkFilter;
-  lang: Lang;
   snapshot: StatsSnapshot;
+  staleLabel: string;
 }) {
   const t = messages(lang);
   const titleId = useId();
@@ -174,6 +228,7 @@ function ChartCard({
   const total = sumSeries(pointsInRange(pointsFor(kind, 'day', snapshot), range, snapshot.asOf), filter);
   const [active, setActive] = useState<number | null>(null);
   const ticks = [top, Math.round(top / 2), 0];
+  const stale = chainState(filter, snapshot) === 'snapshot';
 
   function tipFor(index: number): string {
     const bar = bars[index];
@@ -199,6 +254,7 @@ function ChartCard({
     <article className={styles.card} data-testid={`stats-chart-${kind}`} aria-labelledby={titleId}>
       <h3 id={titleId} className={styles.chartTitle}>
         {title}
+        {stale ? <StaleMark label={staleLabel} /> : null}
       </h3>
       <p className={styles.chartTotal}>{formatInt(total, lang)}</p>
       {bars.length === 0 ? (
@@ -267,7 +323,7 @@ function ChartCard({
   );
 }
 
-function MeterList({ rows, lang }: { rows: readonly Meter[]; lang: Lang }) {
+function MeterList({ rows }: { rows: readonly Meter[] }) {
   const peak = plotTop(meterPeak(rows));
   return (
     <div className={styles.meters}>
@@ -296,49 +352,91 @@ function MeterList({ rows, lang }: { rows: readonly Meter[]; lang: Lang }) {
   );
 }
 
+function writeFilters(filter: NetworkFilter, range: RangeId, panel: Panel, mode: ChartMode) {
+  const params = new URLSearchParams(window.location.search);
+  const assign = (key: string, value: string, omit: string) => {
+    if (value === omit) params.delete(key);
+    else params.set(key, value);
+  };
+  assign('network', filter, 'all');
+  assign('range', range, 'all');
+  assign('view', panel, 'overview');
+  assign('mode', mode, 'daily');
+  const qs = params.toString();
+  const next = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`;
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (next !== current) window.history.replaceState(null, '', next);
+}
+
 export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
-  const [lang, setLang] = useState<Lang>('en');
   const [theme, setTheme] = useState<ThemeName>('light');
   const [filter, setFilter] = useState<NetworkFilter>('all');
   const [range, setRange] = useState<RangeId>('all');
-  const [panel, setPanel] = useState<'overview' | 'transactions'>('overview');
+  const [panel, setPanel] = useState<Panel>('overview');
   const [mode, setMode] = useState<ChartMode>('daily');
+  const [urlReady, setUrlReady] = useState(false);
   const t = messages(lang);
+  const networkLabelId = useId();
+  const rangeLabelId = useId();
+  const tabLabelId = useId();
+  const modeLabelId = useId();
 
   useEffect(() => {
-    setLang(parseLang(readStorage(LANG_KEY)));
     setTheme(parseTheme(readStorage(THEME_KEY)));
   }, []);
 
   useEffect(() => {
     const previous = document.documentElement.lang;
-    document.documentElement.lang = lang === 'es' ? 'es' : 'en';
+    document.documentElement.lang = 'en';
     return () => {
       document.documentElement.lang = previous;
     };
-  }, [lang]);
+  }, []);
 
-  function chooseLang(next: Lang) {
-    setLang(next);
-    writeStorage(LANG_KEY, next);
-  }
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setFilter(parseNetwork(params.get('network')));
+    setRange(parseRange(params.get('range')));
+    setPanel(parsePanel(params.get('view')));
+    setMode(parseMode(params.get('mode')));
+    setUrlReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!urlReady) return;
+    writeFilters(filter, range, panel, mode);
+  }, [urlReady, filter, range, panel, mode]);
+
+  useEffect(() => {
+    const onPop = () => {
+      const params = new URLSearchParams(window.location.search);
+      setFilter(parseNetwork(params.get('network')));
+      setRange(parseRange(params.get('range')));
+      setPanel(parsePanel(params.get('view')));
+      setMode(parseMode(params.get('mode')));
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   function chooseTheme(next: ThemeName) {
     setTheme(next);
     writeStorage(THEME_KEY, next);
   }
 
+  function resetFilters() {
+    setFilter('all');
+    setRange('all');
+    setPanel('overview');
+    setMode('daily');
+  }
+
   const cards = kpis(filter, snapshot);
   const txs = recentTxs(filter, snapshot);
-  const states = Object.values(snapshot.sources);
-  const freshness =
-    snapshot.updatedAt === null || (snapshot.sources.solana !== 'live' && snapshot.sources.stellar !== 'live')
-      ? t.snapshotNote
-      : states.every((state) => state === 'live')
-        ? t.liveNote
-        : `${t.liveNote} ${t.partialNote}`;
   const rangeLabel =
     range === '7d' ? t.range7d : range === '30d' ? t.range30d : range === '90d' ? t.range90d : t.rangeAll;
+  const pristine = filter === 'all' && range === 'all' && panel === 'overview' && mode === 'daily';
+  const prsStale = snapshot.updatedAt !== null && snapshot.sources.github !== 'live';
 
   return (
     <div className={styles.shell} data-theme={theme} data-testid="stats-screen" lang={lang}>
@@ -356,47 +454,17 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
           <span className={styles.badge}>{t.badge}</span>
         </div>
         <div className={styles.tools}>
-          <Segmented
-            label={t.networkLabel}
-            value={filter}
-            options={[
-              { value: 'all', label: t.netAll },
-              { value: 'stellar', label: t.netStellar },
-              { value: 'solana', label: t.netSolana },
-              { value: 'seeker', label: t.netSeeker },
-            ]}
-            onChange={setFilter}
-            testId="stats-network"
-          />
-          <Segmented
-            label={t.rangeLabel}
-            value={range}
-            options={[
-              { value: '7d', label: t.range7d },
-              { value: '30d', label: t.range30d },
-              { value: '90d', label: t.range90d },
-              { value: 'all', label: t.rangeAll },
-            ]}
-            onChange={setRange}
-            testId="stats-range"
-          />
           <a
-            className={styles.export}
+            className={`${styles.export} ${styles.tip}`}
             data-testid="stats-export"
             href={`/stats/export?network=${filter}&range=${range}&mode=${mode}`}
+            aria-label={t.exportCsv}
           >
-            {t.exportCsv}
+            <DownloadIcon />
+            <span className={styles.tooltip} role="tooltip" aria-hidden="true">
+              {t.exportCsv}
+            </span>
           </a>
-          <Segmented
-            label={t.langLabel}
-            value={lang}
-            options={[
-              { value: 'en', label: t.langEn },
-              { value: 'es', label: t.langEs },
-            ]}
-            onChange={chooseLang}
-            testId="stats-lang"
-          />
           <button
             type="button"
             className={styles.theme}
@@ -415,23 +483,60 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
         </p>
         <section className={styles.hero}>
           <h1>{t.heroTitle}</h1>
-          <p>{t.heroSubtitle}</p>
-          <p className={styles.updated} data-testid="stats-updated">
-            {snapshot.updatedAt ? (
-              <time dateTime={snapshot.updatedAt}>
-                {format(t.updatedAt, { time: formatUpdatedAt(snapshot.updatedAt, lang) })}
-              </time>
-            ) : (
-              <time dateTime={snapshot.asOf}>{format(t.updatedAt, { time: snapshot.asOf })}</time>
-            )}
-            {t.sep}
-            {freshness}
-          </p>
+          <div className={styles.filters} role="region" aria-label={t.filtersLabel} data-testid="stats-filters">
+            <div className={styles.filterGroup}>
+              <span className={styles.filterLabel} id={networkLabelId}>
+                {t.networkLabel}
+              </span>
+              <Segmented
+                labelId={networkLabelId}
+                value={filter}
+                options={[
+                  { value: 'all', label: t.netAll },
+                  { value: 'stellar', label: t.netStellar },
+                  { value: 'solana', label: t.netSolana },
+                  { value: 'seeker', label: t.netSeeker },
+                ]}
+                onChange={setFilter}
+                testId="stats-network"
+              />
+            </div>
+            <div className={styles.filterGroup}>
+              <span className={styles.filterLabel} id={rangeLabelId}>
+                {t.rangeLabel}
+              </span>
+              <Segmented
+                labelId={rangeLabelId}
+                value={range}
+                options={[
+                  { value: '7d', label: t.range7d },
+                  { value: '30d', label: t.range30d },
+                  { value: '90d', label: t.range90d },
+                  { value: 'all', label: t.rangeAll },
+                ]}
+                onChange={setRange}
+                testId="stats-range"
+              />
+            </div>
+            <button
+              type="button"
+              className={styles.reset}
+              data-testid="stats-reset"
+              onClick={resetFilters}
+              disabled={pristine}
+              aria-label={t.resetFilters}
+            >
+              {t.reset}
+            </button>
+          </div>
         </section>
         <section className={styles.kpis} aria-label={t.kpiRegion} data-testid="stats-kpis">
           {cards.map((card) => (
             <article key={card.id} className={styles.card} data-testid={`stats-kpi-${card.id}`}>
-              <h2 className={styles.kpiLabel}>{t[kpiTitleKey(card.id)]}</h2>
+              <h2 className={styles.kpiLabel}>
+                {t[kpiTitleKey(card.id)]}
+                {cardStale(card.id, filter, snapshot) ? <StaleMark label={t.lastKnown} /> : null}
+              </h2>
               <p className={styles.kpiValue}>{formatInt(card.value, lang)}</p>
               <p className={styles.kpiDetail}>{phraseLine(card.parts, lang)}</p>
             </article>
@@ -443,37 +548,63 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
               {panel === 'overview' ? t.growth : t.recent}
             </h2>
             <div className={styles.sectionTools}>
-              <Segmented
-                label={t.tabLabel}
-                value={panel}
-                options={[
-                  { value: 'overview', label: t.tabOverview },
-                  { value: 'transactions', label: t.tabTransactions },
-                ]}
-                onChange={setPanel}
-                testId="stats-tab"
-              />
-              {panel === 'overview' ? (
+              <div className={styles.filterGroup}>
+                <span className={styles.filterLabel} id={tabLabelId}>
+                  {t.tabLabel}
+                </span>
                 <Segmented
-                  label={t.modeLabel}
-                  value={mode}
+                  labelId={tabLabelId}
+                  value={panel}
                   options={[
-                    { value: 'cumulative', label: t.modeCumulative },
-                    { value: 'daily', label: t.modeDaily },
+                    { value: 'overview', label: t.tabOverview },
+                    { value: 'transactions', label: t.tabTransactions },
                   ]}
-                  onChange={setMode}
-                  testId="stats-mode"
+                  onChange={setPanel}
+                  testId="stats-tab"
                 />
+              </div>
+              {panel === 'overview' ? (
+                <div className={styles.filterGroup}>
+                  <span className={styles.filterLabel} id={modeLabelId}>
+                    {t.modeLabel}
+                  </span>
+                  <Segmented
+                    labelId={modeLabelId}
+                    value={mode}
+                    options={[
+                      { value: 'daily', label: t.modeDaily },
+                      { value: 'cumulative', label: t.modeCumulative },
+                    ]}
+                    onChange={setMode}
+                    testId="stats-mode"
+                  />
+                </div>
               ) : null}
             </div>
           </div>
           {panel === 'overview' ? (
             <div className={styles.overview}>
-              <ChartCard kind="tx" title={t.chartTx} range={range} mode={mode} filter={filter} lang={lang} snapshot={snapshot} />
-              <ChartCard kind="carts" title={t.chartCarts} range={range} mode={mode} filter={filter} lang={lang} snapshot={snapshot} />
+              <ChartCard
+                kind="tx"
+                title={t.chartTx}
+                range={range}
+                mode={mode}
+                filter={filter}
+                snapshot={snapshot}
+                staleLabel={t.lastKnown}
+              />
+              <ChartCard
+                kind="carts"
+                title={t.chartCarts}
+                range={range}
+                mode={mode}
+                filter={filter}
+                snapshot={snapshot}
+                staleLabel={t.lastKnown}
+              />
               <article className={styles.card} data-testid="stats-by-network">
                 <h3 className={styles.cardTitle}>{t.byNetwork}</h3>
-                <MeterList rows={networkMeters(filter, snapshot)} lang={lang} />
+                <MeterList rows={networkMeters(filter, snapshot)} />
               </article>
               <article className={styles.card} data-testid="stats-engineering">
                 <h3 className={styles.cardTitle}>{t.engineering}</h3>
@@ -484,12 +615,15 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
                     <p className={styles.miniScope}>{t.testsScope}</p>
                   </div>
                   <div className={styles.mini}>
-                    <p className={styles.miniLabel}>{t.mergedPrs}</p>
+                    <p className={styles.miniLabel}>
+                      {t.mergedPrs}
+                      {prsStale ? <StaleMark label={t.lastKnown} /> : null}
+                    </p>
                     <p className={styles.miniValue}>{formatInt(snapshot.totals.mergedPrs, lang)}</p>
                     <p className={styles.miniScope}>{t.prsScope}</p>
                   </div>
                 </div>
-                <MeterList rows={engineeringMeters(filter)} lang={lang} />
+                <MeterList rows={engineeringMeters(filter)} />
               </article>
             </div>
           ) : (
