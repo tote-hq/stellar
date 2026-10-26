@@ -5,9 +5,9 @@
  * devnet JSON-RPC for the escrow program, Stellar Expert for Soroban contract
  * events, Horizon for Stellar transactions. Product numbers come from
  * Postgres (`STATS_STELLAR_DATABASE_URL`, `STATS_SOLANA_DATABASE_URL`):
- * app accounts, delivered orders, and the waitlist count in `config`.
- * When a source is missing or fails, that part keeps the last published
- * value and the snapshot says so. Nothing here throws.
+ * app accounts and delivered orders. The waitlist figure stays on the
+ * last published value. When a source is missing or fails, that part
+ * keeps its published value and the snapshot says so. Nothing here throws.
  *
  * The result holds aggregates and public transaction hashes only. Address
  * sets are counted and dropped; they never leave this module.
@@ -371,28 +371,8 @@ export async function readStellar(deps: LiveDeps): Promise<ChainRead> {
 
 // -------------------------------------------------------------- product --
 
-/** JSON number in `config`. Missing row, or a non-number, keeps the snapshot. */
-export const WAITLIST_CONFIG_KEY = 'waitlist_count';
-
-/**
- * Fixed query. Stellar is tried first, then Solana, so one row is enough.
- * The read-only role needs SELECT on `config.key` and `config.value` for this key.
- */
-export const WAITLIST_COUNT_SQL =
-  "select trunc((value #>> '{}')::numeric)::int as n from config where key = 'waitlist_count' and jsonb_typeof(value) = 'number' and (value #>> '{}')::numeric >= 0";
-
-export async function readWaitlist(deps: LiveDeps): Promise<number | null> {
-  if (!deps.count) return null;
-  for (const raw of [deps.env.STATS_STELLAR_DATABASE_URL, deps.env.STATS_SOLANA_DATABASE_URL]) {
-    const url = raw?.trim();
-    if (!url) continue;
-    try {
-      const n = await deps.count(url, WAITLIST_COUNT_SQL);
-      if (n !== null) return n;
-    } catch {
-      // The other database may still hold the row.
-    }
-  }
+/** The published waitlist figure. Signups are not counted from the database. */
+export async function readWaitlist(_deps: LiveDeps): Promise<number | null> {
   return null;
 }
 

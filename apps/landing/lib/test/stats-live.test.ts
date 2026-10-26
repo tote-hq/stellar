@@ -166,18 +166,14 @@ test('live snapshot reads both chains with zero secrets', async () => {
 
 test('the snapshot never carries an address list or a credential', async () => {
   const snap = await loadLiveSnapshot(
-    deps({
-      env: { STATS_STELLAR_DATABASE_URL: 'postgres://stellar' },
-      count: async (_url, sql) => (sql.includes("key = 'waitlist_count'") ? 42 : null),
-    }),
+    deps({ env: { STATS_STELLAR_DATABASE_URL: 'postgres://stellar' } }),
   );
   const text = JSON.stringify(snap);
   assert.equal(text.includes(BUYER_SOL), false);
   assert.equal(text.includes(BUYER_STL), false);
   assert.equal(text.includes('postgres://stellar'), false);
-  assert.equal(snap.totals.endUsers, 42);
-  assert.equal(snap.totals.endUsersDelta30d, null);
-  assert.equal(snap.sources.waitlist, 'live');
+  assert.equal(snap.totals.endUsers, FALLBACK_SNAPSHOT.totals.endUsers);
+  assert.equal(snap.sources.waitlist, 'snapshot');
 });
 
 test('one chain down keeps its published numbers and the other stays live', async () => {
@@ -200,17 +196,8 @@ test('everything down returns the published snapshot and never throws', async ()
   assert.equal(kpis('all', snap)[0]?.parts.some((p) => p.key === 'lastKnown'), false);
 });
 
-test('waitlist count is the config row; the database needs a configured URL', async () => {
+test('the waitlist figure is not read from the database', async () => {
   assert.equal(await readWaitlist(deps()), null);
-  assert.equal(
-    await readWaitlist(
-      deps({
-        env: { STATS_STELLAR_DATABASE_URL: 'postgres://stellar' },
-        count: async () => null,
-      }),
-    ),
-    null,
-  );
   assert.equal(
     await readWaitlist(
       deps({
@@ -218,10 +205,10 @@ test('waitlist count is the config row; the database needs a configured URL', as
           STATS_STELLAR_DATABASE_URL: 'postgres://stellar',
           STATS_SOLANA_DATABASE_URL: 'postgres://solana',
         },
-        count: async (url) => (url.endsWith('stellar') ? null : 9),
+        count: async () => 9,
       }),
     ),
-    9,
+    null,
   );
   assert.equal(await readAppDb(deps({ count: async () => 5 })), null);
   const seen: string[] = [];
