@@ -110,10 +110,6 @@ function mockFetch(options: { solanaDown?: boolean; stellarDown?: boolean } = {}
       return json({ transaction_hash: HASH(3), created_at: '2026-09-23T08:00:00Z', transaction_successful: true });
     }
     if (url.startsWith('https://api.github.com/')) return json({ total_count: 140 });
-    if (url.startsWith('https://kv.example/hlen/')) {
-      assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer test-token');
-      return json({ result: 42 });
-    }
     throw new Error(`unexpected ${url}`);
   }) as typeof fetch;
 }
@@ -170,13 +166,15 @@ test('live snapshot reads both chains with zero secrets', async () => {
 
 test('the snapshot never carries an address list or a credential', async () => {
   const snap = await loadLiveSnapshot(
-    deps({ env: { KV_REST_API_URL: 'https://kv.example', KV_REST_API_TOKEN: 'test-token' } }),
+    deps({
+      env: { STATS_STELLAR_DATABASE_URL: 'postgres://stellar' },
+      count: async (_url, sql) => (sql.includes("key = 'waitlist_count'") ? 42 : null),
+    }),
   );
   const text = JSON.stringify(snap);
   assert.equal(text.includes(BUYER_SOL), false);
   assert.equal(text.includes(BUYER_STL), false);
-  assert.equal(text.includes('test-token'), false);
-  assert.equal(text.includes('kv.example'), false);
+  assert.equal(text.includes('postgres://stellar'), false);
   assert.equal(snap.totals.endUsers, 42);
   assert.equal(snap.totals.endUsersDelta30d, null);
   assert.equal(snap.sources.waitlist, 'live');
@@ -202,9 +200,29 @@ test('everything down returns the published snapshot and never throws', async ()
   assert.equal(kpis('all', snap)[0]?.parts.some((p) => p.key === 'lastKnown'), false);
 });
 
-test('waitlist needs https and both variables; the database needs a configured URL', async () => {
-  assert.equal(await readWaitlist(deps({ env: { KV_REST_API_URL: 'https://kv.example' } })), null);
-  assert.equal(await readWaitlist(deps({ env: { KV_REST_API_URL: 'http://kv.example', KV_REST_API_TOKEN: 'x' } })), null);
+test('waitlist count is the config row; the database needs a configured URL', async () => {
+  assert.equal(await readWaitlist(deps()), null);
+  assert.equal(
+    await readWaitlist(
+      deps({
+        env: { STATS_STELLAR_DATABASE_URL: 'postgres://stellar' },
+        count: async () => null,
+      }),
+    ),
+    null,
+  );
+  assert.equal(
+    await readWaitlist(
+      deps({
+        env: {
+          STATS_STELLAR_DATABASE_URL: 'postgres://stellar',
+          STATS_SOLANA_DATABASE_URL: 'postgres://solana',
+        },
+        count: async (url) => (url.endsWith('stellar') ? null : 9),
+      }),
+    ),
+    9,
+  );
   assert.equal(await readAppDb(deps({ count: async () => 5 })), null);
   const seen: string[] = [];
   const db = await readAppDb(

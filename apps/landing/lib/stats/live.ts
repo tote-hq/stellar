@@ -3,10 +3,11 @@
  *
  * On-chain numbers come from public endpoints and need no secret: Solana
  * devnet JSON-RPC for the escrow program, Stellar Expert for Soroban contract
- * events, Horizon for Stellar transactions. Product numbers (waitlist, app
- * accounts, delivered orders) need server-only variables; when one is missing
- * or its source fails, that part keeps the last published value and the
- * snapshot says so. Nothing here throws: every source degrades on its own.
+ * events, Horizon for Stellar transactions. Product numbers come from
+ * Postgres (`STATS_STELLAR_DATABASE_URL`, `STATS_SOLANA_DATABASE_URL`):
+ * app accounts, delivered orders, and the waitlist count in `config`.
+ * When a source is missing or fails, that part keeps the last published
+ * value and the snapshot says so. Nothing here throws.
  *
  * The result holds aggregates and public transaction hashes only. Address
  * sets are counted and dropped; they never leave this module.
@@ -30,7 +31,6 @@ export const SOLANA_RPC = 'https://api.devnet.solana.com';
 export const STELLAR_EXPERT_API = 'https://api.stellar.expert/explorer/testnet';
 export const HORIZON = 'https://horizon-testnet.stellar.org';
 export const GITHUB_SEARCH = 'https://api.github.com/search/issues';
-export const WAITLIST_KEY = 'changuito:landing:waitlist';
 
 const TIMEOUT_MS = 8_000;
 const SOLANA_SIG_PAGES = 5;
@@ -371,15 +371,29 @@ export async function readStellar(deps: LiveDeps): Promise<ChainRead> {
 
 // -------------------------------------------------------------- product --
 
+/** JSON number in `config`. Missing row, or a non-number, keeps the snapshot. */
+export const WAITLIST_CONFIG_KEY = 'waitlist_count';
+
+/**
+ * Fixed query. Stellar is tried first, then Solana, so one row is enough.
+ * The read-only role needs SELECT on `config.key` and `config.value` for this key.
+ */
+export const WAITLIST_COUNT_SQL =
+  "select trunc((value #>> '{}')::numeric)::int as n from config where key = 'waitlist_count' and jsonb_typeof(value) = 'number' and (value #>> '{}')::numeric >= 0";
+
 export async function readWaitlist(deps: LiveDeps): Promise<number | null> {
-  const url = (deps.env.KV_REST_API_URL || deps.env.UPSTASH_REDIS_REST_URL || '').trim();
-  const token = (deps.env.KV_REST_API_READ_ONLY_TOKEN || deps.env.KV_REST_API_TOKEN || deps.env.UPSTASH_REDIS_REST_TOKEN || '').trim();
-  if (!url || !token || !url.startsWith('https://')) return null;
-  const body = (await getJson(deps, `${url.replace(/\/$/, '')}/hlen/${encodeURIComponent(WAITLIST_KEY)}`, {
-    headers: { authorization: `Bearer ${token}` },
-    cache: 'no-store',
-  })) as { result?: unknown };
-  return typeof body.result === 'number' ? body.result : null;
+  if (!deps.count) return null;
+  for (const raw of [deps.env.STATS_STELLAR_DATABASE_URL, deps.env.STATS_SOLANA_DATABASE_URL]) {
+    const url = raw?.trim();
+    if (!url) continue;
+    try {
+      const n = await deps.count(url, WAITLIST_COUNT_SQL);
+      if (n !== null) return n;
+    } catch {
+      // The other database may still hold the row.
+    }
+  }
+  return null;
 }
 
 export interface AppDbRead {

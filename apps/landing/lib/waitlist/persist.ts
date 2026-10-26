@@ -4,24 +4,16 @@ import { dirname, join } from 'node:path';
 import type { WaitlistEntry } from './validate.ts';
 
 /**
- * Durable sinks, in the order the landing can actually use them.
+ * Durable sink for a whitelist signup.
  *
- * The shopper already talks to Upstash Redis (`KV_REST_*` on Vercel, or
- * `UPSTASH_REDIS_REST_*`). The landing is a separate Vercel project and does
- * not inherit those variables, so Redis is used only when this project has
- * them. Otherwise a webhook is the durable path: point it at Notion, Sheets,
- * Slack or anything that accepts JSON. With neither set, production refuses
- * to pretend the signup was stored. Local dev appends a JSON line under
- * `.data/` so the form can be tried without credentials.
- *
- * The hash key is namespaced `changuito:landing:` so it does not collide with
- * shopper session keys if both apps share one Redis database.
+ * Production stores the signup by POSTing `WAITLIST_WEBHOOK_URL`. With that
+ * unset, production refuses to pretend the signup was stored. Local dev
+ * appends a JSON line under `.data/` so the form can be tried without a
+ * destination.
  */
 
-const HASH_KEY = 'changuito:landing:waitlist';
-
 export type SaveResult =
-  | { ok: true; sink: 'redis' | 'webhook' | 'file' }
+  | { ok: true; sink: 'webhook' | 'file' }
   | { ok: false; reason: 'unconfigured' | 'upstream' };
 
 export type SaveDeps = {
@@ -31,24 +23,7 @@ export type SaveDeps = {
 };
 
 export async function saveWaitlistEntry(entry: WaitlistEntry, deps: SaveDeps): Promise<SaveResult> {
-  const redis = redisCredentials(deps.env);
   const webhook = webhookTarget(deps.env);
-
-  if (redis) {
-    const saved = await saveRedis(redis, entry, deps.fetch);
-    if (saved) {
-      if (webhook) {
-        const notified = await postWebhook(webhook, entry, deps.fetch);
-        if (!notified) console.error('[waitlist] webhook notify failed after redis save');
-      }
-      return { ok: true, sink: 'redis' };
-    }
-    if (webhook) {
-      const notified = await postWebhook(webhook, entry, deps.fetch);
-      if (notified) return { ok: true, sink: 'webhook' };
-    }
-    return { ok: false, reason: 'upstream' };
-  }
 
   if (webhook) {
     const notified = await postWebhook(webhook, entry, deps.fetch);
@@ -56,9 +31,7 @@ export async function saveWaitlistEntry(entry: WaitlistEntry, deps: SaveDeps): P
   }
 
   if (deps.env.NODE_ENV === 'production') {
-    console.error(
-      '[waitlist] no sink configured. Set WAITLIST_WEBHOOK_URL or KV_REST_API_URL and KV_REST_API_TOKEN.',
-    );
+    console.error('[waitlist] no sink configured. Set WAITLIST_WEBHOOK_URL.');
     return { ok: false, reason: 'unconfigured' };
   }
 
@@ -72,16 +45,7 @@ export async function saveWaitlistEntry(entry: WaitlistEntry, deps: SaveDeps): P
   }
 }
 
-type RedisAuth = { url: string; token: string };
 type WebhookAuth = { url: string; secret?: string };
-
-function redisCredentials(env: NodeJS.ProcessEnv): RedisAuth | undefined {
-  const url = (env.KV_REST_API_URL || env.UPSTASH_REDIS_REST_URL || '').trim();
-  const token = (env.KV_REST_API_TOKEN || env.UPSTASH_REDIS_REST_TOKEN || '').trim();
-  if (!url || !token) return undefined;
-  if (!isHttps(url)) return undefined;
-  return { url: url.replace(/\/$/, ''), token };
-}
 
 function webhookTarget(env: NodeJS.ProcessEnv): WebhookAuth | undefined {
   const raw = (env.WAITLIST_WEBHOOK_URL || '').trim();
@@ -98,32 +62,6 @@ function webhookTarget(env: NodeJS.ProcessEnv): WebhookAuth | undefined {
     return { url: url.toString(), secret: secret || undefined };
   }
   return undefined;
-}
-
-async function saveRedis(auth: RedisAuth, entry: WaitlistEntry, fetchImpl: typeof fetch): Promise<boolean> {
-  try {
-    const result = await upstash(auth, ['HSETNX', HASH_KEY, entry.email, JSON.stringify(entry)], fetchImpl);
-    return result === 0 || result === 1;
-  } catch (error) {
-    console.error('[waitlist] redis save failed', error instanceof Error ? error.message : 'unknown');
-    return false;
-  }
-}
-
-async function upstash(auth: RedisAuth, command: string[], fetchImpl: typeof fetch): Promise<unknown> {
-  const response = await fetchImpl(auth.url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${auth.token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(command),
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!response.ok) throw new Error(`status ${response.status}`);
-  const payload = (await response.json()) as { result?: unknown; error?: string };
-  if (payload.error) throw new Error(payload.error);
-  return payload.result;
 }
 
 /**
@@ -222,14 +160,6 @@ function webhookRejectionDetail(payload: unknown): string | undefined {
   if (record.ok !== false) return undefined;
   if (typeof record.error === 'string' && record.error.trim()) return record.error.trim();
   return 'upstream';
-}
-
-function isHttps(value: string): boolean {
-  try {
-    return new URL(value).protocol === 'https:';
-  } catch {
-    return false;
-  }
 }
 
 async function defaultAppend(line: string): Promise<void> {
