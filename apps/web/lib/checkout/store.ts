@@ -1,6 +1,7 @@
 import { hasDatabase } from '../db.ts';
 import { kvGet, kvSet } from '../kv.ts';
 import { db } from '../db.ts';
+import type { ComparisonQuote } from './compare-fee.ts';
 import type { ManualState } from './manual-policy.ts';
 
 /**
@@ -45,6 +46,11 @@ export interface CheckoutRecord {
   createdAt: number;
   /** What the quote decided (lib/checkout/mode.ts). Absent on records from before it existed. */
   mode?: 'live' | 'demo' | 'mock';
+  /**
+   * Present when the shopper compared this Día basket. `amount` / `amountCents`
+   * include the fee. Absent on every other checkout, including the 0.10 preparation fee.
+   */
+  comparison?: ComparisonQuote;
 
   jobId?: string;
   /**

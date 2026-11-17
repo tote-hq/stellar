@@ -1176,6 +1176,16 @@ body:not(:has(.topbar)) .shell {
 .ck-total-line dt { font-size: 13px; color: var(--muted); }
 .ck-total-line dd { margin: 0; font-size: 14px; font-variant-numeric: tabular-nums; }
 .ck-total-sum { border-top: 1px solid var(--border); padding-top: 6px; }
+.ck-compare {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+}
+.ck-uncounted { margin: 0; padding-left: 1.1rem; font-size: 13px; color: var(--muted); }
+.ck-uncounted li { margin: 2px 0; }
 .ck-total-sum dt { color: var(--fg); }
 .ck-total-sum dd { font-size: 16px; font-weight: 600; }
 
