@@ -1,5 +1,7 @@
 /** Wire shapes shared by app/api/checkout/* and CheckoutModal. Types only. */
 
+import type { ComparisonQuote } from './compare-fee.ts';
+
 export interface QuoteResponse {
   checkoutKind?: 'manual_fee_v1';
   orderNonce?: string;
@@ -35,6 +37,11 @@ export interface QuoteResponse {
    * refunds and hands off to the cart link; `mock` is the operator's mock.
    */
   mode: 'live' | 'demo' | 'mock';
+  /**
+   * Set when this quote compared the Día basket with the Coto catalog.
+   * `amountCents` already includes `feeUsdCents`. Coto is not checked out.
+   */
+  comparison?: ComparisonQuote;
 }
 
 export type CheckoutStage = 'quoted' | 'locked' | 'shopping' | 'done' | 'refunded';

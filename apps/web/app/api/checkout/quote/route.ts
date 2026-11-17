@@ -1,5 +1,9 @@
 /**
- * POST /api/checkout/quote { cart, handoffUrl? }  ->  QuoteResponse
+ * POST /api/checkout/quote { cart, handoffUrl?, compare? }  ->  QuoteResponse
+ *
+ * `compare: true` is only a flag. The server looks up Día and the Coto catalog
+ * and prices the fee. The browser never sends a price. That quote skips the
+ * 0.10 preparation fee and locks the Día basket plus 20% of the matched gap.
  *
  * Turns the basket on screen into the arguments of `escrow.open`: a fresh
  * order id, the basket hash, and how much USDC to lock. The browser builds
@@ -13,9 +17,11 @@
  * instead of hiding it in a buffer. QUOTE_BUFFER (default 0) adds slack on
  * top if a window's price starts moving between quote and run.
  */
+import { compareBasket, cotoSearcher, diaLookup } from '@changuito/mcp/compare';
 import { arsToUsdCents } from '@changuito/mcp/fx';
 import type { Cart } from '@changuito/mcp/types';
 
+import { comparisonTotals, feeUsdFrom, type ComparisonQuote } from '../../../../lib/checkout/compare-fee.ts';
 import { quoteRate } from '../../../../lib/checkout/rate.ts';
 import { NO_DELIVERY, quoteShipping, type ShippingLocation } from '../../../../lib/checkout/shipping.ts';
 import { checkoutStore } from '../../../../lib/checkout/store.ts';
@@ -56,17 +62,24 @@ export async function POST(req: Request): Promise<Response> {
   if (!user.ok && user.mismatch) return sessionMismatchResponse(req);
   if (!user.ok) return Response.json({ error: 'Iniciá sesión para pagar.' }, { status: 401 });
 
-  const body = (await req.json().catch(() => null)) as { cart?: unknown; handoffUrl?: unknown; location?: unknown } | null;
+  const body = (await req.json().catch(() => null)) as {
+    cart?: unknown; handoffUrl?: unknown; location?: unknown; compare?: unknown;
+  } | null;
   if (!isCart(body?.cart)) return Response.json({ error: 'Falta el changuito.' }, { status: 400 });
   const cart = body.cart;
+  const compare = body.compare === true;
+  if (compare && cart.retailer !== 'dia') {
+    return Response.json({ error: 'La comparación solo está disponible para un changuito de Día.' }, { status: 400 });
+  }
   const lines = cart.lines.filter((l) => l.available && l.quantity > 0);
   if (lines.length === 0 || cart.total.centavos <= 0) {
     return Response.json({ error: 'El changuito está vacío.' }, { status: 400 });
   }
 
   // Resume funded sessions across a full app reload without another fee lock.
+  // A compared quote must not resume into the 0.10 record.
   const currentHash = toHex(await basketHash(cart));
-  if (hasDatabase()) {
+  if (!compare && hasDatabase()) {
     try {
       const rows = await db()`select record from manual_checkout where record->>'buyer'=${user.address}
         and record->>'basketHash'=${currentHash} and (record->>'openSig' is not null or record->>'jobId' is not null)
@@ -94,7 +107,8 @@ export async function POST(req: Request): Promise<Response> {
   const config = await getConfig();
   const access = await cardAccess(user.address, (await sandboxFlags()).mock);
   const mode = checkoutMode(access);
-  const manual = access === 'ok' && flagOn(config, 'manual_checkout_enabled');
+  // The compared basket locks goods plus the 20% fee. It is never the 0.10 preparation fee.
+  const manual = !compare && access === 'ok' && flagOn(config, 'manual_checkout_enabled');
   const manualFlow = memberFlow(manual, config);
   if (manual && (!hasDatabase() || !(await manualAvailable()))) {
     return Response.json({ error: 'El navegador de pago no está disponible. Probá más tarde.' }, { status: 503 });
@@ -132,7 +146,30 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ error: 'No pudimos cotizar el envío o el cambio. Probá de nuevo en un rato.' }, { status: 503 });
   }
   const totalCentavos = cart.total.centavos + shipping.centavos;
-  const cents = manual ? SERVICE_FEE_CENTS : arsToUsdCents(totalCentavos as never, rate.arsPerUsd, buffer()) as unknown as number;
+  let comparison: ComparisonQuote | undefined;
+  if (compare) {
+    try {
+      const rows = await compareBasket(
+        lines.map((l) => ({ skuId: l.skuId, name: l.name, quantity: l.quantity, lineTotal: l.lineTotal })),
+        diaLookup(location.postalCode),
+        cotoSearcher(),
+      );
+      const totals = comparisonTotals(rows);
+      comparison = {
+        ...totals,
+        rows,
+        feeUsdCents: feeUsdFrom(totals.feeCentavos, (centavos) => arsToUsdCents(centavos, rate.arsPerUsd, 0)),
+      };
+    } catch (err) {
+      console.warn('[checkout] compare failed', err instanceof Error ? err.name : 'error');
+      return Response.json(
+        { error: 'No pudimos cotizar la comparación con Coto. Podés pagar el changuito de Día igual.' },
+        { status: 503 },
+      );
+    }
+  }
+  const basketCents = arsToUsdCents(totalCentavos as never, rate.arsPerUsd, buffer()) as unknown as number;
+  const cents = manual ? SERVICE_FEE_CENTS : basketCents + (comparison?.feeUsdCents ?? 0);
   const nonce = newOrderId();
   const orderId = manual ? await serviceOrderId(user.address, nonce) : toHex(nonce);
   const units = manual ? SERVICE_FEE_UNITS : centsToUnits(Math.round(cents)).toString();
@@ -163,6 +200,7 @@ export async function POST(req: Request): Promise<Response> {
     createdAt: Date.now(),
     mode,
     ...(manualFlow ? { manualFlow } : {}),
+    ...(comparison ? { comparison } : {}),
   });
 
   const res: QuoteResponse = {
@@ -186,6 +224,7 @@ export async function POST(req: Request): Promise<Response> {
     programId: contractIds(DEFAULT_NETWORK).escrowId,
     usdcMint: contractIds(DEFAULT_NETWORK).usdcId,
     mode,
+    ...(comparison ? { comparison } : {}),
   };
   return Response.json(res);
 }
