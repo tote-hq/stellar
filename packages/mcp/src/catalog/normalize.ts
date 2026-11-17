@@ -35,7 +35,7 @@ export interface NameSize {
  * sees the same spans.
  */
 export const NET_UNIT =
-  'kilogramos?|kilos?|kgm|kgs?|gramos?|grs?|gr|g|mililitros?|mls?|ml|litros?|lts?|lt|l|metros?|mts?|mt|m|rollos?|unidades?|un|u|cc';
+  'kilogramos?|kilos?|kgm|kgs?|gramos?|grs?|gr|g|mililitros?|mls?|ml|litros?|ltrs?|lts?|lt|l|metros?|mts?|mt|m|rollos?|unidades?|un|u|cc';
 
 const NET_CONTENT_SOURCE =
   `\\b(?:\\d+(?:[.,]\\d+)?\\s*[x×]\\s*\\d+(?:[.,]\\d+)?\\s*(?:${NET_UNIT})|\\d+(?:[.,]\\d+)?\\s*(?:${NET_UNIT}))(?![a-z])`;
@@ -67,7 +67,7 @@ function parseAmount(raw: string): number {
   return Number.isFinite(n) ? n : Number.NaN;
 }
 
-/** kg/kgm/kilo → g, l/lt/litro → ml, cc → ml, un/u → u, m → m. */
+/** kg/kgm/kilo → g, l/lt/ltr/litro → ml, cc → ml, un/u → u, m → m. */
 function canonUnit(amount: number, unitRaw: string): SizeEach | null {
   if (!(amount > 0)) return null;
   const u = unitRaw.toLowerCase();
@@ -95,6 +95,8 @@ function canonUnit(amount: number, unitRaw: string): SizeEach | null {
     case 'l':
     case 'lt':
     case 'lts':
+    case 'ltr':
+    case 'ltrs':
     case 'litro':
     case 'litros':
       unit = 'ml';

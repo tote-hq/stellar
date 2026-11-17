@@ -208,6 +208,17 @@ describe('normalize', () => {
     assert.equal(bottles.each?.unit, 'ml');
   });
 
+  it('reads Coto litre spellings ltr and lt. as 1000 ml', () => {
+    const ltr = sizeFromName('Leche Entera 3% CASANTO 1 Ltr');
+    const lt = sizeFromName('Leche Entera 3% CASANTO 1 Lt.');
+    assert.ok(ltr && lt);
+    assert.equal(ltr.quantity, 1000);
+    assert.equal(ltr.unit, 'ml');
+    assert.equal(lt.quantity, 1000);
+    assert.equal(lt.unit, 'ml');
+    assert.ok(sizesEqual(ltr, lt));
+  });
+
   it('folds accents, case, and punctuation in a brand', () => {
     assert.equal(normalizeBrand('LA SERENÍSIMA'), normalizeBrand('La Serenisima'));
     assert.equal(normalizeBrand('  dos   hnos. '), 'DOS HNOS');
