@@ -14,20 +14,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { getAdapter } from './adapters/registry.js';
+import { discoverPublicKey } from './catalog/coto.js';
+import { sizeFromName } from './catalog/normalize.js';
+import { CATALOG_QUERIES as QUERIES } from './catalog/queries.js';
 import type { Product } from './types.js';
-
-const QUERIES = [
-  'leche entera',
-  'arroz largo fino',
-  'fideos spaghetti',
-  'aceite de girasol',
-  'azucar',
-  'yerba mate',
-  'harina 0000',
-  'huevos',
-  'pan lactal',
-  'papel higienico',
-] as const;
 
 const JUMBO_POSTAL = '1425';
 const TZ = 'America/Argentina/Buenos_Aires';
@@ -48,20 +38,6 @@ const ANONYMOUS_STORE = '200';
 
 const COTO_ENDPOINT =
   'GET https://ac.cnstrc.com/search/{query}?key=<public browser key>&section=Products&num_results_per_page=1';
-
-/**
- * Pack net content, as written in the product name.
- * Coto's `product_format_quantity` + `product_format` is the unit `formatPrice`
- * is quoted per (1 Kilo on a 500 g pack, 1 Litro on a 1.5 L bottle). Jumbo's
- * `unitMultiplier` + `measurementUnit` is the selling unit (`1 un`). Neither
- * is the pack's net content, and neither response has a field that carries it.
- */
-const NET_UNIT =
-  'kilogramos?|kgm|kgs?|gramos?|grs?|gr|g|mililitros?|mls?|ml|litros?|lts?|lt|l|metros?|mts?|mt|m|rollos?|unidades?|un|u|cc';
-const NET_CONTENT_RE = new RegExp(
-  `\\b(?:\\d+(?:[.,]\\d+)?\\s*[x×]\\s*\\d+(?:[.,]\\d+)?\\s*(?:${NET_UNIT})|\\d+(?:[.,]\\d+)?\\s*(?:${NET_UNIT}))(?![a-z])`,
-  'gi',
-);
 
 interface ProbeRow {
   query: string;
@@ -140,12 +116,6 @@ function asNumber(value: unknown): number | null {
   return null;
 }
 
-function sizeFromName(name: string): string | null {
-  const found = name.match(NET_CONTENT_RE);
-  if (!found?.length) return null;
-  return found.map((part) => part.replace(/\s+/g, ' ').trim()).join(' ');
-}
-
 function blankRow(query: string, notes: string): ProbeRow {
   return {
     query,
@@ -175,23 +145,6 @@ async function getText(url: string, accept: string): Promise<{ status: number; t
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   return { status: res.status, text: await res.text() };
-}
-
-/**
- * The public index key from the storefront's own bundle
- * (`constructor.apiKey` on www.coto.com.ar). No cookies, no session.
- */
-async function discoverPublicKey(): Promise<string> {
-  const home = await getText('https://www.coto.com.ar/', 'text/html');
-  if (home.status !== 200) throw new Error(`storefront HTTP ${home.status}`);
-  const main = home.text.match(/src="(\/main\.[a-f0-9]+\.js)"/);
-  if (!main?.[1]) throw new Error('storefront HTML had no main bundle');
-  await sleep(GAP_MS);
-  const bundle = await getText(`https://www.coto.com.ar${main[1]}`, '*/*');
-  if (bundle.status !== 200) throw new Error(`storefront bundle HTTP ${bundle.status}`);
-  const key = bundle.text.match(/constructor:\{apiKey:"(key_[A-Za-z0-9]+)"/);
-  if (!key?.[1]) throw new Error('storefront bundle had no public Constructor key');
-  return key[1];
 }
 
 function cotoRow(query: string, hit: CotoHit | undefined): ProbeRow {
@@ -236,7 +189,7 @@ function cotoRow(query: string, hit: CotoHit | undefined): ProbeRow {
   const brand = data.product_brand?.trim() ?? '';
   if (!brand) missing.push('brand');
 
-  const fromName = sizeFromName(name);
+  const fromName = sizeFromName(name)?.text ?? null;
   const size = fromName ? `from name: ${fromName}` : '';
   const hasSize = Boolean(fromName);
   if (!hasSize) missing.push('size');
@@ -291,7 +244,7 @@ async function probeCoto(query: string, key: string): Promise<ProbeRow> {
 }
 
 function jumboSize(p: Product): { text: string; hasSize: boolean } {
-  const fromName = sizeFromName(p.name);
+  const fromName = sizeFromName(p.name)?.text ?? null;
   if (fromName) return { text: `from name: ${fromName}`, hasSize: true };
   return { text: '—', hasSize: false };
 }
