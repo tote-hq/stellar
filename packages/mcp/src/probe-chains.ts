@@ -49,8 +49,19 @@ const ANONYMOUS_STORE = '200';
 const COTO_ENDPOINT =
   'GET https://ac.cnstrc.com/search/{query}?key=<public browser key>&section=Products&num_results_per_page=1';
 
-const SIZE_RE =
-  /\b(\d+(?:[.,]\d+)?\s?(?:kg|kgs|g|gr|grs|ml|lts?|litros?|cc|cm|mts?|rollos?|unidades?|un|u))\b/i;
+/**
+ * Pack net content, as written in the product name.
+ * Coto's `product_format_quantity` + `product_format` is the unit `formatPrice`
+ * is quoted per (1 Kilo on a 500 g pack, 1 Litro on a 1.5 L bottle). Jumbo's
+ * `unitMultiplier` + `measurementUnit` is the selling unit (`1 un`). Neither
+ * is the pack's net content, and neither response has a field that carries it.
+ */
+const NET_UNIT =
+  'kilogramos?|kgm|kgs?|gramos?|grs?|gr|g|mililitros?|mls?|ml|litros?|lts?|lt|l|metros?|mts?|mt|m|rollos?|unidades?|un|u|cc';
+const NET_CONTENT_RE = new RegExp(
+  `\\b(?:\\d+(?:[.,]\\d+)?\\s*[x×]\\s*\\d+(?:[.,]\\d+)?\\s*(?:${NET_UNIT})|\\d+(?:[.,]\\d+)?\\s*(?:${NET_UNIT}))(?![a-z])`,
+  'gi',
+);
 
 interface ProbeRow {
   query: string;
@@ -83,6 +94,7 @@ interface CotoHit {
     product_list_price?: number | string;
     product_main_ean?: string | number;
     product_brand?: string;
+    /** Unit `formatPrice` is quoted per. Not the pack's net content. */
     product_format?: string;
     product_format_quantity?: number;
     store_availability?: unknown;
@@ -129,8 +141,9 @@ function asNumber(value: unknown): number | null {
 }
 
 function sizeFromName(name: string): string | null {
-  const m = name.match(SIZE_RE);
-  return m?.[1]?.replace(/\s+/g, ' ') ?? null;
+  const found = name.match(NET_CONTENT_RE);
+  if (!found?.length) return null;
+  return found.map((part) => part.replace(/\s+/g, ' ').trim()).join(' ');
 }
 
 function blankRow(query: string, notes: string): ProbeRow {
@@ -223,22 +236,10 @@ function cotoRow(query: string, hit: CotoHit | undefined): ProbeRow {
   const brand = data.product_brand?.trim() ?? '';
   if (!brand) missing.push('brand');
 
-  let size = '';
-  let hasSize = false;
-  const format = data.product_format?.trim() ?? '';
-  const qty = data.product_format_quantity;
-  if ((typeof qty === 'number' && qty > 0) || format) {
-    size = [typeof qty === 'number' && qty > 0 ? plainNumber(qty) : '', format].filter(Boolean).join(' ');
-    hasSize = true;
-  } else {
-    const fromName = sizeFromName(name);
-    if (fromName) {
-      size = `from name: ${fromName}`;
-      hasSize = true;
-    } else {
-      missing.push('size');
-    }
-  }
+  const fromName = sizeFromName(name);
+  const size = fromName ? `from name: ${fromName}` : '';
+  const hasSize = Boolean(fromName);
+  if (!hasSize) missing.push('size');
 
   const availability = data.store_availability;
   let available = '—';
@@ -290,8 +291,6 @@ async function probeCoto(query: string, key: string): Promise<ProbeRow> {
 }
 
 function jumboSize(p: Product): { text: string; hasSize: boolean } {
-  const unit = p.measurementUnit?.trim();
-  if (p.unitMultiplier != null && unit) return { text: `${p.unitMultiplier} ${unit}`, hasSize: true };
   const fromName = sizeFromName(p.name);
   if (fromName) return { text: `from name: ${fromName}`, hasSize: true };
   return { text: '—', hasSize: false };
@@ -389,9 +388,10 @@ function render(when: string, coto: ProbeRow[], jumbo: ProbeRow[]): string {
     `Store ${ANONYMOUS_STORE} is chosen locally: it is the branch the public storefront uses when no address is saved, and that row is already in the response.`,
     'If that row has no positive listPrice, the shelf falls back to `data.product_list_price` and the row says so.',
     'List price is `data.product_list_price` when it differs from the shelf.',
-    'EAN is `data.product_main_ean`. Brand is `data.product_brand`. Size is `data.product_format_quantity` plus `data.product_format`.',
+    'EAN is `data.product_main_ean`. Brand is `data.product_brand`.',
+    'Size is the pack net content, taken from the product name (`value`) and marked `from name`.',
+    'The response has no net-content field. `data.product_format_quantity` and `data.product_format` are the unit `formatPrice` is quoted per, and are not the size.',
     `Available is whether "${ANONYMOUS_STORE}" is in \`data.store_availability\`.`,
-    'A size taken from the product name is marked `from name`.',
     '',
     '## Coto',
     '',
@@ -402,7 +402,8 @@ function render(when: string, coto: ProbeRow[], jumbo: ProbeRow[]): string {
     '## Jumbo',
     '',
     `Existing VTEX adapter: \`getAdapter('jumbo').resolveLocation('${JUMBO_POSTAL}')\`, then \`search(query, ctx, { limit: 5 })\`. Top result only. No price check and no cart.`,
-    'Shelf price is `price.display`. List price is `listPrice.display` when the adapter set one. EAN is `ean`. Brand is `brand`. Size is `unitMultiplier` plus `measurementUnit`, otherwise from the name (marked). Available is `available`.',
+    'Shelf price is `price.display`. List price is `listPrice.display` when the adapter set one. EAN is `ean`. Brand is `brand`.',
+    'Size is the pack net content, taken from `name` and marked `from name`. `unitMultiplier` and `measurementUnit` are the selling unit, and Product has no net-content field, so they are not the size. Available is `available`.',
     '',
     table(jumbo),
     '',
