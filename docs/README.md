@@ -19,7 +19,7 @@ Elsewhere in the repo:
 
 - [`../README.md`](../README.md) — what changuito is, the deployed contract ids,
   and what was verified on testnet.
-- [`../DEPLOY.md`](../DEPLOY.md) — deploying the contracts, then the app on Vercel.
+- [`../DEPLOY.md`](../DEPLOY.md) — deploying the contracts, then the app on Cloudflare Workers.
 - [`../CLAUDE.md`](../CLAUDE.md) — how the agent's behaviour was arrived at, and
   which decisions not to undo.
 - [`../packages/mcp/VENDORED.md`](../packages/mcp/VENDORED.md) — what changed in

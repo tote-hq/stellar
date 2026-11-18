@@ -8,7 +8,7 @@
  *   1. A second copy of the SDK means two sets of XDR classes in one process,
  *      and `instanceof` stops working across the seam. The bindings must use
  *      the exact version apps/web resolves.
- *   2. A dist build is a build step Vercel would have to be told about. Next
+ *   2. A dist build is a build step the app build would have to be told about. Next
  *      already compiles workspace sources via transpilePackages, so pointing
  *      `exports` at src/ removes the step entirely.
  *   3. The generated README tells you to run that build, which is now wrong.

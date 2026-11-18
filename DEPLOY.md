@@ -1,7 +1,7 @@
 # Deploying changuito
 
 Two halves, in this order: the contracts on Stellar testnet, then the app on
-Vercel. The contracts are already deployed and their ids are committed in
+Cloudflare Workers. The contracts are already deployed and their ids are committed in
 `deployments.json`, so **if you are only deploying the app, skip to part 2.**
 
 ---
@@ -160,12 +160,12 @@ escrow; it is simply no longer on the deposit rail.
 
 ---
 
-## Part 2W — the app on Cloudflare Workers
+## Part 2 — the app on Cloudflare Workers
 
 The app is the Worker **`changuito-web`**, which owns `app.changuito.me`.
 It is deployed by **Workers Builds** from this repository's `main` branch,
-not from a laptop. Everything in Part 2 about *which* variables exist still
-applies; only where they are set changes.
+not from a laptop. Which variables exist, and what each name means, is under
+[Variables and services](#variables-and-services) below.
 
 The build is vinext on Vite (`apps/web/vite.config.ts`, `worker.ts`,
 `cloudflare.config.ts`). It needs **Node 22.18 or newer**, because the config
@@ -270,10 +270,7 @@ binding's connection string onto it for each request.
 
 ---
 
-## Part 2 — the app on Vercel
-
-Vercel is the previous host and the Stellar projects there are blocked. The
-variable tables below are still the reference for what each name means.
+### Variables and services
 
 ### 2.1 Get the two API keys
 
@@ -298,64 +295,12 @@ set rather than a variable of its own. In the dashboard, on that testnet app:
 The mainnet key (`NEXT_PUBLIC_POLLAR_API_KEY_MAINNET`) stays empty on a
 testnet deployment; with the testnet key set it is not read for sign-in.
 
-### 2.2 Import the repository
-
-In Vercel: **Add New → Project**, import `tote-hq/stellar`.
-
-| Setting | Value |
-|---|---|
-| Framework preset | Next.js |
-| Root directory | `apps/web` |
-| Build command | *(leave as the default)* |
-| Install command | *(leave as the default)* |
-| Node.js version | **22.x** |
-
-Two of these are not optional:
-
-- **Root directory `apps/web`.** It is a workspace, and Vercel still installs
-  from the repo root, so the MCP package and the bindings resolve normally.
-- **Node 22.x.** `@stellar/stellar-sdk@17` requires ≥ 22.12 and the install
-  fails outright on 20.
-
-### 2.3 Preview and production
-
-One deployment, one URL, two apps — and **which one a visitor is in is decided
-by whether Pollar has a session**, evaluated in the browser (`lib/app-mode.ts`).
-
-| | **preview** | **production** |
-|---|---|---|
-| who is it | nobody signed in | a Pollar session |
-| network | testnet | the network of the Pollar key — **testnet** while D1 runs |
-| who pays | **the demo wallet, server-signed** | their own wallet |
-| money | the USDC issued in [1.6](#16-issue-the-testnet-usdc-preview-pays-with) | testnet USDC while D1 runs; real Circle USDC on mainnet |
-| Postgres | **never touched** | chat, orders, the card binding |
-| the card | one per código, given back with the basket | one per customer, kept |
-
-**Signing in *is* the crossing.** There is no mode variable, no toggle and no
-second deployment, and there must not be one: a mode derived from the session
-cannot disagree with who you are, which deletes the entire class of bug where
-somebody spends real money in what the screen calls the demo. The control
-beside the balance is a read-only badge saying which of the two you are in.
-
-Preview exists so that anyone with the link can search, fill a basket, watch a
-**real on-chain payment settle and a real card appear** without connecting
-anything. It is a demo with a ledger behind it, not a mock: the only step that
-differs from production is who signs the payment.
-
-Two consequences worth knowing before you configure anything:
-
-- **A deployment that sets only the preview half is complete**, not broken. No
-  Pollar key, no Vyrion key and no database still gives you the whole demo;
-  what is missing is the way out of it, and the sign-in button says so.
-- **A guest who runs out of free turns is told to sign in**, which now means
-  "switch to spending real money". That is the honest crossing and the copy
-  names it. Raise `FREE_TURNS` if the demo feels cramped — the ceiling is your
-  Anthropic bill on a public URL, held back by Turnstile and the per-IP cap.
-
 ### 2.4 Environment variables
 
-Under **Settings → Environment Variables**, for Production *and* Preview.
-Grouped by which of the two apps needs them.
+On the Worker (`changuito-web` → Settings → Variables and Secrets). A
+`NEXT_PUBLIC_*` name is a build variable instead, from the table above,
+because it is inlined into the bundle. Grouped by which of the two apps
+needs them.
 
 **Always:**
 
@@ -445,7 +390,7 @@ Production only. Preview writes nothing, by design and by construction — there
 is no proven address in preview, so `archiveChat` answers `'guest'`, the card
 binding has no owner to key on, and the order table is never reached.
 
-1. **supabase.com → New project.** Region: match your Vercel functions.
+1. **supabase.com → New project.** Region: the same region as the Worker.
 2. **Project Settings → Database → Connection string.** Take both: the
    *transaction pooler* on port **6543** and the *direct* connection on **5432**.
 3. Put them in `apps/web/.env` locally as `DATABASE_URL` and `DIRECT_URL`, with
@@ -458,15 +403,17 @@ npm run db:status      # what is applied, what is pending
 npm run db:invariants  # the constraints, against the real database
 ```
 
-5. In Vercel, set **`DATABASE_URL` only**. Migrations are a laptop operation.
-   Workers Builds does not run them and does not need `DIRECT_URL`.
+5. On the Worker, do not set **`DATABASE_URL`** by hand. `worker.ts` copies
+   the Hyperdrive binding's connection string onto it for each request.
+   Migrations are a laptop operation. Workers Builds does not run them and
+   does not need `DIRECT_URL`.
 
 **The 6543/5432 difference is the part that fails only under load**, which is
 why it is spelled out here rather than left to the connection-string picker.
 6543 is transaction-mode pooling: a connection is held for one statement and
-given back, which is exactly the shape of a lambda per request. 5432 is a
-session, which DDL and advisory locks need and which a request handler must
-never open — `lib/db.ts` reads `DATABASE_URL` and deliberately does not read
+given back, which is exactly the shape of one request at a time on a Worker.
+5432 is a session, which DDL and advisory locks need and which a request
+handler must never open — `lib/db.ts` reads `DATABASE_URL` and deliberately does not read
 `DIRECT_URL`, because a route that quietly took a session connection would work
 perfectly in development and exhaust the database at traffic rather than at
 deploy.
@@ -504,36 +451,12 @@ use the REST names, not `REDIS_URL` or `KV_URL`: those are `rediss://` strings
 for a TCP client. A database created at upstash.com names the same endpoint
 `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`; both are read.
 
-### 2.7 Deploy a preview first
-
-Push to a branch, let Vercel build it, and check on the preview URL before
-promoting.
-
-The rate comes back:
-
-```bash
-curl "https://<preview>/api/quote?centavos=1234500"
-```
-
-And the chat **streams** rather than arriving in one lump. If it arrives all at
-once something is buffering the SSE response — the route sets
-`X-Accel-Buffering: no` for exactly this, and the runtime must be `nodejs`,
-never edge.
-
-Then walk preview end to end, which is the whole point of it: load with no
-session, build a basket, pay with the demo wallet, watch the deposit go from
-waiting to confirmed, and see the card. Then open the payment on Horizon and
-confirm it is **`USDC:<issuer>` with the código in the memo** — not XLM, and
-not a Soroban event. Then confirm no row landed in `chat`, `orders` or
-`card_owner`.
-
-Then **Promote to Production**.
-
 ### 2.8 Who may pay
 
 `REAL_MODE_ALLOWLIST_ADDRESSES` decides who may pay with real money. Same
 format and the same deny-by-default rule as the old faucet list: empty in
-production means nobody, Previews included. It is enforced **after** the
+production means nobody. The Worker sets `NODE_ENV=production`, so that is
+the live app. It is enforced **after** the
 wallet's SEP-53 signature is verified, so it is checked against a proven
 address rather than a claimed one. Passkey wallets (`C…`) cannot sign that
 message, so testers need a custodial `G…` account.
@@ -612,7 +535,7 @@ different moments. There is now one, and nothing left to disagree with it.
 
 `AGENT_PROVIDER`, `OLLAMA_URL`, `OLLAMA_MODEL`, `OLLAMA_HEADERS`,
 `OLLAMA_LANES`, `OLLAMA_FIRST_BYTE_MS` and `OLLAMA_KEEP_ALIVE` are read by
-nothing. Delete them from Vercel; leaving them is harmless but misleading.
+nothing. Delete them from the Worker's variables; leaving them is harmless but misleading.
 
 ### 3.1 The two knobs that are left
 
@@ -649,21 +572,19 @@ console, which is how you check the second one is working rather than assuming.
 
 ## Part 4 — www.changuito.me
 
-The marketing site is a second Vercel project. It is `apps/landing`
-(`@changuito/landing`), not a route inside `apps/web`. Do not point
-`www.changuito.me` at the shopper project, and do not point `app.changuito.me`
-at the landing.
+The marketing site is `apps/landing` (`@changuito/landing`), not a route
+inside `apps/web`. Do not point `www.changuito.me` at the shopper app, and do
+not point `app.changuito.me` at the landing. The landing has no Workers
+config in this repo.
 
-| Setting | Value |
+| | |
 |---|---|
-| Framework preset | Next.js |
 | Root directory | `apps/landing` |
-| Install / build | defaults (install from the repo root, `next build` in this package) |
-| Node.js version | **22.x** |
-| Environment variables | none |
+| Node.js | **22** (the repo's `.nvmrc`) |
+| Build | `npm run build -w @changuito/landing` |
+| Variables | Turnstile and the waitlist webhook for `/whitelist`; analytics ids are optional. Names are in [apps/landing/README.md](apps/landing/README.md) |
 
-Details, including the manual install/build commands if Vercel does not detect
-the workspace, are in [apps/landing/README.md](apps/landing/README.md). Locally:
+Locally:
 
 ```bash
 npm run dev -w @changuito/landing     # http://localhost:3125

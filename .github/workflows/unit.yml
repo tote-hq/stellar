@@ -1,15 +1,17 @@
-# Unit tests on every pull request and on every push to main.
+# Unit tests once per pull request; docs-only changes skip it.
+# The local gate (tests, typecheck, build, gitleaks) is the real check.
 # Playwright is not a GitHub workflow. Run it locally with npm run test:e2e.
 name: Unit
 
 on:
   pull_request:
-  push:
-    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
 
 concurrency:
   group: unit-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

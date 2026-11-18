@@ -63,7 +63,7 @@ deposit account.
 | Identity is proven, not claimed | [`apps/web/lib/wallet-proof-verify.ts`](../apps/web/lib/wallet-proof-verify.ts) (SEP-53) and the four gates that use it: `deposit-gate`, `network-access`, `faucet-auth`, `settle-gate` |
 | A deposit can buy exactly one card | [`apps/web/lib/card.ts`](../apps/web/lib/card.ts) — the claim is a conditional `UPDATE … where card_id is null`, not a read-then-write, because two tabs pressing the button together is the ordinary case |
 | Card numbers are never written down | `card.ts` header, and `e2e/app-frame-checkout.spec.ts`, which asserts no PAN or CVV reaches `localStorage` or `sessionStorage` and runs with traces off |
-| Mainnet is closed by default | [`apps/web/lib/network-access.ts`](../apps/web/lib/network-access.ts) — in production an empty allowlist means nobody, and Vercel previews run as production |
+| Mainnet is closed by default | [`apps/web/lib/network-access.ts`](../apps/web/lib/network-access.ts) — in production an empty allowlist means nobody. The Worker sets `NODE_ENV=production`, so that is the live app |
 | The contracts do what the README says | [§5](#5-verify-it-yourself) — ask the deployed wasm, not the source |
 
 ## 4. What is real, and what is not

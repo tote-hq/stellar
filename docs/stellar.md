@@ -128,8 +128,8 @@ address — no session store, no shared secret, no account.
 and only the first one was ever asked for. Dropping the signature costs a
 logged-in shopper nothing and costs a script the whole exercise.
 
-Deny by default: in production an empty allowlist means nobody, which also covers
-Vercel previews, since those run as production too. Testnet is never gated; it is
+Deny by default: in production an empty allowlist means nobody. The Worker
+sets `NODE_ENV=production`, so that is the live app. Testnet is never gated; it is
 the default and it cannot spend anything.
 
 ---
@@ -319,5 +319,5 @@ the suite rather than the demo.
 confusing class of build error, and the protocol accepts an older env meta
 version than the ledger's anyway. If you upgrade the CLI, move the pin with it.
 
-Node must be **≥ 22.12** — `@stellar/stellar-sdk@17` requires it, and on Vercel
-the project's Node version has to be set explicitly or the install fails.
+Node must be **≥ 22.12** — `@stellar/stellar-sdk@17` requires it. Workers Builds
+reads `.nvmrc`; the vinext config loader needs 22.18 or newer.

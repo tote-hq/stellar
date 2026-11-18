@@ -23,11 +23,11 @@ function nonempty(value: unknown): string {
 /**
  * Turnstile env.
  *
- * Next and Vercel only ship a variable that the source mentions as
+ * Next only inlines a variable the source mentions as
  * `process.env.NAME`. A bracket lookup alone is invisible to that pass, so
  * production reported both keys missing and the shopper never mounted the
  * widget. The literal member expressions below are the ones the bundler sees.
- * Bracket access still wins when the lambda has a runtime value the build
+ * Bracket access still wins when the Worker has a runtime binding the build
  * did not inline.
  *
  * The secret is what makes the gate real. The site key is public and is what
