@@ -1,3 +1,4 @@
+import { readConsent, type ConsentChoice } from './consent.ts';
 import { POSTHOG_PROXY_PATH } from './posthog-path.ts';
 
 /**
@@ -16,6 +17,11 @@ import { POSTHOG_PROXY_PATH } from './posthog-path.ts';
  * Decline after Accept opts the running client out and does not import
  * again. `identify` takes the random `analytics_id` only — a `G…` address
  * is refused, because that string is the wallet.
+ *
+ * `reset()` clears PostHog's own consent and returns to the opted-out
+ * default. Logout still calls it, then opts back in and starts recording
+ * when `chg_consent` is still `granted`, so signing out does not turn
+ * measurement off.
  */
 
 export const POSTHOG_KEY = (process.env.NEXT_PUBLIC_POSTHOG_KEY ?? '').trim();
@@ -23,6 +29,12 @@ export const POSTHOG_KEY = (process.env.NEXT_PUBLIC_POSTHOG_KEY ?? '').trim();
 /** Read at call time. Next still inlines the literal; tests can set the env before a call. */
 function currentKey(): string {
   return (process.env.NEXT_PUBLIC_POSTHOG_KEY ?? '').trim();
+}
+
+/** The first-party cookie, read where the banner wrote it. No `document` means no choice. */
+function browserConsent(): ConsentChoice | null {
+  const doc = (globalThis as { document?: { cookie?: string } }).document;
+  return readConsent(doc?.cookie);
 }
 
 type CaptureValue = string | number | boolean;
@@ -123,7 +135,7 @@ function clientRunning(injected?: PostHogClient): PostHogClient | null {
  * client), then opts in. `null` and `denied` do not import and do not call
  * `init`. A decline after an accept in the same page opts the running client
  * out. A decline that arrives while that first import is still in flight is
- * remembered, so `init` is not called when the import settles.
+ * remembered, so the client does not opt in when the import settles.
  */
 export function applyPostHogConsent(
   choice: 'granted' | 'denied' | null,
@@ -159,16 +171,10 @@ export function initPostHog(injected?: PostHogClient, key: string = currentKey()
   loading = true;
   void import('posthog-js')
     .then((mod) => {
-      loading = false;
-      // `init()` always fetches remote config. A decline that landed while
-      // this import was in flight must not start that request.
-      if (pending === 'out') {
-        pending = null;
-        return;
-      }
       const ph = mod.default as unknown as PostHogClient;
       ph.init(projectKey, initOptions());
       active = ph;
+      loading = false;
       applyPending();
       notifyReady();
     })
@@ -210,7 +216,11 @@ export function identifyWallet(analyticsId: unknown, injected?: PostHogClient, k
 
 export function resetPostHog(): void {
   pendingId = null;
-  active?.reset();
+  if (!active) return;
+  active.reset();
+  if (browserConsent() !== 'granted') return;
+  active.opt_in_capturing();
+  active.startSessionRecording();
 }
 
 export function capturePostHog(event: string, props?: Record<string, CaptureValue>): void {

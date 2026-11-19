@@ -7,12 +7,28 @@ import {
   identifyWallet,
   initOptions,
   initPostHog,
+  resetPostHog,
   type PostHogClient,
   type PostHogInitOptions,
 } from '../posthog.ts';
 
 const UUID = '11111111-1111-4111-8111-111111111111';
 const ADDRESS = `G${'A'.repeat(55)}`;
+
+type CookieHost = { document?: { cookie: string } };
+
+function withCookie(cookie: string, run: () => void): void {
+  const host = globalThis as CookieHost;
+  const previous = host.document;
+  host.document = { cookie };
+  try {
+    run();
+  } finally {
+    if (previous === undefined) delete host.document;
+    else host.document = previous;
+  }
+}
+
 
 describe('posthog client', { concurrency: 1 }, () => {
   test('an empty key does nothing, and a set key identifies only a uuid', () => {
@@ -113,6 +129,41 @@ describe('posthog client', { concurrency: 1 }, () => {
       applyPostHogConsent('denied', client);
       assert.equal(inits.length, 1);
       assert.equal(calls[calls.length - 1], 'out');
+    } finally {
+      if (previous === undefined) delete process.env.NEXT_PUBLIC_POSTHOG_KEY;
+      else process.env.NEXT_PUBLIC_POSTHOG_KEY = previous;
+    }
+  });
+
+  test('logout reset opts back in while consent stays granted', () => {
+    const previous = process.env.NEXT_PUBLIC_POSTHOG_KEY;
+    process.env.NEXT_PUBLIC_POSTHOG_KEY = 'phc_test';
+    const calls: string[] = [];
+    const client: PostHogClient = {
+      init() {},
+      opt_in_capturing() {
+        calls.push('opt_in');
+      },
+      opt_out_capturing() {},
+      startSessionRecording() {
+        calls.push('record');
+      },
+      identify() {},
+      reset() {
+        calls.push('reset');
+      },
+      capture() {},
+    };
+    initPostHog(client);
+    try {
+      for (const cookie of ['', 'chg_consent=denied']) {
+        calls.length = 0;
+        withCookie(cookie, () => resetPostHog());
+        assert.deepEqual(calls, ['reset'], cookie || 'unset');
+      }
+      calls.length = 0;
+      withCookie('chg_consent=granted', () => resetPostHog());
+      assert.deepEqual(calls, ['reset', 'opt_in', 'record']);
     } finally {
       if (previous === undefined) delete process.env.NEXT_PUBLIC_POSTHOG_KEY;
       else process.env.NEXT_PUBLIC_POSTHOG_KEY = previous;
