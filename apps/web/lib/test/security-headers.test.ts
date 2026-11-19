@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { DEPLOYMENTS, NETWORK_IDS } from '../deployments.ts';
 import { appContentSecurityPolicy, appSecurityHeaders, fixtureSecurityHeaders } from '../security-headers.ts';
 
-const none = { ga: '', meta: '', clarity: '' };
+const none = { ga: '', meta: '', clarity: '', posthog: false };
 const header = (name: string, env = 'production') =>
   appSecurityHeaders(env, none).find((h) => h.key === name)?.value;
 

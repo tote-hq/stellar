@@ -207,7 +207,7 @@ function PayWithPollar({ cart, handoffUrl, onClose, onOpened }: Props) {
   }
 
   return (
-    <div className="modal-backdrop" onClick={() => phase !== 'signing' && onClose()}>
+    <div className="modal-backdrop ph-no-capture" onClick={() => phase !== 'signing' && onClose()}>
       <section
         className="modal"
         role="dialog"

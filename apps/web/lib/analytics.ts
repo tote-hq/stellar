@@ -1,10 +1,16 @@
 /**
- * Free analytics for the shopper. GA4, Meta Pixel and Microsoft Clarity.
+ * Free analytics for the shopper. GA4, Meta Pixel, Microsoft Clarity and PostHog.
  *
- * Empty or malformed public ids mean the whole module is a no-op: no
- * scripts, no queued events, no thrown errors. Props are coarse on purpose.
- * Email, names, message text, cart lines and payment amounts never leave.
+ * Empty or malformed public ids mean that vendor is a no-op: no scripts, no
+ * queued events, no thrown errors. PostHog is on when `NEXT_PUBLIC_POSTHOG_KEY`
+ * is non-empty. Nothing is sent until the shopper accepts (`chg_consent=granted`).
+ * A decline, or no choice yet, drops the event instead of queueing it, so a
+ * later accept cannot describe a moment from before the choice. Props are
+ * coarse on purpose. Email, names, message text, cart lines and payment
+ * amounts never leave.
  */
+import { readConsent } from './consent.ts';
+import { capturePostHog, posthogReady } from './posthog.ts';
 
 export type AnalyticsValue = string | number | boolean;
 
@@ -12,12 +18,15 @@ export interface AnalyticsIds {
   ga: string;
   meta: string;
   clarity: string;
+  /** True when `NEXT_PUBLIC_POSTHOG_KEY` is non-empty. The key itself stays out of events. */
+  posthog: boolean;
 }
 
 export interface AnalyticsSink {
   gtag?: (command: string, name: string, params?: Record<string, AnalyticsValue>) => void;
   fbq?: (command: string, name: string, params?: Record<string, AnalyticsValue>) => void;
   clarity?: (command: string, name: string) => void;
+  posthog?: (event: string, props?: Record<string, AnalyticsValue>) => void;
 }
 
 const GA_ID = /^G-[A-Z0-9]+$/;
@@ -58,11 +67,17 @@ export function matchAnalyticsId(raw: string | undefined, pattern: RegExp): stri
   return pattern.test(value) ? value : '';
 }
 
-export function readAnalyticsIds(env: { ga?: string; meta?: string; clarity?: string }): AnalyticsIds {
+export function readAnalyticsIds(env: {
+  ga?: string;
+  meta?: string;
+  clarity?: string;
+  posthog?: string;
+}): AnalyticsIds {
   return {
     ga: matchAnalyticsId(env.ga, GA_ID),
     meta: matchAnalyticsId(env.meta, META_ID),
     clarity: matchAnalyticsId(env.clarity, CLARITY_ID),
+    posthog: (env.posthog ?? '').trim().length > 0,
   };
 }
 
@@ -74,10 +89,11 @@ export const ANALYTICS_IDS = readAnalyticsIds({
   ga: process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID,
   meta: process.env.NEXT_PUBLIC_META_PIXEL_ID,
   clarity: process.env.NEXT_PUBLIC_CLARITY_PROJECT_ID,
+  posthog: process.env.NEXT_PUBLIC_POSTHOG_KEY,
 });
 
 export function analyticsConfigured(ids: AnalyticsIds = ANALYTICS_IDS): boolean {
-  return Boolean(ids.ga || ids.meta || ids.clarity);
+  return Boolean(ids.ga || ids.meta || ids.clarity || ids.posthog);
 }
 
 export function sanitizeProps(
@@ -150,6 +166,7 @@ export function emitAnalytics(
     else sink.fbq('trackCustom', event, safe);
   }
   if (ids.clarity && sink.clarity) sink.clarity('event', event);
+  if (ids.posthog && sink.posthog) sink.posthog(event, safe);
 }
 
 interface AnalyticsWindow {
@@ -158,38 +175,67 @@ interface AnalyticsWindow {
   clarity?: AnalyticsSink['clarity'];
 }
 
+interface PageGlobals {
+  window?: AnalyticsWindow;
+  document?: { cookie: string };
+}
+
 const pending: Array<{ event: string; props?: Record<string, unknown> }> = [];
 
-function browserSink(): AnalyticsSink {
-  const w = window as unknown as AnalyticsWindow;
-  return { gtag: w.gtag, fbq: w.fbq, clarity: w.clarity };
+function globals(): { window: AnalyticsWindow; document: { cookie: string } } | null {
+  const host = globalThis as PageGlobals;
+  if (!host.window || !host.document) return null;
+  return { window: host.window, document: host.document };
+}
+
+function browserSink(win: AnalyticsWindow, ids: AnalyticsIds): AnalyticsSink {
+  return {
+    gtag: win.gtag,
+    fbq: win.fbq,
+    clarity: win.clarity,
+    posthog: ids.posthog && posthogReady() ? (event, props) => capturePostHog(event, props) : undefined,
+  };
 }
 
 function vendorsReady(ids: AnalyticsIds, sink: AnalyticsSink): boolean {
   if (ids.ga && typeof sink.gtag !== 'function') return false;
   if (ids.meta && typeof sink.fbq !== 'function') return false;
   if (ids.clarity && typeof sink.clarity !== 'function') return false;
+  if (ids.posthog && typeof sink.posthog !== 'function') return false;
   return true;
 }
 
-export function track(event: string, props?: Record<string, unknown>): void {
-  if (!analyticsConfigured()) return;
-  if (typeof window === 'undefined') return;
-  const sink = browserSink();
-  if (!vendorsReady(ANALYTICS_IDS, sink)) {
+export function track(
+  event: string,
+  props?: Record<string, unknown>,
+  ids: AnalyticsIds = ANALYTICS_IDS,
+  sink?: AnalyticsSink,
+): void {
+  const here = globals();
+  if (!here || !analyticsConfigured(ids)) return;
+  // Before the choice, and after a decline, the event is gone. Queueing it
+  // would send a description of a moment the shopper had not agreed to.
+  if (readConsent(here.document.cookie) !== 'granted') return;
+  const resolved = sink ?? browserSink(here.window, ids);
+  if (!vendorsReady(ids, resolved)) {
     if (pending.length < 32) pending.push({ event, props });
     return;
   }
-  emitAnalytics(event, props, ANALYTICS_IDS, sink);
+  emitAnalytics(event, props, ids, resolved);
 }
 
 /** Called once each vendor snippet has defined its function. */
-export function flushAnalytics(): void {
-  if (!analyticsConfigured() || typeof window === 'undefined') return;
-  const sink = browserSink();
-  if (!vendorsReady(ANALYTICS_IDS, sink)) return;
+export function flushAnalytics(ids: AnalyticsIds = ANALYTICS_IDS, sink?: AnalyticsSink): void {
+  const here = globals();
+  if (!here || !analyticsConfigured(ids)) return;
+  if (readConsent(here.document.cookie) !== 'granted') {
+    pending.length = 0;
+    return;
+  }
+  const resolved = sink ?? browserSink(here.window, ids);
+  if (!vendorsReady(ids, resolved)) return;
   const batch = pending.splice(0, pending.length);
-  for (const item of batch) emitAnalytics(item.event, item.props, ANALYTICS_IDS, sink);
+  for (const item of batch) emitAnalytics(item.event, item.props, ids, resolved);
 }
 
 export function trackLoginStart(open?: () => void): void {

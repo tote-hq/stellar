@@ -67,7 +67,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang={HTML_LANG[lang]} className={inter.variable}>
       <body className={inter.className}>
-        <Analytics />
+        <Analytics initialLang={lang} />
         <ViewportLock />
         {children}
       </body>

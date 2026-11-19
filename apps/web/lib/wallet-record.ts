@@ -21,9 +21,14 @@ export interface WalletStanding {
   banned: boolean;
   /** False when this process did not read or write a row. */
   stored: boolean;
+  /**
+   * Random id PostHog may use as a distinct id. Null when this process did
+   * not read a row, or the row has none yet. Never the wallet address.
+   */
+  analyticsId: string | null;
 }
 
-const OPEN = { faucetAllowed: false, banned: false, stored: false } as const;
+const OPEN = { faucetAllowed: false, banned: false, stored: false, analyticsId: null } as const;
 
 export function walletNetwork(env: NodeJS.ProcessEnv = process.env): NetworkId {
   return (
@@ -34,8 +39,18 @@ export function walletNetwork(env: NodeJS.ProcessEnv = process.env): NetworkId {
   );
 }
 
-function standingOf(network: NetworkId, row: { faucet_allowed: boolean; banned: boolean }): WalletStanding {
-  return { network, faucetAllowed: row.faucet_allowed === true, banned: row.banned === true, stored: true };
+function standingOf(
+  network: NetworkId,
+  row: { faucet_allowed: boolean; banned: boolean; analytics_id?: string | null },
+): WalletStanding {
+  const analyticsId = typeof row.analytics_id === 'string' && row.analytics_id.length > 0 ? row.analytics_id : null;
+  return {
+    network,
+    faucetAllowed: row.faucet_allowed === true,
+    banned: row.banned === true,
+    stored: true,
+    analyticsId,
+  };
 }
 
 /**
@@ -51,6 +66,10 @@ export interface WalletDirectory {
 /**
  * Insert the wallet the first time it signs in. An existing row is returned
  * unchanged, including a ban or a faucet grant written before this login.
+ *
+ * `analytics_id` is a random UUID, set on insert and filled in on a later
+ * login only when it is still null. An unconditional `on conflict do update`
+ * would also fire `wallet_touch` and rewrite `updated_at` on every login.
  */
 export async function registerWallet(
   address: string,
@@ -63,15 +82,21 @@ export async function registerWallet(
   if (!hasDatabase(env)) return { network, ...OPEN };
   try {
     const inserted = await db(env)`
-      insert into wallet (network, address)
-      values (${network}, ${address})
+      insert into wallet (network, address, analytics_id)
+      values (${network}, ${address}, gen_random_uuid())
       on conflict (network, address) do nothing
-      returning faucet_allowed, banned`;
-    if (inserted.length > 0) return standingOf(network, inserted[0] as { faucet_allowed: boolean; banned: boolean });
+      returning faucet_allowed, banned, analytics_id`;
+    if (inserted.length > 0) return standingOf(network, inserted[0] as { faucet_allowed: boolean; banned: boolean; analytics_id: string | null });
+    const filled = await db(env)`
+      update wallet
+      set analytics_id = gen_random_uuid()
+      where network = ${network} and address = ${address} and analytics_id is null
+      returning faucet_allowed, banned, analytics_id`;
+    if (filled.length > 0) return standingOf(network, filled[0] as { faucet_allowed: boolean; banned: boolean; analytics_id: string | null });
     const existing = await db(env)`
-      select faucet_allowed, banned from wallet
+      select faucet_allowed, banned, analytics_id from wallet
       where network = ${network} and address = ${address}`;
-    const row = existing[0] as { faucet_allowed: boolean; banned: boolean } | undefined;
+    const row = existing[0] as { faucet_allowed: boolean; banned: boolean; analytics_id: string | null } | undefined;
     if (!row) return { network, ...OPEN };
     return standingOf(network, row);
   } catch (err) {
@@ -95,9 +120,9 @@ export async function walletStanding(
   if (!hasDatabase(env)) return { network, ...OPEN };
   try {
     const rows = await db(env)`
-      select faucet_allowed, banned from wallet
+      select faucet_allowed, banned, analytics_id from wallet
       where network = ${network} and address = ${address}`;
-    const row = rows[0] as { faucet_allowed: boolean; banned: boolean } | undefined;
+    const row = rows[0] as { faucet_allowed: boolean; banned: boolean; analytics_id: string | null } | undefined;
     if (!row) return { network, ...OPEN };
     return standingOf(network, row);
   } catch (err) {

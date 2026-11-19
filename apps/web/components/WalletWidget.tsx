@@ -8,6 +8,7 @@ import { usdcAmount } from '../lib/faucet-copy.ts';
 import { modeCopyFor, previewMasthead } from '../lib/mode-copy.ts';
 import { OPEN_FAUCET_EVENT } from '../lib/onboarding.ts';
 import { initials, profileCopy } from '../lib/profile-copy.ts';
+import { resetPostHog } from '../lib/posthog.ts';
 import { ensureUserCookie, forgetUserCookie } from '../lib/session-login.ts';
 import { postFaucet } from '../lib/faucet-client.ts';
 import { wipeLocalAccount } from '../lib/local-account.ts';
@@ -108,6 +109,7 @@ export function WalletWidget() {
     setShowingProfile(false);
     forgetUserCookie();
     wipeLocalAccount();
+    resetPostHog();
     void fetch('/api/session/logout', { method: 'POST', credentials: 'same-origin' })
       .catch(() => null)
       .then(() => wallet.logout())
@@ -162,7 +164,13 @@ export function WalletWidget() {
     const android = wallet.androidChoices && wallet.enabled;
     return (
       <div
-        className={android ? 'topbar-wallet is-android' : wallet.enabled ? 'topbar-wallet' : 'topbar-wallet wallet-off'}
+        className={
+          android
+            ? 'topbar-wallet is-android ph-no-capture'
+            : wallet.enabled
+              ? 'topbar-wallet ph-no-capture'
+              : 'topbar-wallet wallet-off ph-no-capture'
+        }
         title={wallet.enabled ? undefined : 'Falta NEXT_PUBLIC_POLLAR_API_KEY. Ver DEPLOY.md'}
       >
         {android ? (
@@ -242,7 +250,7 @@ export function WalletWidget() {
   }
 
   return (
-    <div className="topbar-wallet">
+    <div className="topbar-wallet ph-no-capture">
       {wallet.androidChoices && wallet.kind === 'privy' ? (
         <button
           type="button"

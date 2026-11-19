@@ -1,3 +1,4 @@
+import { identifyWallet } from './posthog.ts';
 import { signWalletProof, type WalletSigner } from './wallet-proof.ts';
 
 /** What `fetchAs` asks for. On this chain that is the wallet signer, not a bearer token. */
@@ -22,7 +23,7 @@ export type TokenSource = WalletSigner;
  * mint we already counted as done. Logout bumps a generation so an in-flight
  * response from the session that just ended cannot resurrect that cookie.
  *
- * Its one relative import names its extension, so the module still loads
+ * Its relative imports name their extension, so the module still loads
  * under `node --experimental-strip-types`.
  */
 
@@ -40,7 +41,21 @@ function start(address: string, sign: WalletSigner): Promise<boolean> {
             headers: { 'content-type': 'application/json', accept: 'application/json' },
             credentials: 'same-origin',
             body: JSON.stringify({ address, proof }),
-          }).then((r) => r.ok && gen === generation)
+          }).then(async (r) => {
+            if (!r.ok || gen !== generation) return false;
+            let analyticsId: unknown;
+            try {
+              const body = (await r.json()) as { analyticsId?: unknown } | null;
+              analyticsId = body?.analyticsId;
+            } catch {
+              analyticsId = undefined;
+            }
+            // Logout during the read bumps the generation. A stale response
+            // must not identify the session that just ended.
+            if (gen !== generation) return false;
+            if (typeof analyticsId === 'string') identifyWallet(analyticsId);
+            return true;
+          })
         : false,
     )
     .catch(() => false)

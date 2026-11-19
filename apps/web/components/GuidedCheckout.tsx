@@ -164,16 +164,20 @@ export function GuidedCheckout({ orderId, flow, status, pesos, cardSent, onUpdat
     {(screen === 'card' || screen === 'browser') && active ? (
       <p aria-live="off">{words.session}: {clock}</p>
     ) : null}
-    {showFrame ? <iframe
-      key={screen}
-      ref={frame}
-      src={src}
-      title={screen === 'browser' ? words.browserFrame(pesos) : words.formFrame}
-      data-part={screen === 'browser' ? 'screen' : 'form'}
-      className={screen === 'browser' ? 'ck-flow-frame ck-flow-browser' : frameStyles.formFrame}
-      referrerPolicy="origin"
-      sandbox="allow-scripts allow-same-origin"
-    /> : null}
+    {showFrame ? (
+      <div className="ph-no-capture">
+        <iframe
+          key={screen}
+          ref={frame}
+          src={src}
+          title={screen === 'browser' ? words.browserFrame(pesos) : words.formFrame}
+          data-part={screen === 'browser' ? 'screen' : 'form'}
+          className={screen === 'browser' ? 'ck-flow-frame ck-flow-browser' : frameStyles.formFrame}
+          referrerPolicy="origin"
+          sandbox="allow-scripts allow-same-origin"
+        />
+      </div>
+    ) : null}
     {screen === 'card' && cardReady ? (
       <div className="modal-actions">
         <button type="button" className="btn" onClick={() => onCard()}>{words.continueToStore}</button>

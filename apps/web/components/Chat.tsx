@@ -438,7 +438,7 @@ function ChatCore({
     <div className={state.blocks.length === 0 ? 'chat is-empty' : 'chat'}>
       <div
         ref={thread}
-        className="thread"
+        className="thread ph-no-capture"
         data-testid="chat-thread"
         role="log"
         aria-live="polite"
