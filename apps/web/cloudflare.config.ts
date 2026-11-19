@@ -6,6 +6,7 @@ const publicNames = [
   "NEXT_PUBLIC_GA_MEASUREMENT_ID",
   "NEXT_PUBLIC_META_PIXEL_ID",
   "NEXT_PUBLIC_CLARITY_PROJECT_ID",
+  "NEXT_PUBLIC_POSTHOG_KEY",
 ] as const;
 
 // Present only for the machine that builds. Absent keys stay on the dashboard
