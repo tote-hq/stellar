@@ -70,43 +70,6 @@ export interface CheckoutCopy {
   openTabNote: string;
   paidCta: string;
   checking: string;
-  /** The optional card we provide — per basket in preview, one per customer in
-   *  production, which is why these three are set per mode rather than shared.
-   *  Optional in the copy too: the frame already takes the shopper's own card,
-   *  and this must never read as the only way. */
-  cardTitle: string;
-  cardLead: string;
-  cardCta: string;
-  cardMinting: string;
-  /**
-   * The returning customer, production only. There is one card per person, so
-   * a second deposit tops up the first — and somebody who is shown "Generar
-   * una tarjeta" again will reasonably conclude they are about to be given a
-   * second one, which is the one thing the product promises not to do.
-   *
-   * Empty in the test mode, where the card really is per-basket and there is
-   * nothing to come back to.
-   */
-  cardAgainLead: string;
-  cardAgainCta: string;
-  /** Under the numbers. Says where they live, which is nowhere. */
-  cardNote: string;
-  cardNumberLabel: string;
-  cardExpiryLabel: string;
-  cardCvvLabel: string;
-  cardFunded: string;
-  /** The default reason, when the server has none worth reading out. */
-  cardError: string;
-  /** Printed under every card failure, whatever the reason: the frame still
-   *  takes the shopper's own card, so no failure here is a dead end. */
-  cardFallback: string;
-  otpTitle: string;
-  /** The field's own label, under the heading that already said it once. */
-  otpLabel: string;
-  otpWaiting: string;
-  /** The code is on screen and running out; the countdown is beside it. */
-  otpLead: string;
-  otpExpired: string;
   /** Shown when the store corroborates. Deliberately not "confirmamos tu pago". */
   verified: string;
   /** Shown when it does not, which is not the same as "you did not pay". */
@@ -155,11 +118,6 @@ export interface CheckoutCopy {
   driftNow: string;
   /** Never an accusation, and never a promise of a refund nobody automated. */
   driftLead: string;
-  /**
-   * Above the card at the last step. Says what to pay with it — **never that
-   * it was loaded or topped up**, because on this deployment nothing was: the
-   * card is loaded by hand and this flow does not touch it. */
-  cardReadyLead: string;
   /** The rehearsal is not reading a real súper and should not imply it is. */
   rehearsalNote: string;
 }
@@ -192,19 +150,6 @@ const COMMON = {
   verified: 'El súper nos confirma que el changuito se cerró.',
   unverified: 'El súper todavía nos muestra el changuito abierto. Si ya pagaste, seguí igual y revisalo en tu cuenta del súper.',
   unreachable: 'No pudimos chequearlo con el súper en este momento.',
-  cardMinting: 'Generando…',
-  cardAgainLead: '',
-  cardAgainCta: '',
-  cardNumberLabel: 'Número',
-  cardExpiryLabel: 'Vence',
-  cardCvvLabel: 'Código de seguridad',
-  cardError: 'No pudimos generar la tarjeta.',
-  cardFallback: 'Podés pagar con la tuya en el formulario del súper.',
-  otpTitle: 'Código que te pide el súper',
-  otpLabel: 'Código',
-  otpWaiting: 'Si el súper te pide un código para confirmar, aparece acá.',
-  otpLead: 'Ponelo en el formulario del súper antes de que venza.',
-  otpExpired: 'Ese código venció. Pedí uno nuevo desde el formulario del súper y esperá acá.',
   stepLogin: 'Entrá a tu cuenta',
   stepDelivery: 'Elegí el envío',
   stepPay: 'Pagá el importe',
@@ -221,7 +166,6 @@ const COMMON = {
   driftPaid: 'Pagaste',
   driftNow: 'Ahora dice',
   driftLead: 'Revisá el changuito antes de pagar en el súper. Si no te cierra, escribinos.',
-  cardReadyLead: 'Usá esta tarjeta en el formulario del súper para pagar ese importe.',
   rehearsalNote: '',
 } as const;
 
@@ -239,12 +183,7 @@ const PRUEBA: CheckoutCopy = {
   // Per basket here, and it really does close with the window: preview has no
   // session, so no owner, so `keepsOneCard` is false and the card really is
   // born for this basket. This is the only mode that may say so.
-  cardTitle: 'Tarjeta de un solo uso',
-  cardLead: 'Podés pagar con tu tarjeta de siempre en el formulario del súper. O, si preferís no ponerla, te damos una que sirve una sola vez y nada más que para esta compra.',
-  cardCta: 'Generar una tarjeta',
   // Per basket here, and it really does close with the window.
-  cardNote: 'Copiala en el formulario del súper. No la guardamos en ningún lado: cuando cerrás esta ventana, la tarjeta se cierra con ella.',
-  cardFunded: 'Tiene justo el importe de esta compra y no se puede usar para otra cosa.',
   refundNote: 'Es una prueba, así que no se mueve plata real.',
   failed: 'Algo salió mal. Como es una prueba, no hay nada que devolver.',
   rehearsalNote: 'Es una prueba: no estamos mirando un súper de verdad, así que el importe sale del changuito.',
@@ -271,19 +210,12 @@ const REAL: CheckoutCopy = {
   // done since `keepsOneCard` landed. The old shared wording called it single
   // use, and a shopper who read it and then saw the same last4 twice would be
   // right to wonder which of the two the app was lying about.
-  cardTitle: 'Tu tarjeta para el súper',
-  cardLead: 'Podés pagar con tu tarjeta de siempre en el formulario del súper. O, si preferís no ponerla, te damos una tuya que usás en cada compra.',
-  cardCta: 'Generar mi tarjeta',
-  cardAgainLead: 'Es la misma de siempre: le sumamos el importe de esta compra y seguís con ella.',
-  cardAgainCta: 'Usar mi tarjeta',
   // Not "se cierra con la ventana": this one does not. The numbers still live
   // nowhere — they are asked for again each time the card is shown — and that
   // is the promise this sentence has to keep without overclaiming the rest.
-  cardNote: 'Copiala en el formulario del súper. No la guardamos en ningún lado: cada vez que la necesites te la mostramos de nuevo.',
   // The balance, not the basket. A kept card can carry change from the last
   // shop, so "justo el importe de esta compra" would be wrong about the one
   // number the shopper is looking at.
-  cardFunded: 'Ese es el saldo que tiene ahora, y solo sirve para el súper.',
   // No automated outbound payment exists, and none is going to be implied.
   refundNote: 'Si algo sale mal, te devolvemos el importe a mano. No es automático.',
   failed: 'No pudimos completar la compra. Escribinos y te devolvemos el importe a mano.',
@@ -314,13 +246,6 @@ export function checkoutCopy(net: NetworkId, lang: Lang = DEFAULT_LANG): Checkou
  * - `unverified` never reads as "you did not pay".
  * - `openTabNote` reads as an equal path, not a failure.
  * - `memoNote` says the code is not optional.
- * - `cardLead` names the shopper's own card first, in both modes, because the
- *   frame takes it for free and a deployment with no card provider still works.
- * - `cardNote` promises the numbers are not kept, and **only the practice mode**
- *   says the card dies with the window — in real mode it does not, and a shopper
- *   who believed it would not come back for a card that still has money.
- * - `cardFunded` is this basket's amount in practice and the card's *current
- *   balance* in real mode, because a kept card carries change.
  * - The one-press pay words exist only in the mode where the money is the
  *   shopper's, and the demo-pay words only where it is ours. Empty, not absent:
  *   the panels key off the emptiness.
@@ -358,19 +283,6 @@ const COMMON_EN = {
   unverified:
     'The store still shows the cart as open. If you have already paid, carry on and check it in your store account.',
   unreachable: "We couldn't check with the store just now.",
-  cardMinting: 'Creating…',
-  cardAgainLead: '',
-  cardAgainCta: '',
-  cardNumberLabel: 'Number',
-  cardExpiryLabel: 'Expires',
-  cardCvvLabel: 'Security code',
-  cardError: "We couldn't create the card.",
-  cardFallback: "You can pay with your own in the store's form.",
-  otpTitle: 'The code the store asks you for',
-  otpLabel: 'Code',
-  otpWaiting: 'If the store asks for a code to confirm, it appears here.',
-  otpLead: "Put it in the store's form before it expires.",
-  otpExpired: "That code expired. Ask for a new one from the store's form and wait here.",
   stepLogin: 'Sign in',
   stepDelivery: 'Choose delivery',
   stepPay: 'Pay the amount',
@@ -388,7 +300,6 @@ const COMMON_EN = {
   driftPaid: 'You paid',
   driftNow: 'Now it says',
   driftLead: 'Check the cart before paying at the store. If it does not add up, write to us.',
-  cardReadyLead: "Use this card in the store's form to pay that amount.",
   rehearsalNote: '',
 } as const;
 
@@ -399,15 +310,6 @@ const PRACTICE_EN: CheckoutCopy = {
   demoPayCta: 'Pay with our money',
   demoPayWorking: 'Paying…',
   demoPayError: "We couldn't make the practice payment. Try again.",
-  // The only mode allowed to say the card dies with the window, because here
-  // it does: no session, so no owner, so `keepsOneCard` is false.
-  cardTitle: 'Single-use card',
-  cardLead:
-    "You can pay with your usual card in the store's form. Or, if you'd rather not enter it, we'll give you one that works once and only for this purchase.",
-  cardCta: 'Create a card',
-  cardNote:
-    "Copy it into the store's form. We don't save it anywhere: when you close this window, the card closes with it.",
-  cardFunded: "It holds exactly this purchase's amount and cannot be used for anything else.",
   refundNote: "This is practice, so no real money moves.",
   failed: "Something went wrong. Since this is practice, there's nothing to refund.",
   rehearsalNote:
@@ -425,18 +327,6 @@ const LIVE_EN: CheckoutCopy = {
   walletPayError: "We couldn't make the payment. Try again.",
   // Points nowhere: there is no funding control in this dialog.
   walletPayShort: "Your balance isn't enough for this payment.",
-  cardTitle: 'Your card for the store',
-  cardLead:
-    "You can pay with your usual card in the store's form. Or, if you'd rather not enter it, we'll give you one of your own that you use on every purchase.",
-  cardCta: 'Create my card',
-  cardAgainLead: "It's the same one as always: we add this purchase's amount and you carry on with it.",
-  cardAgainCta: 'Use my card',
-  // Not "closes with the window": this one does not. The numbers still live
-  // nowhere, which is the promise this sentence keeps without overclaiming.
-  cardNote:
-    "Copy it into the store's form. We don't save it anywhere: every time you need it we show it to you again.",
-  // The balance, not the basket. A kept card can carry change.
-  cardFunded: "That's the balance it has right now, and it only works at the store.",
   refundNote: "If something goes wrong we refund the amount by hand. It isn't automatic.",
   failed: "We couldn't complete the purchase. Write to us and we'll refund the amount by hand.",
 };

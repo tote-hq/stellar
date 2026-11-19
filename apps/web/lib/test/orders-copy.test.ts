@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { keptCardCopy, orderStatus, purchasesCopy } from '../orders-copy.ts';
+import { orderStatus, purchasesCopy } from '../orders-copy.ts';
 
 /** Same keys in both languages. Values are not compared. */
 function assertSameKeys(a: unknown, b: unknown, path: string): void {
@@ -32,7 +32,6 @@ function assertSameKeys(a: unknown, b: unknown, path: string): void {
 describe('orders copy', () => {
   it('every key exists in both languages', () => {
     assertSameKeys(purchasesCopy('es'), purchasesCopy('en'), 'purchases');
-    assertSameKeys(keptCardCopy('es'), keptCardCopy('en'), 'keptCard');
     assertSameKeys(orderStatus('es'), orderStatus('en'), 'status');
   });
 });

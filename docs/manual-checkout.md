@@ -5,8 +5,9 @@ same authenticated browser through an interactive noVNC iframe.
 
 ## Product and fee policy
 
-- Current shared-card members are eligible, but manual jobs never retrieve or
-  receive the operator's card. The shopper enters their own payment details.
+- The allowlist is `shared_card_member` for the default network. The table name
+  is historical. A member may open a manual checkout and type their own card
+  into Día. The server never reads `shared_card` or a card number.
 - Only **0.10 test USDC on Stellar testnet** is escrowed. DIA charges groceries and
   delivery separately in pesos; its final amount is reviewed in its checkout.
 - The worker earns the fee when the complete basket, approved delivery and a

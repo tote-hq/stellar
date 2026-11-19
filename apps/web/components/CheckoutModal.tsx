@@ -36,22 +36,24 @@ import { flowLabels, flowRailIndex, flowScreen } from '../lib/checkout/flow.ts';
  *                pays the fee and sends. The USDC is
  *                now in a vault the program owns, not in an account of ours.
  *   3. shop    — the server starts a sandbox job (services/sandbox) that logs
- *                into the shopper's Día account, fills the cart, picks the
- *                delivery and pays with the operator's card. This dialog
- *                polls /api/checkout/status, which reports the phase.
+ *                into the shopper's Día account, fills the cart and picks the
+ *                delivery. This dialog polls /api/checkout/status, which
+ *                reports the phase. The job does not carry a card.
  *   4. done    — Día placed the order: the resolver settled the escrow to the
- *                treasury. Anything else, a declined card included, refunds.
+ *                treasury. Anything else refunds.
  *
- * The quote says which run this is (`mode`, lib/shared-card.ts):
+ * The quote says which run this is (`mode`, lib/checkout/mode.ts):
  *
  *   - `live` / `mock`: the sandbox logs into the shopper's Día account, so the
  *     Día login has to be in their profile first. When it is not, this dialog
  *     asks for it and saves it (/api/profile, encrypted) *before* anything is
  *     locked; the start route decrypts it. The password lives in this
  *     component's state until that one request, and never in chat-store.
- *   - `demo`: a wallet not on the shared card's member list. No Día login; the
- *     run stops at payment, the USDC comes back, and the last step hands off
- *     to the cart link so the shopper finishes in Día.
+ *     `live` here is an admitted manual checkout, which leaves this path
+ *     before the sandbox job. `mock` is the operator's rehearsal.
+ *   - `demo`: every other wallet. No Día login; the run stops at payment, the
+ *     USDC comes back, and the last step hands off to the cart link so the
+ *     shopper finishes in Día.
  *
  * The dialog never decides an outcome. Every stage after `lock` is what the
  * server read from the chain or the sandbox, and the server reads the chain

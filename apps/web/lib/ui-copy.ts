@@ -241,12 +241,6 @@ export interface CheckoutUiCopy {
   prepareOffline: string;
 }
 
-export interface CardFaceCopy {
-  number: string;
-  expiry: string;
-  cvv: string;
-}
-
 export interface UiCopy {
   cart: CartCopy;
   rail: RailCopy;
@@ -259,7 +253,6 @@ export interface UiCopy {
   chat: ChatCopy;
   gate: GateCopy;
   checkout: CheckoutUiCopy;
-  card: CardFaceCopy;
   /** Every dialog's ✕. One key, because it is one word. */
   close: string;
   purchasesUnconfigured: string;
@@ -464,11 +457,6 @@ const ES: UiCopy = {
     sessionFailed: 'No pudimos confirmar tu sesión. Probá de nuevo.',
     prepareFailed: 'No pudimos preparar el pago.',
     prepareOffline: 'No pudimos preparar el pago. Revisá la conexión y volvé a intentar.',
-  },
-  card: {
-    number: 'Número',
-    expiry: 'Vence',
-    cvv: 'CVV',
   },
   close: 'Cerrar',
   purchasesUnconfigured: 'Falta configurar el inicio de sesión en esta instalación.',
@@ -677,11 +665,6 @@ const EN: UiCopy = {
     sessionFailed: "We couldn't confirm your session. Try again.",
     prepareFailed: "We couldn't set up the payment.",
     prepareOffline: "We couldn't set up the payment. Check your connection and try again.",
-  },
-  card: {
-    number: 'Number',
-    expiry: 'Expires',
-    cvv: 'CVV',
   },
   close: 'Close',
   purchasesUnconfigured: 'Signing in has not been configured in this installation.',

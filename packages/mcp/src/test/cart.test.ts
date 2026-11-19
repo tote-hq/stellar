@@ -6,7 +6,7 @@ import { payableTotal, toCart, type VtexOrderForm } from '../adapters/orderform.
 import { buildCart, fetchOrderForm, setQuantity } from '../checkout/cart.js';
 import { loadConfig } from '../config.js';
 
-const cfg = loadConfig({ VYRION_API_KEY: 'sk_test_x', SECRETS_DIR: '/tmp/s' });
+const cfg = loadConfig({ SECRETS_DIR: '/tmp/s' });
 const OF_ID = '9f2c1b0e4d5a4f7c8e1b2a3c4d5e6f70';
 
 interface Recorded { method: string; url: string; data?: unknown }

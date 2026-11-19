@@ -10,8 +10,8 @@
  * ## Why no signature
  *
  * Every other route that takes a memo either moves money or hands back
- * something a stranger would want: `POST /api/card` mints a funded card,
- * `POST /api/orders` lists what somebody buys. This one sets a status. It
+ * something a stranger would want. `POST /api/orders` lists what somebody
+ * buys. This one sets a status. It
  * cannot mark an order paid — `markDone` only moves `paid`/`carded` → `done`
  * and no code path anywhere lets a request choose a status — so the worst a
  * caller who guessed a memo achieves is closing a shop that was already over.
@@ -21,8 +21,7 @@
  * take longer than that, and the failure mode would be a wallet prompt on top
  * of a receipt. The memo carries what protection is warranted — `mintMemo`
  * draws from the CSPRNG — and `requireHuman` keeps the route off the open
- * internet, the same two things `POST /api/card` relies on for a much larger
- * effect.
+ * internet.
  *
  * ## Why preview gets a 200
  *

@@ -2,19 +2,18 @@
 
 The optional [manual checkout mode](manual-checkout.md) prepares this same
 browser for shopper-controlled payment and charges only a preparation fee.
-It defaults off. The full-basket/shared-card behavior below describes legacy
+It defaults off. The full-basket behavior below describes legacy
 checkouts, not manual service-fee orders.
 
 `services/sandbox` is the part of changuito that goes to the supermarket. After
 the shopper's USDC is locked in the escrow, it logs into **the shopper's own
 Día account** in a headless browser, empties the cart, adds the basket by SKU,
-attaches the delivery address and window, opens the payment step, and pays
-with **the operator's card** (the `shared_card` row, sent in the job). The escrow settles only when Día
+attaches the delivery address and window, and opens the payment step. A job
+may still carry a card; this app no longer sends one. The escrow settles only when Día
 places the order; anything else refunds.
 
 **The sandbox can place real orders.** It presses "Finalizar compra" only when
-the job carries a card, which the web app reads from `shared_card` (migration
-0004) at checkout start. Without a row it
+the job carries a card. This app no longer sends one. Without a card the worker
 stops at the payment step, the order endpoints stay aborted at the network
 level, and the escrow refunds. The gate is the card itself, not a separate
 flag: a flag naming a resource can outlive the resource (CLAUDE.md §5).
@@ -126,11 +125,9 @@ Content-Type: application/json
 `shopper` lives on the in-memory job until the run ends and is then deleted.
 `GET /jobs/{id}` never returns it, `repr()` of it prints `<redacted>`, and its
 values are redacted from everything Jev reads and everything the run prints.
-`card` is optional: `{pan, cvv, exp_month, exp_year, holder, kind}` from the
-`shared_card` row, sent only when the shopper's wallet is on
-`shared_card_member` for that row's network. Manage the list with `npm run
-members` (`list`, `add <address> [note]`, `remove <address>`). A wallet that
-is not on it never reaches this service: it gets the web app's demo run (the
+`card` is optional: `{pan, cvv, exp_month, exp_year, holder, kind}`. This app
+no longer sends one. A wallet that is not on an admitted manual checkout never
+reaches this service: it gets the web app's demo run (the
 in-process mock, whatever `config` says), which stops at payment, settles the
 (testnet) escrow to the treasury, and
 hands the shopper the cart link to finish in Día. Same rules as `shopper` — in memory for the run, deleted
@@ -323,8 +320,8 @@ chromium`, then `uvicorn server:app` on `$PORT` (default 8080).
 3. Deploy; check `GET https://<service>/health` returns `{"ok": true, …}`.
 4. In the web app (the Worker) set `SANDBOX_URL=https://<service>` and the same
    `SANDBOX_TOKEN`, and `npm run config -- set sandbox_mock false`.
-5. Make sure `shared_card` has the card (a `testnet` or `mainnet` row), and
-   allow the wallets that may buy with it: `npm run members -- add <address> <who>`. Everyone else gets the demo run: up to payment, then settled.
+5. Wallets on `shared_card_member` for the default network may open a manual
+   checkout. Everyone else gets the demo run: up to payment, then settled.
 
 ## Run locally
 

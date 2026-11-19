@@ -24,7 +24,7 @@ automated is stated by us, before you find it.
 | **Contracts** | escrow [`CCA3ES6A…JG7EX`](https://stellar.expert/explorer/testnet/contract/CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX) *(testnet, mintable `mock_usdc`, mounted on the login-network checkout)* · mintable USDC [`CAOPLEE4…BNN3E`](https://stellar.expert/explorer/testnet/contract/CAOPLEE4NVOVEBYRO7NHG5K4FEML5O5C5AATYBK4FCDLYRAJFZWBNN3E) |
 | **SEPs used** | SEP-53 (signed messages, for identity), SEP-41 (the token interface), SEP-7 (the receive URI) |
 | **Wallet** | Pollar (`@pollar/react` 0.11.3) — email or Google login, so a shopper needs no prior wallet |
-| **Tests** | `npm test` → 772 · `npm run contracts:test` → 34. Neither needs an API key |
+| **Tests** | `npm test` → 603 · `npm run contracts:test` → 34. Neither needs an API key |
 | **Pitch video** | sources in [`creatives/`](../creatives) (Remotion, three cuts: ES, EN, promo). There is no hosted link in this repo — `npm run render` in any of those folders produces the mp4 |
 
 ## 1. The one-paragraph version
@@ -62,7 +62,7 @@ deposit account.
 | Confirmation is trustless | [`apps/web/lib/ledger/`](../apps/web/lib/ledger/) — public ledger read via the port (Horizon today). No webhook, no secret, no reconciliation. You can check any deposit yourself |
 | Identity is proven, not claimed | [`apps/web/lib/wallet-proof-verify.ts`](../apps/web/lib/wallet-proof-verify.ts) (SEP-53) and the four gates that use it: `deposit-gate`, `network-access`, `faucet-auth`, `settle-gate` |
 | A deposit can buy exactly one card | [`apps/web/lib/card.ts`](../apps/web/lib/card.ts) — the claim is a conditional `UPDATE … where card_id is null`, not a read-then-write, because two tabs pressing the button together is the ordinary case |
-| Card numbers are never written down | `card.ts` header, and `e2e/app-frame-checkout.spec.ts`, which asserts no PAN or CVV reaches `localStorage` or `sessionStorage` and runs with traces off |
+| Card numbers are never written down | The app does not issue a card. `packages/mcp/src/secure/redact.ts` masks PAN-shaped runs, and the checkout server stops before typing a payment form. |
 | Mainnet is closed by default | [`apps/web/lib/network-access.ts`](../apps/web/lib/network-access.ts) — in production an empty allowlist means nobody. The Worker sets `NODE_ENV=production`, so that is the live app |
 | The contracts do what the README says | [§5](#5-verify-it-yourself) — ask the deployed wasm, not the source |
 
@@ -78,7 +78,7 @@ being told.
 | The USDC payment and its confirmation | **Real.** A classic Stellar payment, matched by memo, confirmed from Horizon |
 | Identity and the gates on real money | **Real.** SEP-53 signatures, allowlisted in production |
 | The escrow contract | **Deployed on testnet over the mintable `mock_usdc` and mounted on the login-network checkout** (`PaymentModal` calls `open`). Other networks keep the memo deposit in [`lib/deposit.ts`](../apps/web/lib/deposit.ts) |
-| **Funding the card from the deposit** | **Operator-run.** The issuer's API answers `403 "Contact support via email to enable your API"` on every endpoint. One card exists, created by hand, read from a `shared_card` row by wallets on a member list. No copy in the app claims a load happened |
+| **Paying Día** | The app does not issue a card. An admitted manual checkout (allowlist `shared_card_member`) lets the shopper pay Día with their own card. Everyone else gets a demo that stops at the payment form. |
 | Refunds | **By hand.** No automated outbound payment and no Stellar secret in the production deployment |
 | The receipt's per-order link | **Inferred by one character.** `orderRef` is `${orderGroup}-01`; degrades to the order list, never a 404 |
 
@@ -112,7 +112,7 @@ printf 'changuito/receipt/v1\nretailer|dia\ncart|live-check-1\nhandoff|https://d
 And the suites, from a clean clone with only `npm install`:
 
 ```bash
-npm test                 # 772: mcp 304 · trust 1 · web 467
+npm test                 # 603: mcp 180 · trust 1 · web 422
 npm run contracts:test   #   34: escrow 19 · mock_usdc 15
 npm run build
 ```

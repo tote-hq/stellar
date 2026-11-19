@@ -5,10 +5,9 @@ import { before, describe, it } from 'node:test';
 /**
  * Money routes with no Turnstile cookie.
  *
- * Settle and the faucet already have their own gate tests. The card routes
- * import generated contract bindings, which strip-types cannot load, so those
- * are pinned on the source: `requireHuman` runs before any card client. Quote,
- * balance and network are called as handlers.
+ * Settle and the faucet already have their own gate tests. Quote and network
+ * are called as handlers. Balance is pinned on the source: `requireHuman(`
+ * is present and comes before `accountBalances(`.
  */
 
 // @types/node marks NODE_ENV readonly. The other route tests write through this cast.
@@ -42,21 +41,14 @@ describe('Stellar money APIs refuse a stranger', () => {
     }
   });
 
-  it('RULE: card routes ask for a human before they touch a card', () => {
-    const files = [
-      'app/api/balance/route.ts',
-      'app/api/card/route.ts',
-      'app/api/card/mine/route.ts',
-      'app/api/card/3ds/route.ts',
-      'app/api/card/terminate/route.ts',
-      'app/api/card/retire/route.ts',
-    ];
-    for (const rel of files) {
-      const src = readFileSync(new URL(`../../${rel}`, import.meta.url), 'utf8');
-      const human = src.indexOf('requireHuman(');
-      const spend = src.search(/issueCard\(|cardClient\(|heldCard\(|canIssueCard\(|accountBalances\(/);
-      assert.ok(human > 0, rel);
-      if (spend > 0) assert.ok(human < spend, `${rel}: human gate must precede the spend`);
-    }
+  it('RULE: the balance route asks for a human before it reads an account', () => {
+    const rel = 'app/api/balance/route.ts';
+    const src = readFileSync(new URL(`../../${rel}`, import.meta.url), 'utf8');
+    const human = src.indexOf('requireHuman(');
+    const spend = src.indexOf('accountBalances(');
+    assert.ok(human > 0, `${rel}: requireHuman( is present`);
+    assert.ok(spend > 0, `${rel}: accountBalances( is present`);
+    assert.ok(human < spend, `${rel}: human gate must precede accountBalances`);
   });
+
 });

@@ -5,8 +5,8 @@
  * Two mechanisms, deliberately layered, because neither is sufficient alone:
  *
  *   1. EXACT MATCH (`registerSecret`). When we hold a real secret in memory — a
- *      PAN from GET /cards/{id}/details, a CVV, a 3DS OTP, a decrypted private
- *      key — we register the literal string. Anything containing it is masked,
+ *      PAN, a CVV, a one-time code, a passphrase — we register the literal
+ *      string. Anything containing it is masked,
  *      no pattern matching involved. This is the reliable guarantee.
  *
  *   2. HEURISTICS. Patterns for secrets we never registered because they came
@@ -66,10 +66,6 @@ const SENSITIVE_KEY = new RegExp(
 
 /** A 4-digit-group card number with optional spaces or dashes, or a bare run. */
 const PAN_LIKE = /\b(?:\d[ -]?){12,18}\d\b/g;
-/** Vyrion API keys. */
-const API_KEY = /\bsk_(?:test|live)_[A-Za-z0-9_-]{8,}\b/g;
-/** An EVM private key, with or without the 0x. */
-const HEX_KEY = /\b(?:0x)?[0-9a-fA-F]{64}\b/g;
 /** Bearer tokens in a header string. */
 const BEARER = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi;
 
@@ -111,9 +107,7 @@ function scrubString(input: string): string {
     if (s.includes(secret)) s = s.split(secret).join(placeholder);
   }
 
-  s = s.replace(API_KEY, '[REDACTED:apikey]');
   s = s.replace(BEARER, 'Bearer [REDACTED:token]');
-  s = s.replace(HEX_KEY, '[REDACTED:key]');
   s = s.replace(PAN_LIKE, (m) => (looksLikeCardNumber(m) ? maskPan(m) : m));
 
   return s;

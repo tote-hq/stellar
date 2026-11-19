@@ -157,14 +157,11 @@ More: **[docs/architecture.md](docs/architecture.md)**.
 
 Read this before the demo, not after it.
 
-- **The card is not funded by the deposit.** The issuer's API answers `403
-  "Contact support via email to enable your API"` on every endpoint, so no card
-  is minted programmatically. One card exists, made by hand in the issuer's
-  dashboard, and its numbers are read out of a `shared_card` row by the wallets
-  on a member list. The deposit is real, the card is real, and **the link
-  between them is operator-run.** No copy in the app claims a load happened —
-  see [`lib/shared-card.ts`](apps/web/lib/shared-card.ts) and
-  `supabase/migrations/0004_shared_card.sql`.
+- **The app does not issue a card.** Checkout is a deposit into escrow, then
+  either an admitted manual checkout (the shopper pays Día with their own card)
+  or a demo that stops at the payment form. The allowlist is the
+  `shared_card_member` table; the name is historical.
+  `supabase/migrations/0004_shared_card.sql` is unchanged.
 - **A failed order is refunded by hand.** There is no automated outbound payment
   and no Stellar secret in the production deployment. That is a deliberate
   trade: worse product, much smaller blast radius.
@@ -262,7 +259,7 @@ npm run dev            # http://localhost:3124
 **It degrades rather than breaking.** With only `ANTHROPIC_API_KEY` set you get
 search, comparison, carts and the store handoff. Without
 `NEXT_PUBLIC_POLLAR_API_KEY_MAINNET` the masthead reads *"Billetera: sin
-configurar"* instead of a balance. Without `DATABASE_URL` the card and order
+configurar"* instead of a balance. Without `DATABASE_URL` the order
 tables are simply absent and every reader answers "nothing" — deliberately, not
 defensively. Without `KV_REST_API_*` conversation history falls back to an
 in-process `Map`.
@@ -279,8 +276,7 @@ The annotated list is `apps/web/.env.example`. The ones that change what works:
 | `ANTHROPIC_API_KEY` | server | the agent |
 | `NEXT_PUBLIC_POLLAR_API_KEY_MAINNET` | browser | login, wallet, SEP-53, paying |
 | `DEPOSIT_ADDRESS_TESTNET` / `_MAINNET` | server | the deposit rail. Missing → `/api/deposit` 503s and logs the variable name |
-| `DATABASE_URL` | server | orders, kept cards, chat archive, chat and faucet quotas |
-| `VYRION_API_KEY` | server | card issuance (currently 403 — see the honesty section) |
+| `DATABASE_URL` | server | orders, chat archive, chat and faucet quotas |
 | `STELLAR_RESOLVER_SECRET` | server | the testnet faucet and the escrow |
 | `KV_REST_API_URL` / `_TOKEN` | server | conversation history across restarts |
 | `REAL_MODE_ALLOWLIST_ADDRESSES` | server | who may reach mainnet. Empty in production means nobody |
@@ -292,7 +288,7 @@ The annotated list is `apps/web/.env.example`. The ones that change what works:
 ## Tests
 
 ```bash
-npm test                    # 772: mcp 304 · trust 1 · web 467
+npm test                    # 603: mcp 180 · trust 1 · web 422
 npm run contracts:test      #   34: escrow 19 · mock_usdc 15
 npm run typecheck -w @changuito/web
 npm run build
@@ -316,11 +312,6 @@ Four that guard mistakes which type-check cleanly:
   settles a basket nobody approved.
 - **`stellar.test.ts`** reads the contract ids baked into the generated bindings
   as text and compares them with `deployments.json`.
-- **`app-frame-checkout.spec.ts`** drives the whole checkout in a browser and
-  pins that the basket is quoted **exactly once**, and never before the shopper
-  has signed in — which is the property the envío bug violated. It runs with
-  `trace / video / screenshot` off, because the repo is public and the spec walks
-  past a test PAN.
 
 The contract suite covers what the money depends on: a double open is rejected,
 settling an order that was never opened is rejected, an unauthorized settle is

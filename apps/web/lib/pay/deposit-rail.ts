@@ -8,13 +8,12 @@
  *
  * This holds no chain SDK. `activeLedger()` is the port; the Stellar adapter
  * is what that returns today, and it holds no signing key. Postgres stays a
- * direct call — the order row is the latch a card claims against, not a
- * second ledger.
+ * direct call — the order row is the record of the memo, not a second ledger.
  *
  * ## The order row, which is not state this module reads back
  *
  * Both halves write one. The quote opens the order the memo belongs to,
- * because issuing a card needs a row to latch its once-only claim onto. The
+ * because a late confirmation still has to find the memo it was quoted against. The
  * confirmation marks it paid when the payment shows up, because the poll is
  * the only place confirmation is ever observed and an order stuck at `quoted`
  * for a shopper who has paid is a record that lies.
@@ -24,25 +23,21 @@
  * UPDATE lands, and a database that is down costs a record rather than a
  * payment. That is why both are best-effort and logged, and why `markPaid` is
  * monotonic — the browser polls every four seconds and keeps confirming long
- * after the card has been issued.
+ * after the shopper has already been told the money arrived.
  *
  * Confirming the same deposit as many times as it is asked proves the money
- * arrived and *not* that it has not already been spent. Issuing a card against
- * a memo is the step that must happen once, and that claim does not live here.
+ * arrived.
  */
 import { arsToUsdCents, getArsPerUsd } from '@changuito/mcp/fx';
-import { CARD_MIN_CENTS, formatUsd } from '@changuito/mcp/pay';
 
 import { modeForSession, modeKeepsRecords, type AppMode } from '../app-mode.ts';
-import { canIssueCard, rememberDepositor } from '../card.ts';
-import { hasDatabase, markPaid, openChatOrder } from '../db.ts';
+import { hasDatabase, markPaid, openChatOrder, openOrder, orderByMemo } from '../db.ts';
 import type { NetworkId } from '../deployments.ts';
 import { requestNetwork } from '../server-network.ts';
 import { isMemo, mintMemo, type DepositAsset } from '../deposit.ts';
 import { authorizeRealMode, realModeNeedsProof } from '../deposit-gate.ts';
 import { activeLedger } from '../ledger/index.ts';
 import { orderFormIdFrom, readOrderForm } from '../order-check.ts';
-import { sharedCardCeilingCents } from '../shared-card.ts';
 import { canDemoPay } from '../server/demo-wallet.ts';
 import { proofFromBody } from '../wallet-proof-verify.ts';
 
@@ -66,20 +61,12 @@ export interface DepositIntent {
   arsPerUsd: number;
   source: string;
   /**
-   * Whether this deployment can mint a single-use card at all. Answered here
-   * rather than in a `NEXT_PUBLIC_` flag so the browser learns it from the
-   * same server that would have to honour it — and so a deployment without a
-   * card provider never renders a button that 503s.
-   */
-  cardAvailable: boolean;
-  /**
    * Whether this deployment can pay the deposit itself. True only in preview,
-   * and only where `DEMO_WALLET_SECRET` is actually set — answered here for
-   * the same reason `cardAvailable` is, rather than in a `NEXT_PUBLIC_` flag:
-   * the browser learns it from the server that would have to honour it, so a
-   * deployment without the secret never renders a button that 503s. A preview
-   * shopper who gets `false` sees the address and the memo instead, which is
-   * the manual path and still works.
+   * and only where `DEMO_WALLET_SECRET` is actually set. Answered here rather
+   * than in a `NEXT_PUBLIC_` flag: the browser learns it from the server that
+   * would have to honour it, so a deployment without the secret never renders
+   * a button that 503s. A preview shopper who gets `false` sees the address
+   * and the memo instead, which is the manual path and still works.
    */
   demoPayable: boolean;
 }
@@ -97,13 +84,56 @@ export type DepositReply =
   | { status: number; body: { error: string; message?: string } };
 
 /**
- * The buffer is 15%, the same one the card-funding path in @changuito/mcp
- * uses and for the same reason: the card network applies its own rate when the
- * supermarket charges it, and a cent short at the till is a decline in front
- * of a shopper with a full basket. The escrow path quotes at zero buffer
- * because it settles the exact number it locked; this one does not.
+ * The buffer is 15%. The escrow path quotes at zero buffer because it settles
+ * the exact number it locked; this one does not, because the rate can move
+ * between the quote and the payment.
  */
 const BUFFER = 0.15;
+
+/**
+ * Record that this memo was issued, and to whom.
+ *
+ * `address` is omitted when nothing was proven — writing a claimed address
+ * down would be recording a guess. With no database the same fact lives in
+ * an in-process map, which is what a fresh clone and the unit tests use.
+ * It does not survive a restart, and production does not use it.
+ */
+const localOwners = new Map<string, string>();
+const localKey = (net: NetworkId, memo: string) => `${net}:${memo}`;
+
+export async function rememberDepositor(
+  net: NetworkId,
+  memo: string,
+  o: {
+    /** Omitted when no address was proven. */
+    address?: string;
+    /** What the deposit was quoted at, in US cents. */
+    amountCents: number;
+    /** The centavos figure the shopper actually read on screen. */
+    arsQuoted?: number;
+    cartId?: string;
+  },
+): Promise<void> {
+  if (!hasDatabase()) {
+    if (o.address) localOwners.set(localKey(net, memo), o.address);
+    return;
+  }
+  await openOrder({
+    network: net,
+    memo,
+    address: o.address ?? null,
+    amountCents: o.amountCents,
+    arsQuoted: o.arsQuoted ?? null,
+    cartId: o.cartId ?? null,
+  });
+}
+
+/** The wallet that opened this deposit, or undefined if nothing recorded one. */
+export async function depositorOf(net: NetworkId, memo: string): Promise<string | undefined> {
+  if (!hasDatabase()) return localOwners.get(localKey(net, memo));
+  return (await orderByMemo(net, memo))?.address ?? undefined;
+}
+
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -225,32 +255,9 @@ export async function quoteDeposit(
   try {
     const override = Number(process.env.FX_ARS_PER_USD);
     const rate = await getArsPerUsd(Number.isFinite(override) && override > 0 ? { override } : {});
-    // Raised to the card minimum, the way `decideFunding` does it in the MCP
-    // package. Not a call to `decideFunding` itself, which wants a settled
-    // provider balance this deployment cannot read — the provider API is 403 —
-    // so the one rule that applies here is applied directly. Without it a very
-    // small basket quotes below $1 and is then refused by the card with
-    // `too-small`, after the money has already moved.
-    const bare = arsToUsdCents(centavos, rate.arsPerUsd, BUFFER);
-    const usdCents = bare > 0 && bare < CARD_MIN_CENTS ? CARD_MIN_CENTS : bare;
+    const usdCents = arsToUsdCents(centavos, rate.arsPerUsd, BUFFER);
 
-    // A basket bigger than what is on the card. Refused here rather than
-    // discovered at the till: the card is loaded by hand and nothing tops it
-    // up, so quoting past it means taking the USDC and *then* declining. Soft
-    // by construction — `sharedCardCeilingCents` says why — and absent on
-    // every deployment that has no such record, where it is a no-op.
-    const ceiling = await sharedCardCeilingCents(network);
-    if (ceiling !== null && usdCents > ceiling) {
-      return {
-        status: 409,
-        body: {
-          error: 'over_card_ceiling',
-          message: `Este changuito supera el límite por compra (${formatUsd(ceiling)}). Sacá algo o escribinos.`,
-        },
-      };
-    }
-
-    // The order is opened for every memo, so the claim latch that the card
+    // The order is opened for every memo, so a confirmation that arrives late
     // needs always has a row to latch onto. The *address* is written when the
     // signature above proved one, or — on a signed-in testnet session where
     // the gate needs no proof — when the cookie named one. Recording a body
@@ -311,9 +318,8 @@ export async function quoteDeposit(
     // No chat id, or no database to file one against: the old path, which
     // records the same fact with no conversation attached.
     //
-    // A failure here is not the shopper's problem *yet*. It becomes one when
-    // they try to mint a card, which refuses rather than let an unowned memo
-    // through. Loud, because the recovery is a manual refund.
+    // A failure here is not the shopper's problem *yet*. The memo was still
+    // issued. Loud, because the row is the record of who it was quoted to.
     if (!order) {
       await rememberDepositor(network, memo, {
         address: depositor,
@@ -334,7 +340,6 @@ export async function quoteDeposit(
       usdCents,
       arsPerUsd: rate.arsPerUsd,
       source: rate.source,
-      cardAvailable: canIssueCard(),
       demoPayable: canDemoPay(network),
     };
     return { status: 200, body: intent };
@@ -375,7 +380,7 @@ export async function confirmDeposit(q: {
       // paid that they have not.
       //
       // `markPaid` is monotonic. The browser polls every few seconds and keeps
-      // confirming long after the card has been issued.
+      // confirming long after the shopper was told the money arrived.
       await markPaid(network, q.memo, hit.txHash).catch((err) => {
         console.error(`[deposit] ${network}:${q.memo} confirmed but not recorded:`, message(err));
       });

@@ -151,7 +151,7 @@ to Upstash in December 2024. This app talks to Upstash's REST API directly.
 ## Tests
 
 ```
-npm test                          # 772 — mcp 304 · trust 1 · web 467
+npm test                          # 603: mcp 180 · trust 1 · web 422
 npm test -w @changuito/mcp        # 304 — adapters, money, FX, cart maths
 npm test -w @changuito/web        # 467 — chat-state, order-check, deposit, copy, …
 npm run contracts:test            #   34 — escrow 19 · mock_usdc 15
@@ -184,11 +184,9 @@ in `apps/web/.env.example`; setup in [`../DEPLOY.md`](../DEPLOY.md).
 |---|---|---|
 | `ANTHROPIC_API_KEY` | yes | the agent |
 | `NEXT_PUBLIC_POLLAR_API_KEY_MAINNET` | no | the wallet. Without it preview still works end to end; what is missing is the way *out* of preview |
-| `DATABASE_URL`, `DIRECT_URL` | for orders and the faucet | orders, cards, the chat archive, quotas, and who may use the faucet. Unset, the faucet is closed |
+| `DATABASE_URL`, `DIRECT_URL` | for orders and the faucet | orders, the chat archive, quotas, and who may use the faucet. Unset, the faucet is closed |
 | `DEPOSIT_ADDRESS_TESTNET` / `_MAINNET` | for checkout | where a deposit is paid. A `C…` contract address is refused — it cannot take a memo. Unset, the deposit screen answers 503 |
 | `DEMO_WALLET_SECRET` | for preview pay | lets preview settle a real testnet payment for a visitor with no wallet. Unset, the button answers 503 and says so |
-| `VYRION_API_KEY` | for the card | unset, the card button is never rendered rather than rendered and broken |
-| `ALLOW_LIVE` | no | an `sk_live_` key is refused unless this is exactly `1` |
 | `STELLAR_RESOLVER_SECRET` | for faucet + settle | the testnet signing key. Read at call time, never at import, so a build without it succeeds |
 | `STELLAR_RESOLVER_SECRET_MAINNET` | no | must be a *different* key; checked against `deployments.json` and refused on mismatch |
 | `REAL_MODE_ALLOWLIST_ADDRESSES` | for modo real | deny-by-default: empty in production means nobody. The Worker sets `NODE_ENV=production` |

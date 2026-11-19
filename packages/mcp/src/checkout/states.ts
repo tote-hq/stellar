@@ -21,10 +21,6 @@ export type Action =
   | { kind: 'click'; label: string; why: string }
   /** Fill the delivery address form from the address the user gave us. */
   | { kind: 'fill_address'; why: string }
-  /** Enter the card. Only ever planned when the goal is 'confirmation'. */
-  | { kind: 'fill_payment'; why: string }
-  /** Fetch the OTP from Vyrion and type it into the challenge. */
-  | { kind: 'submit_otp'; why: string }
   /** The page is working; give it time. */
   | { kind: 'wait'; ms: number; why: string }
   /** Nothing safe to do here. The loop escalates. */
@@ -96,12 +92,12 @@ export function planAction(verdict: Verdict, ps: PageState, ctx: PlanContext): A
     }
 
     case 'payment_form':
-      // Reaching here with goal 'payment_form' is impossible: the loop returns
-      // on the goal before planning. So this is only the paying run.
-      return { kind: 'fill_payment', why: 'enter the virtual card' };
+      // The loop returns when the goal is the payment form, before planning.
+      // If a later state still asks, do not type a card.
+      return { kind: 'none', why: 'the payment form is as far as this checkout goes' };
 
     case 'threeds':
-      return { kind: 'submit_otp', why: 'the bank is asking for a one-time code' };
+      return { kind: 'none', why: 'a bank challenge appeared and this checkout does not answer it' };
 
     case 'processing':
       return { kind: 'wait', ms: PROCESSING_WAIT_MS, why: 'the store is still working' };

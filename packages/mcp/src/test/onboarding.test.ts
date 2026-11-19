@@ -20,7 +20,7 @@ describe('setupGuidePath', () => {
 
 describe('CATALOG_INSTRUCTIONS', () => {
   it('names no checkout tool, because a catalog server registers none', () => {
-    for (const tool of ['link_marketplace_account', 'approve_payment', 'check_funds', 'diagnose']) {
+    for (const tool of ['link_marketplace_account', 'review_order', 'build_cart', 'diagnose']) {
       assert.ok(!CATALOG_INSTRUCTIONS.includes(tool), `promises ${tool}, which is not registered`);
     }
   });
@@ -61,7 +61,7 @@ describe('RULE: the server tells the client how to use it', () => {
   });
 
   it('no error message points at a bare "SETUP.md" the user cannot find', async () => {
-    const files = ['config.ts', 'tools.ts', 'pay/vyrion.ts', 'wallet/evm.ts', 'wallet/keystore.ts'];
+    const files = ['config.ts', 'tools.ts', 'checkout/purchase.ts', 'checkout/driver.ts'];
     for (const f of files) {
       const src = await readFile(new URL(`../../src/${f}`, import.meta.url), 'utf8');
       for (const line of src.split('\n')) {

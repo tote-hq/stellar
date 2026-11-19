@@ -337,8 +337,8 @@ export function registerCatalogTools(
  * here touches an account or spends money.
  *
  * The checkout tools are deliberately NOT reachable from this module. They
- * drive a headed browser and hold an EVM signer, and the binary that wants
- * them imports them itself (see index.ts). Making that a module boundary
+ * drive a headed browser, and the binary that wants them imports them itself
+ * (see index.ts). Making that a module boundary
  * rather than a `checkout: false` option is the difference between a host
  * that does not call Playwright and a host that cannot: a bundler resolves
  * `await import()` statically, so a flag would keep the dependency out of the

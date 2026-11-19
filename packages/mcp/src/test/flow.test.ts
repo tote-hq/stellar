@@ -234,12 +234,12 @@ describe('runFlow — the happy path', () => {
     assert.equal(d.performed.length, 0, 're-submitting a placed order is the one mistake with no undo');
   });
 
-  it('runs all the way to a confirmation when that is the goal', async () => {
+  it('stops at the payment form instead of typing a card, even when the goal is confirmation', async () => {
     const d = new FakeDriver({ screens: [PAYMENT, PROCESSING, CONFIRMED] });
-    const r = await run(d, 'confirmation');
-    assert.equal(r.reached, true);
-    assert.deepEqual(d.performed.map((a) => a.kind), ['fill_payment', 'wait']);
-    assert.ok(d.slept > 0, 'it waits out the gateway rather than clicking again');
+    const e = await expectEscalation(run(d, 'confirmation'));
+    assert.equal(d.performed.length, 0, 'nothing is typed into the payment form');
+    assert.equal(e.verdict.state, 'payment_form');
+    assert.match(e.message, /payment form/);
   });
 });
 

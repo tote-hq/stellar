@@ -39,9 +39,7 @@ const config: NextConfig = {
     '/api/**': [
       './node_modules/playwright/**',
       './node_modules/playwright-core/**',
-      './node_modules/ethers/**',
       './packages/mcp/dist/checkout/**',
-      './packages/mcp/dist/wallet/**',
     ],
   },
 };

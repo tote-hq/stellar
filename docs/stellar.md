@@ -52,7 +52,7 @@ money bugs live; the fetch is the part that needs a network and has nothing to
 get wrong. `lib/deposit-watch.ts` remains a facade for existing callers and
 tests.
 
-**Spending** — `POST /api/card` → `lib/pay/issue-card.ts`. Re-reads the ledger
+**Spending** — the deposit quote re-reads the ledger
 port for a payment carrying the código and derives the amount **from the payment
 that actually landed**. The deposit is then claimed exactly once, with a
 conditional `UPDATE … where card_id is null`.
@@ -98,7 +98,7 @@ code refuses to quote an asset it cannot observe.
 ### No secret passes through the issuing script
 
 Every signature in `setup-demo-asset.mjs` is made by the `stellar` CLI from a
-local identity named on the command line. The secrets stay in the CLI keystore —
+local identity named on the command line. The secrets stay in the Stellar CLI —
 never read by the script, never printed, never placed in `argv` where `ps` would
 show them, never written to an env file. The issuer's secret is discarded
 outright.

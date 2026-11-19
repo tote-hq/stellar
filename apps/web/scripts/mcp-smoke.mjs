@@ -30,8 +30,8 @@ tools.length === 10
   ? ok('tools/list', `${tools.length} read-only tools`)
   : die('tools/list', `expected 10 read-only tools, got ${tools.length}: ${tools.map((t) => t.name)}`);
 
-tools.some((t) => t.name === 'approve_payment')
-  ? die('checkout tools absent', 'approve_payment leaked into a read-only server')
+tools.some((t) => t.name === 'review_order')
+  ? die('checkout tools absent', 'review_order leaked into a read-only server')
   : ok('checkout tools absent');
 
 const instructions = client.getInstructions();
