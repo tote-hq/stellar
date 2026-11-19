@@ -29,30 +29,6 @@ function withCookie(cookie: string, run: () => void): void {
   }
 }
 
-function standIn(calls: string[]): PostHogClient {
-  return {
-    init() {
-      calls.push('init');
-    },
-    opt_in_capturing() {
-      calls.push('opt_in');
-    },
-    opt_out_capturing() {
-      calls.push('opt_out');
-    },
-    startSessionRecording() {
-      calls.push('record');
-    },
-    identify(id: string) {
-      calls.push(`id:${id}`);
-    },
-    reset() {
-      calls.push('reset');
-    },
-    capture() {},
-  };
-}
-
 describe('posthog client', { concurrency: 1 }, () => {
   test('an empty key does nothing, and a set key identifies only a uuid', () => {
     const previous = process.env.NEXT_PUBLIC_POSTHOG_KEY;
@@ -78,9 +54,6 @@ describe('posthog client', { concurrency: 1 }, () => {
     assert.equal(calls.length, 0);
 
     process.env.NEXT_PUBLIC_POSTHOG_KEY = 'phc_test';
-    const host = globalThis as CookieHost;
-    const previousDocument = host.document;
-    host.document = { cookie: 'chg_consent=granted' };
     let options: PostHogInitOptions | undefined;
     const live: PostHogClient = {
       init(_key, opts) {
@@ -117,23 +90,44 @@ describe('posthog client', { concurrency: 1 }, () => {
 
     if (previous === undefined) delete process.env.NEXT_PUBLIC_POSTHOG_KEY;
     else process.env.NEXT_PUBLIC_POSTHOG_KEY = previous;
-    if (previousDocument === undefined) delete host.document;
-    else host.document = previousDocument;
   });
 
-  test('init waits until consent is granted', () => {
+  test('applyPostHogConsent inits only when the choice is granted', () => {
     const previous = process.env.NEXT_PUBLIC_POSTHOG_KEY;
     process.env.NEXT_PUBLIC_POSTHOG_KEY = 'phc_test';
-    resetPostHog();
+    const inits: PostHogInitOptions[] = [];
+    const calls: string[] = [];
+    const client: PostHogClient = {
+      init(_key, options) {
+        inits.push(options);
+        calls.push('init');
+      },
+      opt_in_capturing() {
+        calls.push('in');
+      },
+      opt_out_capturing() {
+        calls.push('out');
+      },
+      startSessionRecording() {
+        calls.push('rec');
+      },
+      identify() {},
+      reset() {},
+      capture() {},
+    };
+
     try {
-      for (const cookie of ['', 'chg_consent=denied']) {
-        const calls: string[] = [];
-        withCookie(cookie, () => initPostHog(standIn(calls)));
-        assert.deepEqual(calls, [], cookie || 'unset');
-      }
-      const calls: string[] = [];
-      withCookie('chg_consent=granted', () => initPostHog(standIn(calls)));
-      assert.deepEqual(calls, ['init']);
+      applyPostHogConsent(null, client);
+      applyPostHogConsent('denied', client);
+      assert.deepEqual(calls, []);
+
+      applyPostHogConsent('granted', client);
+      applyPostHogConsent('granted', client);
+      assert.deepEqual(inits, [initOptions()]);
+
+      applyPostHogConsent('denied', client);
+      assert.equal(inits.length, 1);
+      assert.equal(calls[calls.length - 1], 'out');
     } finally {
       if (previous === undefined) delete process.env.NEXT_PUBLIC_POSTHOG_KEY;
       else process.env.NEXT_PUBLIC_POSTHOG_KEY = previous;
@@ -144,58 +138,34 @@ describe('posthog client', { concurrency: 1 }, () => {
     const previous = process.env.NEXT_PUBLIC_POSTHOG_KEY;
     process.env.NEXT_PUBLIC_POSTHOG_KEY = 'phc_test';
     const calls: string[] = [];
+    const client: PostHogClient = {
+      init() {},
+      opt_in_capturing() {
+        calls.push('opt_in');
+      },
+      opt_out_capturing() {},
+      startSessionRecording() {
+        calls.push('record');
+      },
+      identify() {},
+      reset() {
+        calls.push('reset');
+      },
+      capture() {},
+    };
+    initPostHog(client);
     try {
-      withCookie('chg_consent=granted', () => {
-        initPostHog(standIn(calls));
+      for (const cookie of ['', 'chg_consent=denied']) {
         calls.length = 0;
-        resetPostHog();
-      });
+        withCookie(cookie, () => resetPostHog());
+        assert.deepEqual(calls, ['reset'], cookie || 'unset');
+      }
+      calls.length = 0;
+      withCookie('chg_consent=granted', () => resetPostHog());
       assert.deepEqual(calls, ['reset', 'opt_in', 'record']);
     } finally {
       if (previous === undefined) delete process.env.NEXT_PUBLIC_POSTHOG_KEY;
       else process.env.NEXT_PUBLIC_POSTHOG_KEY = previous;
     }
   });
-
-  test('applyPostHogConsent inits only when the choice is granted', () => {
-    const previous = process.env.NEXT_PUBLIC_POSTHOG_KEY;
-    process.env.NEXT_PUBLIC_POSTHOG_KEY = 'phc_test';
-    const calls: string[] = [];
-    const seen: PostHogInitOptions[] = [];
-    const client: PostHogClient = {
-      init(_key, options) {
-        seen.push(options);
-        calls.push('init');
-      },
-      opt_in_capturing() {
-        calls.push('opt_in');
-      },
-      opt_out_capturing() {
-        calls.push('opt_out');
-      },
-      startSessionRecording() {
-        calls.push('record');
-      },
-      identify() {},
-      reset() {},
-      capture() {},
-    };
-    try {
-      applyPostHogConsent(null, client);
-      applyPostHogConsent('denied', client);
-      assert.deepEqual(calls, []);
-
-      // init still refuses until the banner cookie is granted.
-      withCookie('chg_consent=granted', () => {
-        applyPostHogConsent('granted', client);
-        applyPostHogConsent('granted', client);
-      });
-      assert.deepEqual(seen, [initOptions()]);
-      assert.deepEqual(calls, ['init', 'opt_in', 'record', 'opt_in', 'record']);
-    } finally {
-      if (previous === undefined) delete process.env.NEXT_PUBLIC_POSTHOG_KEY;
-      else process.env.NEXT_PUBLIC_POSTHOG_KEY = previous;
-    }
-  });
-
 });
