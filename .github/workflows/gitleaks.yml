@@ -1,13 +1,12 @@
-# Secret scan of the whole history on every PR and push to main.
+# Secret scan of the whole history on every pull request.
 # Runs the gitleaks binary directly (the gitleaks-action needs a licence for
 # organisation repos). Known fake test fixtures are allowlisted in
 # .gitleaks.toml and .gitleaksignore; anything new fails the job.
+# No push trigger: the local gate already scans before every push.
 name: Gitleaks
 
 on:
   pull_request:
-  push:
-    branches: [main]
 
 permissions:
   contents: read
