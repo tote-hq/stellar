@@ -47,8 +47,17 @@ const ES: PrivacyCopy = {
       id: 'cookies',
       heading: 'Cookies y medición',
       paragraphs: [
-        'chg_user es la sesión (HttpOnly). chg_human es la verificación de Cloudflare Turnstile y dura unas doce horas. chg_lang guarda el idioma y no es HttpOnly: el botón la escribe y solo elige palabras.',
-        'Si el servidor tiene los identificadores, el navegador carga Google Analytics 4, Meta o Microsoft Clarity. Antes de enviar un evento, el cliente descarta la dirección, el texto largo, el email y otros campos que identificarían un pedido. Si esos identificadores no están, esos scripts no se cargan.',
+        'chg_user es la sesión (HttpOnly). chg_human es la verificación de Cloudflare Turnstile y dura unas doce horas. chg_lang guarda el idioma y no es HttpOnly: el botón la escribe y solo elige palabras. chg_consent guarda Aceptar o Rechazar, tampoco es HttpOnly, y dura 180 días.',
+        'Ningún evento de medición sale antes de Aceptar ni después de Rechazar. Si el servidor no tiene los identificadores, esos scripts no se cargan.',
+      ],
+    },
+    {
+      id: 'medicion',
+      heading: 'Medición y grabación',
+      paragraphs: [
+        'El aviso de la primera visita dice «Usamos cookies para mejorar la app.» y ofrece Aceptar, Rechazar y Más info. La elección queda en chg_consent. Antes de Aceptar, y después de Rechazar, no se envía nada.',
+        'Si aceptás, el navegador carga Google Analytics 4, Meta Pixel, Microsoft Clarity y PostHog. PostHog puede grabar la sesión: los campos y el texto van enmascarados, y no entra en la grabación el pago, el modal de pago, la conversación, la billetera ni el iframe de la tienda. PostHog está en Estados Unidos. La cookie de sesión no se reenvía.',
+        'Si entraste con una billetera, PostHog recibe un identificador al azar, no tu dirección. El cliente también descarta el email, el DNI, los montos, los mensajes y otros campos que identificarían un pedido.',
       ],
     },
     {
@@ -91,8 +100,17 @@ const EN: PrivacyCopy = {
       id: 'cookies',
       heading: 'Cookies and measurement',
       paragraphs: [
-        'chg_user is the session (HttpOnly). chg_human is the Cloudflare Turnstile check and lasts about twelve hours. chg_lang stores the language and is not HttpOnly: the button writes it, and it only chooses words.',
-        'When the server has the ids, the browser loads Google Analytics 4, Meta or Microsoft Clarity. Before an event is sent, the client drops the address, long text, email and other fields that would identify an order. If those ids are unset, those scripts are not loaded.',
+        'chg_user is the session (HttpOnly). chg_human is the Cloudflare Turnstile check and lasts about twelve hours. chg_lang stores the language and is not HttpOnly: the button writes it, and it only chooses words. chg_consent stores Accept or Decline, is not HttpOnly either, and lasts 180 days.',
+        'No measurement event is sent before Accept or after Decline. If the server does not have the ids, those scripts are not loaded.',
+      ],
+    },
+    {
+      id: 'medicion',
+      heading: 'Measurement and recording',
+      paragraphs: [
+        'The first-visit notice says “We use cookies to improve the app.” and offers Accept, Decline and Learn more. The choice is stored in chg_consent. Nothing is sent before Accept, or after Decline.',
+        'If you accept, the browser loads Google Analytics 4, Meta Pixel, Microsoft Clarity and PostHog. PostHog can record the session: inputs and text are masked, and the recording leaves out checkout, the payment modal, the conversation, the wallet and the store iframe. PostHog is in the United States. The session cookie is not forwarded.',
+        'If you signed in with a wallet, PostHog receives a random identifier, not your address. The client also drops email, DNI, amounts, messages and other fields that would identify an order.',
       ],
     },
     {

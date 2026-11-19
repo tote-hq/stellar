@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 
+import { identifyWallet, initPostHog, type PostHogClient } from '../posthog.ts';
 import { ensureUserCookie, forgetUserCookie } from '../session-login.ts';
 
 const ADDRESS = 'GA' + 'B'.repeat(54);
@@ -85,5 +86,38 @@ describe('ensureUserCookie', () => {
     ]);
     assert.deepEqual([a, b], [true, true]);
     assert.equal(inflight.length, 1);
+  });
+
+  it('identifies the wallet by analyticsId and never by the address', async () => {
+    const previous = process.env.NEXT_PUBLIC_POSTHOG_KEY;
+    const seen: string[] = [];
+    const client: PostHogClient = {
+      init() {},
+      opt_in_capturing() {},
+      opt_out_capturing() {},
+      startSessionRecording() {},
+      identify(id) {
+        seen.push(id);
+      },
+      reset() {},
+      capture() {},
+    };
+    process.env.NEXT_PUBLIC_POSTHOG_KEY = 'phc_test';
+    initPostHog(client);
+    try {
+      const analyticsId = '11111111-1111-4111-8111-111111111111';
+      stubFetch(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ ok: true, address: ADDRESS, analyticsId }), { status: 200 }),
+        ),
+      );
+      assert.equal(await ensureUserCookie(ADDRESS, sign), true);
+      assert.deepEqual(seen, [analyticsId]);
+      identifyWallet(ADDRESS);
+      assert.deepEqual(seen, [analyticsId]);
+    } finally {
+      if (previous === undefined) delete process.env.NEXT_PUBLIC_POSTHOG_KEY;
+      else process.env.NEXT_PUBLIC_POSTHOG_KEY = previous;
+    }
   });
 });

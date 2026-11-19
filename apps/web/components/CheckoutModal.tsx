@@ -371,7 +371,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
   useEffect(() => { setCardSent(false); }, [quote?.orderId]);
 
   return (
-    <div className="modal-backdrop" onClick={close}>
+    <div className="modal-backdrop ph-no-capture" onClick={close}>
       <section
         className="modal modal-wide"
         role="dialog"

@@ -11,7 +11,7 @@ describe('framable storefronts', () => {
     // here. The shopper's cart link then loads into a frame the browser
     // blocks, with a console error nobody is reading and a blank rectangle
     // where the checkout should be.
-    const csp = appContentSecurityPolicy('production', { ga: '', meta: '', clarity: '' });
+    const csp = appContentSecurityPolicy('production', { ga: '', meta: '', clarity: '', posthog: false });
     const frame = csp.split(';').find((d) => d.trim().startsWith('frame-src')) ?? '';
     for (const origin of STOREFRONT_ORIGINS) {
       assert.ok(frame.includes(origin), `${origin} is not in frame-src`);

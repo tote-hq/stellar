@@ -122,8 +122,8 @@ function memoryWallets(seed: { address: string; banned?: boolean; faucetAllowed?
   for (const row of seed) rows.set(`testnet:${row.address}`, { faucetAllowed: row.faucetAllowed === true, banned: row.banned === true });
   function read(network: NetworkId, address: string): WalletStanding {
     const row = rows.get(`${network}:${address}`);
-    if (!row) return { network, faucetAllowed: false, banned: false, stored: false };
-    return { network, faucetAllowed: row.faucetAllowed, banned: row.banned, stored: true };
+    if (!row) return { network, faucetAllowed: false, banned: false, stored: false, analyticsId: null };
+    return { network, faucetAllowed: row.faucetAllowed, banned: row.banned, stored: true, analyticsId: null };
   }
   return {
     inserts: () => inserts,

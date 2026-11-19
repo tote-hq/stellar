@@ -97,6 +97,21 @@ describe('POST /api/session/login', () => {
     const row = await book.directory.standing('testnet', shopper.publicKey());
     assert.equal(row.stored, true);
     assert.equal(row.banned, false);
+    const body = (await res.json()) as { ok: boolean; address: string; analyticsId: string | null };
+    assert.equal(body.ok, true);
+    assert.equal(body.address, shopper.publicKey());
+    assert.equal(body.analyticsId, null);
+  });
+
+  it('returns the row analytics id and not the address', async () => {
+    const analyticsId = '11111111-1111-4111-8111-111111111111';
+    const book = memoryWallets([{ address: shopper.publicKey(), analyticsId }]);
+    const res = await issueUserSession(await post({ address: shopper.publicKey(), proof: signed(shopper) }), env, now, book.directory);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { address: string; analyticsId: string | null };
+    assert.equal(body.analyticsId, analyticsId);
+    assert.equal(body.address, shopper.publicKey());
+    assert.notEqual(body.analyticsId, body.address);
   });
 
   it('refuses a banned wallet and does not set a cookie', async () => {
@@ -112,17 +127,23 @@ describe('POST /api/session/login', () => {
   });
 });
 
-function memoryWallets(seed: { address: string; banned?: boolean; faucetAllowed?: boolean }[] = []): {
+function memoryWallets(seed: { address: string; banned?: boolean; faucetAllowed?: boolean; analyticsId?: string | null }[] = []): {
   directory: WalletDirectory;
   inserts: () => number;
 } {
-  const rows = new Map<string, { faucetAllowed: boolean; banned: boolean }>();
+  const rows = new Map<string, { faucetAllowed: boolean; banned: boolean; analyticsId: string | null }>();
   let inserts = 0;
-  for (const row of seed) rows.set(`testnet:${row.address}`, { faucetAllowed: row.faucetAllowed === true, banned: row.banned === true });
+  for (const row of seed) {
+    rows.set(`testnet:${row.address}`, {
+      faucetAllowed: row.faucetAllowed === true,
+      banned: row.banned === true,
+      analyticsId: row.analyticsId ?? null,
+    });
+  }
   function read(network: NetworkId, address: string): WalletStanding {
     const row = rows.get(`${network}:${address}`);
-    if (!row) return { network, faucetAllowed: false, banned: false, stored: false };
-    return { network, faucetAllowed: row.faucetAllowed, banned: row.banned, stored: true };
+    if (!row) return { network, faucetAllowed: false, banned: false, stored: false, analyticsId: null };
+    return { network, faucetAllowed: row.faucetAllowed, banned: row.banned, stored: true, analyticsId: row.analyticsId };
   }
   return {
     inserts: () => inserts,
@@ -130,7 +151,7 @@ function memoryWallets(seed: { address: string; banned?: boolean; faucetAllowed?
       async register(network, address) {
         const key = `${network}:${address}`;
         if (!rows.has(key)) {
-          rows.set(key, { faucetAllowed: false, banned: false });
+          rows.set(key, { faucetAllowed: false, banned: false, analyticsId: null });
           inserts += 1;
         }
         return read(network, address);

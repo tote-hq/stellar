@@ -19,7 +19,7 @@ describe('web app manifest', () => {
   });
 
   it('refuses framing and eval, and names the wallet host', () => {
-    const csp = appContentSecurityPolicy('production', { ga: '', meta: '', clarity: '' });
+    const csp = appContentSecurityPolicy('production', { ga: '', meta: '', clarity: '', posthog: false });
     assert.match(csp, /frame-ancestors 'none'/);
     assert.match(csp, /sdk\.api\.pollar\.xyz/);
     assert.doesNotMatch(csp, /'unsafe-eval'/);

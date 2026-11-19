@@ -144,8 +144,8 @@ function granted(addresses: string[]): WalletDirectory {
   const rows = new Map(addresses.map((address) => [address, { faucetAllowed: true, banned: false }]));
   function read(network: NetworkId, address: string): WalletStanding {
     const row = rows.get(address);
-    if (!row) return { network, faucetAllowed: false, banned: false, stored: false };
-    return { network, ...row, stored: true };
+    if (!row) return { network, faucetAllowed: false, banned: false, stored: false, analyticsId: null };
+    return { network, ...row, stored: true, analyticsId: null };
   }
   return {
     async register(network, address) {
