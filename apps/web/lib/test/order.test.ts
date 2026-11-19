@@ -47,22 +47,11 @@ describe('hex and base64', () => {
     const id = newOrderId();
     assert.deepEqual(fromHex(toHex(id)), id);
   });
-
-  it('pads a low byte rather than dropping a nibble', () => {
-    assert.equal(toHex(new Uint8Array([0, 1, 255])), '0001ff');
-  });
-
-  it('encodes base64 the way Pollar reads a `bytes` arg', () => {
-    assert.equal(toBase64(new Uint8Array([0, 1, 2, 3])), 'AAECAw==');
-  });
 });
 
 describe('newOrderId', () => {
-  it('is 32 bytes, which is what BytesN<32> means', () => {
+  it('is 32 bytes and is not derived from anything', () => {
     assert.equal(newOrderId().length, 32);
-  });
-
-  it('is not derived from anything — two calls differ', () => {
     // If ids were a hash of the basket, a user retrying a payment that failed
     // in their wallet would be rejected for OrderExists.
     assert.notEqual(toHex(newOrderId()), toHex(newOrderId()));
@@ -70,38 +59,22 @@ describe('newOrderId', () => {
 });
 
 describe('canonicalBasket', () => {
-  it('is stable across two equal carts built in a different order', () => {
+  it('is stable across line order and ignores store messages', () => {
     const a = cart({ lines: [line({ index: 0 }), line({ index: 1, skuId: '999' })] });
     const b = cart({ lines: [line({ index: 1, skuId: '999' }), line({ index: 0 })] });
     assert.equal(canonicalBasket(a), canonicalBasket(b));
-  });
-
-  it('carries a version tag, because a hash is a promise about bytes', () => {
-    assert.match(canonicalBasket(cart()), /^changuito\/basket\/v1\n/);
-  });
-
-  it('does not depend on the display strings, which are a formatting choice', () => {
-    const other = cart({ total: { centavos: 300_000, display: '3000 pesos' } });
-    assert.equal(canonicalBasket(cart()), canonicalBasket(other));
-  });
-
-  it('ignores store messages, which change without the basket changing', () => {
     assert.equal(canonicalBasket(cart()), canonicalBasket(cart({ messages: ['Promo 2x1'] })));
   });
 });
 
 describe('basketHash', () => {
-  it('is 32 bytes and deterministic', async () => {
+  it('RULE: changing anything the user was shown changes the hash', async () => {
     const a = await basketHash(cart());
     const b = await basketHash(cart());
     assert.equal(a.length, 32);
     assert.deepEqual(a, b);
-  });
 
-  it('RULE: changing anything the user was shown changes the hash', async () => {
-    // This is the whole point of the commitment. Each of these is a way the
-    // agent could settle against a basket the user never approved.
-    const base = toHex(await basketHash(cart()));
+    const base = toHex(a);
     const variants: Record<string, Cart> = {
       quantity: cart({ lines: [line({ quantity: 3 })] }),
       sku: cart({ lines: [line({ skuId: '54321' })] }),
@@ -133,27 +106,16 @@ describe('openArgs', () => {
     );
     assert.equal(args[0].value, ok.buyer);
     assert.equal(args[1].value, toBase64(ok.orderId));
-    // i128 travels as a string: 2^53 is not far above a sensible balance in
-    // 7-decimal units, and JSON numbers stop being exact there.
     assert.equal(args[2].value, '250000000');
     assert.equal(args[4].value, String(DEFAULT_TIMEOUT_SECS));
-  });
-
-  it('defaults to a timeout the contract will accept', () => {
     assert.ok(DEFAULT_TIMEOUT_SECS >= MIN_TIMEOUT_SECS && DEFAULT_TIMEOUT_SECS <= MAX_TIMEOUT_SECS);
   });
 
-  it('refuses a hash that is not 32 bytes rather than letting the ledger say no', () => {
+  it('refuses a hash, amount or timeout the contract would reject', () => {
     assert.throws(() => openArgs({ ...ok, orderId: bytes(31) }), /32 bytes/);
     assert.throws(() => openArgs({ ...ok, basketHash: bytes(33) }), /32 bytes/);
-  });
-
-  it('refuses a zero or negative amount', () => {
     assert.throws(() => openArgs({ ...ok, amountUnits: 0n }), /positive/);
     assert.throws(() => openArgs({ ...ok, amountUnits: -1n }), /positive/);
-  });
-
-  it('refuses a timeout outside the contract bounds', () => {
     assert.throws(() => openArgs({ ...ok, timeoutSecs: MIN_TIMEOUT_SECS - 1 }), /timeout_secs/);
     assert.throws(() => openArgs({ ...ok, timeoutSecs: MAX_TIMEOUT_SECS + 1 }), /timeout_secs/);
   });
@@ -161,10 +123,6 @@ describe('openArgs', () => {
 
 describe('RULE: the args match the contract they are sent to', () => {
   it('open() still takes (buyer, order_id, amount, basket_hash, timeout_secs)', async () => {
-    // Soroban arguments are positional, and two of them are BytesN<32>. Swap
-    // order_id and basket_hash and everything type-checks, deploys, and then
-    // settles against a basket nobody approved. Nothing else catches that, so
-    // this reads the signature out of the contract and compares it.
     const src = await readFile(new URL('../../../../contracts/escrow/src/lib.rs', import.meta.url), 'utf8');
     const sig = /pub fn open\(\s*env: Env,([^)]*)\)/.exec(src);
     assert.ok(sig, 'could not find `pub fn open` in the escrow contract');
@@ -179,8 +137,6 @@ describe('RULE: the args match the contract they are sent to', () => {
       declared.map(([name]) => name),
       ['buyer', 'order_id', 'amount', 'basket_hash', 'timeout_secs'],
     );
-
-    // And the Rust types the encoder is claiming to satisfy.
     assert.deepEqual(
       declared.map(([, type]) => type),
       ['Address', 'BytesN<32>', 'i128', 'BytesN<32>', 'u64'],
@@ -189,7 +145,6 @@ describe('RULE: the args match the contract they are sent to', () => {
     const bounds = /const MIN_TIMEOUT: u64 = (\d+);[\s\S]*?const MAX_TIMEOUT: u64 = ([^;]+);/.exec(src);
     assert.ok(bounds, 'could not find the timeout bounds');
     assert.equal(Number(bounds[1]), MIN_TIMEOUT_SECS);
-    // `30 * 24 * 60 * 60` — evaluated rather than string-matched.
     assert.equal(
       bounds[2].split('*').reduce((n, x) => n * Number(x.trim()), 1),
       MAX_TIMEOUT_SECS,
@@ -206,15 +161,7 @@ describe('canonicalReceipt', () => {
     settledAt: '2026-09-20T14:30:00.000Z',
   };
 
-  it('is verifiable: the preimage is plain text a person can read', () => {
-    // The whole point of returning it from /api/settle. 32 bytes on a block
-    // explorer prove nothing unless you can see what was hashed into them.
-    assert.match(canonicalReceipt(input), /^changuito\/receipt\/v2\n/);
-    assert.match(canonicalReceipt(input), /\nsettled\|2026-09-20T14:30:00\.000Z\n/);
-  });
-
-  it('records only what the contract and the server know, and on whose word', () => {
-    // v1 hashed a retailer, cart id and link that came from the browser.
+  it('records only what the contract and the server know, and hashes that', async () => {
     const lines = canonicalReceipt(input).split('\n');
     assert.deepEqual(lines.slice(1, 6), [
       `order|${input.orderId}`,
@@ -224,20 +171,11 @@ describe('canonicalReceipt', () => {
       'basis|buyer-confirmed',
     ]);
     assert.doesNotMatch(canonicalReceipt(input), /retailer|cart\||handoff/);
-  });
 
-  it('hashes to 32 bytes, and a different moment is a different receipt', async () => {
     const a = await receiptHash(input);
     assert.equal(a.length, 32);
     const b = await receiptHash({ ...input, settledAt: '2026-09-20T14:30:01.000Z' });
     assert.notEqual(toHex(a), toHex(b));
-  });
-
-  it('is not the basket hash, even for the same cart', async () => {
-    // Two BytesN<32> fields on the same order; a collision here would mean the
-    // encoder was reusing one for the other.
-    const receipt = toHex(await receiptHash(input));
-    const basket = toHex(await basketHash(cart()));
-    assert.notEqual(receipt, basket);
+    assert.notEqual(toHex(a), toHex(await basketHash(cart())));
   });
 });

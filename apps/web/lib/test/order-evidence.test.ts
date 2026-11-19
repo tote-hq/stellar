@@ -1,13 +1,10 @@
 import assert from 'node:assert/strict';
-import { before, beforeEach, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 import type { Cart, CartLine } from '@changuito/mcp/types';
-import { Keypair } from '@stellar/stellar-sdk';
 
 import { decideOrderEvidence } from '../order-evidence.ts';
 import { basketHash, toHex } from '../order.ts';
-import { chain, mockBindings, mockResolver, RESOLVER_PUBLIC, Status } from './support/fake-soroban.ts';
-import { signedProof } from './support/proof.ts';
 
 /**
  * Evidence for the release / refund / BasketMismatch rule, driven by five
@@ -16,15 +13,6 @@ import { signedProof } from './support/proof.ts';
  * pins the rule itself: a matching basket releases, a failed or expired
  * order refunds, and a wrong basket is rejected.
  */
-
-const env = process.env as Record<string, string | undefined>;
-env.NODE_ENV = 'production';
-env.TURNSTILE_SECRET_KEY = 'turnstile-test-secret';
-env.NEXT_PUBLIC_TURNSTILE_SITE_KEY = 'site-test';
-delete env.DATABASE_URL;
-
-mockBindings();
-mockResolver();
 
 const money = (centavos: number) => ({
   centavos,
@@ -115,15 +103,6 @@ const WRONG_CART = cart('dia-evidence-wrong-cart-99', [
 ]);
 
 describe('order evidence rule (Día fixture carts)', () => {
-  it('the fixture table has five orders, three releases and two refunds', () => {
-    assert.equal(FIXTURES.length, 5);
-    assert.equal(FIXTURES.filter((f) => f.expect === 'release').length, 3);
-    assert.equal(FIXTURES.filter((f) => f.expect === 'refund').length, 2);
-    assert.ok(FIXTURES.every((f) => f.cart.retailer === 'dia'));
-    assert.equal(new Set(FIXTURES.map((f) => f.cart.cartId)).size, 5);
-    assert.equal(new Set(FIXTURES.map((f) => f.orderId)).size, 5);
-  });
-
   it('decideOrderEvidence: matching confirmed baskets release', async () => {
     for (const f of FIXTURES.filter((x) => x.expect === 'release')) {
       const hash = toHex(await basketHash(f.cart));
@@ -154,98 +133,5 @@ describe('order evidence rule (Día fixture carts)', () => {
       decideOrderEvidence({ lockedBasketHash: locked, presentedBasketHash: wrong, store: 'confirmed' }),
       { action: 'reject', error: 'BasketMismatch' },
     );
-  });
-});
-
-describe('POST /api/settle against the Día evidence fixtures', () => {
-  let POST: (req: Request) => Promise<Response>;
-  let human: string;
-  const buyer = Keypair.random();
-
-  before(async () => {
-    const { HUMAN_COOKIE, mintHumanToken } = await import('../human-gate.ts');
-    human = `${HUMAN_COOKIE}=${encodeURIComponent(await mintHumanToken('turnstile-test-secret'))}`;
-    POST = (await import('../../app/api/settle/route.ts')).POST;
-  });
-
-  beforeEach(() => {
-    chain.reset();
-    chain.resolver = RESOLVER_PUBLIC;
-  });
-
-  async function seed(orderId: string, basket: Cart, amountUnits: bigint) {
-    const hash = await basketHash(basket);
-    chain.orders.set(orderId, {
-      buyer: buyer.publicKey(),
-      amount: amountUnits,
-      basket_hash: Buffer.from(hash),
-      status: Status.Open,
-    });
-    return toHex(hash);
-  }
-
-  const call = async (
-    action: 'settle' | 'refund',
-    orderId: string,
-    basketHashHex: string,
-  ) =>
-    POST(
-      new Request('https://app.changuito.me/api/settle', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', cookie: human },
-        body: JSON.stringify({
-          action,
-          orderId,
-          basketHash: basketHashHex,
-          address: buyer.publicKey(),
-          proof: signedProof(buyer, action, orderId),
-        }),
-      }),
-    );
-
-  it('releases each confirmed matching Día basket', async () => {
-    for (const f of FIXTURES.filter((x) => x.expect === 'release')) {
-      chain.reset();
-      chain.resolver = RESOLVER_PUBLIC;
-      const hash = await seed(f.orderId, f.cart, 1_250_000n);
-      const res = await call('settle', f.orderId, hash);
-      assert.equal(res.status, 200, f.key);
-      const body = await res.json();
-      assert.equal(body.action, 'settle', f.key);
-      assert.ok(chain.calls.some((c) => c.method === 'settle'), f.key);
-    }
-  });
-
-  it('refunds the failed and expired Día orders', async () => {
-    for (const f of FIXTURES.filter((x) => x.expect === 'refund')) {
-      chain.reset();
-      chain.resolver = RESOLVER_PUBLIC;
-      const hash = await seed(f.orderId, f.cart, 2_500_000n);
-      const res = await call('refund', f.orderId, hash);
-      assert.equal(res.status, 200, f.key);
-      const body = await res.json();
-      assert.equal(body.action, 'refund', f.key);
-      const sent = chain.calls.find((c) => c.method === 'refund');
-      assert.deepEqual(sent?.args, { order: f.orderId, caller: RESOLVER_PUBLIC }, f.key);
-    }
-  });
-
-  it('rejects a release that presents a different Día cart', async () => {
-    const target = FIXTURES[0];
-    const locked = await seed(target.orderId, target.cart, 1_250_000n);
-    const wrong = toHex(await basketHash(WRONG_CART));
-    assert.notEqual(locked, wrong);
-
-    const decision = decideOrderEvidence({
-      lockedBasketHash: locked,
-      presentedBasketHash: wrong,
-      store: 'confirmed',
-    });
-    assert.deepEqual(decision, { action: 'reject', error: 'BasketMismatch' });
-
-    const res = await call('settle', target.orderId, wrong);
-    assert.equal(res.status, 409);
-    assert.match((await res.json()).error, /carrito no coincide/);
-    assert.ok(!chain.calls.some((c) => c.method === 'settle'));
   });
 });

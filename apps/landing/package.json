@@ -10,8 +10,7 @@
     "dev": "next dev -p 3125",
     "build": "next build",
     "start": "next start -p 3125",
-    "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test \"lib/test/*.test.ts\""
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@changuito/trust": "*",

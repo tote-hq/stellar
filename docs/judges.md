@@ -24,7 +24,7 @@ automated is stated by us, before you find it.
 | **Contracts** | escrow [`CCA3ES6A…JG7EX`](https://stellar.expert/explorer/testnet/contract/CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX) *(testnet, mintable `mock_usdc`, mounted on the login-network checkout)* · mintable USDC [`CAOPLEE4…BNN3E`](https://stellar.expert/explorer/testnet/contract/CAOPLEE4NVOVEBYRO7NHG5K4FEML5O5C5AATYBK4FCDLYRAJFZWBNN3E) |
 | **SEPs used** | SEP-53 (signed messages, for identity), SEP-41 (the token interface), SEP-7 (the receive URI) |
 | **Wallet** | Pollar (`@pollar/react` 0.11.3) — email or Google login, so a shopper needs no prior wallet |
-| **Tests** | `npm test` → 1178 · `npm run contracts:test` → 34. Neither needs an API key |
+| **Tests** | `npm test` → 747 · `npm run contracts:test` → 34. Neither needs an API key |
 | **Pitch video** | sources in [`creatives/`](../creatives) (Remotion, three cuts: ES, EN, promo). There is no hosted link in this repo — `npm run render` in any of those folders produces the mp4 |
 
 ## 1. The one-paragraph version
@@ -56,7 +56,7 @@ deposit account.
 | The claim | Where to check it |
 |---|---|
 | It is a real MCP server, spoken over the real protocol | [`apps/web/lib/mcp/boot.ts`](../apps/web/lib/mcp/boot.ts) — `InMemoryTransport.createLinkedPair()`, so `initialize` / `tools/list` / `tools/call` actually happen. Importing the functions would have been shorter |
-| The supermarket integration is not a mock | [`packages/mcp/`](../packages/mcp) — four Argentine VTEX chains, 520 tests, written before this app existed |
+| The supermarket integration is not a mock | [`packages/mcp/`](../packages/mcp) — four Argentine VTEX chains, 279 tests, written before this app existed |
 | The model cannot put a wrong price on screen | [`apps/web/lib/agent/render-tools.ts`](../apps/web/lib/agent/render-tools.ts) — render tools take **identifiers only**. A hallucinated price has no argument to travel in |
 | The shopper is charged the store's exact total, envío included | [`apps/web/lib/pay/deposit-rail.ts`](../apps/web/lib/pay/deposit-rail.ts) — ignores the client's figure whenever it can read the store's. Commit `16ee1a8` is the fix and says why |
 | Confirmation is trustless | [`apps/web/lib/ledger/`](../apps/web/lib/ledger/) — public ledger read via the port (Horizon today). No webhook, no secret, no reconciliation. You can check any deposit yourself |
@@ -112,7 +112,7 @@ printf 'changuito/receipt/v1\nretailer|dia\ncart|live-check-1\nhandoff|https://d
 And the suites, from a clean clone with only `npm install`:
 
 ```bash
-npm test                 # 1178: mcp 520 · trust 2 · web 583 · landing 73
+npm test                 # 747: mcp 279 · trust 1 · web 467
 npm run contracts:test   #   34: escrow 19 · mock_usdc 15
 npm run build
 ```

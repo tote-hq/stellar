@@ -41,13 +41,10 @@ describe('trustlines', () => {
     // The pure half of the rule above, kept because the branch is still live:
     // `contracts.usdc.id` is the Soroban token, it backs the dormant escrow,
     // and a SEP-41 balance really does reach anybody who asks.
-    assert.equal(trustlineFor([], null), 'not-needed');
-    assert.equal(trustlineFor(null, null), 'not-needed');
-  });
-
-  it('RULE: an unconfigured network never asks for a trustline it cannot name', () => {
     // Before the mainnet deploy `usdcIssuer` is '', and an empty issuer must
     // read as "nothing to open" rather than as an asset called USDC:''.
+    assert.equal(trustlineFor([], null), 'not-needed');
+    assert.equal(trustlineFor(null, null), 'not-needed');
     for (const net of NETWORK_IDS) {
       const issuer = DEPLOYMENTS[net].usdcIssuer;
       if (issuer) continue;
@@ -62,21 +59,12 @@ describe('trustlineFor, on a token that has an issuer', () => {
   // until the deploy — a test that can only run afterwards guards nothing.
   const state = (balances: AccountBalance[] | null) => trustlineFor(balances, { code: 'USDC', issuer: ISSUER });
 
-  it('an account holding the line is ok', () => {
+  it('classifies a held line, a missing line, another issuer, and an account not on the ledger', () => {
     assert.equal(state([native, usdc(ISSUER)]), 'ok');
-  });
-
-  it('an account holding only XLM needs one', () => {
     assert.equal(state([native]), 'needed');
-  });
-
-  it('RULE: the same code from another issuer is not the same asset', () => {
     // USDC is four letters anybody can issue. Matching on the code alone
     // would call somebody else's token our money.
     assert.equal(state([native, usdc('GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5')]), 'needed');
-  });
-
-  it('RULE: an account that is not on the ledger has opted into nothing', () => {
     assert.equal(state(null), 'needed');
   });
 });

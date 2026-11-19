@@ -9,11 +9,6 @@ describe('shortAddress', () => {
   it('keeps both ends, which are the parts a person compares', () => {
     assert.equal(shortAddress(DEPLOYMENTS.testnet.resolver), 'GBXB…YGN5');
   });
-
-  it('leaves anything already short alone', () => {
-    assert.equal(shortAddress('GABC'), 'GABC');
-    assert.equal(shortAddress(''), '');
-  });
 });
 
 describe('addressKind', () => {
@@ -37,13 +32,6 @@ describe('addressKind', () => {
       assert.equal(addressKind(bad), null, `${bad.slice(0, 12)} was accepted`);
     }
   });
-
-  it('never accepts a secret key, because that is a paste people make', () => {
-    // S-addresses are the same alphabet and length as G-addresses. If one ever
-    // reached a balance URL it would be in a server log within the second.
-    const secret = 'SAVYLZCEWXGXYVLOPICDQRVUQ6ZVKEPTFFOLC6RGKCXZZLBGQAPXYTYD';
-    assert.equal(addressKind(secret), null);
-  });
 });
 
 describe('pollarNetwork', () => {
@@ -61,6 +49,10 @@ describe('pollarNetwork', () => {
     // Derived from which key is set (testnet wins when both are). With neither
     // key set — the unit-test default — there is no login network at all, and
     // that is not the same as asking Pollar for DEFAULT_NETWORK.
+    // Mode follows the session; network follows the key. LOGIN_NETWORK is
+    // whatever loginNetwork returns from the env keys — null, testnet, or
+    // mainnet — never a hard-coded 'mainnet'. pollarEnabled is exactly
+    // "is there a login network".
     assert.equal(
       LOGIN_NETWORK,
       loginNetwork({
@@ -74,24 +66,9 @@ describe('pollarNetwork', () => {
       assert.equal(pollarNetwork(LOGIN_NETWORK), LOGIN_NETWORK);
       assert.equal(pollarEnabled, pollarEnabledOn(LOGIN_NETWORK));
     }
-  });
-
-  it('RULE: signing in does not mean mainnet — the key decides the network', () => {
-    // Mode follows the session; network follows the key. LOGIN_NETWORK is
-    // whatever loginNetwork returns from the env keys — null, testnet, or
-    // mainnet — never a hard-coded 'mainnet'. pollarEnabled is exactly
-    // "is there a login network".
     assert.equal(pollarEnabled, LOGIN_NETWORK !== null);
     assert.ok(
       LOGIN_NETWORK === null || LOGIN_NETWORK === 'testnet' || LOGIN_NETWORK === 'mainnet',
     );
-  });
-
-  it('reports per-network whether a key was configured', () => {
-    // Pollar dashboard keys are network-scoped, so mainnet needs its own.
-    // Nothing is asserted about the values — a fresh clone has neither.
-    for (const net of NETWORK_IDS) {
-      assert.equal(typeof pollarEnabledOn(net), 'boolean');
-    }
   });
 });

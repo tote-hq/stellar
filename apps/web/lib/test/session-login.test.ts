@@ -26,34 +26,24 @@ const denied = () => Promise.resolve(new Response('{"error":"invalid_address"}',
 beforeEach(forgetUserCookie);
 
 describe('ensureUserCookie', () => {
-  it('mints once for two callers racing the same login', async () => {
+  it('mints one login proof and reuses it for a racing or later caller', async () => {
     const calls = stubFetch(ok);
     const [a, b] = await Promise.all([ensureUserCookie(ADDRESS, sign), ensureUserCookie(ADDRESS, sign)]);
     assert.equal(calls.length, 1);
     assert.deepEqual([a, b], [true, true]);
     assert.match(calls[0]!, /GAB/);
-  });
-
-  it('sends a login proof with the address, never the address alone', async () => {
-    const calls = stubFetch(ok);
-    await ensureUserCookie(ADDRESS, sign);
     const body = JSON.parse(calls[0]!) as { address: string; proof?: { message: string; signature: string } };
     assert.equal(body.address, ADDRESS);
     assert.equal(body.proof?.signature, 'c2lnbmVk');
     assert.match(body.proof?.message ?? '', new RegExp(`^Changuito: iniciar sesión con ${ADDRESS} \\(`));
+    await ensureUserCookie(ADDRESS, sign);
+    assert.equal(calls.length, 1);
   });
 
   it('does not call the server when the wallet will not sign', async () => {
     const calls = stubFetch(ok);
     assert.equal(await ensureUserCookie(ADDRESS, refuse), false);
     assert.equal(calls.length, 0);
-  });
-
-  it('remembers a success, so a later caller does not re-mint', async () => {
-    const calls = stubFetch(ok);
-    await ensureUserCookie(ADDRESS, sign);
-    await ensureUserCookie(ADDRESS, sign);
-    assert.equal(calls.length, 1);
   });
 
   it('does not remember a failure — the next caller gets a real attempt', async () => {
@@ -68,32 +58,32 @@ describe('ensureUserCookie', () => {
     assert.equal(await ensureUserCookie(ADDRESS, sign), false);
   });
 
-  it('mints again for a different address', async () => {
+  it('mints again for another address, after logout, or when forced', async () => {
     const calls = stubFetch(ok);
     await ensureUserCookie(ADDRESS, sign);
     await ensureUserCookie('GC' + 'D'.repeat(54), sign);
     assert.equal(calls.length, 2);
-  });
 
-  it('forgets on logout, so logging back in re-mints', async () => {
-    const calls = stubFetch(ok);
+    forgetUserCookie();
+    const afterLogout = stubFetch(ok);
     await ensureUserCookie(ADDRESS, sign);
     forgetUserCookie();
     await ensureUserCookie(ADDRESS, sign);
-    assert.equal(calls.length, 2);
-  });
+    assert.equal(afterLogout.length, 2);
 
-  it('force remints after a remembered success', async () => {
-    const calls = stubFetch(ok);
+    forgetUserCookie();
+    const forced = stubFetch(ok);
     await ensureUserCookie(ADDRESS, sign);
     assert.equal(await ensureUserCookie(ADDRESS, sign, { force: true }), true);
-    assert.equal(calls.length, 2);
-  });
+    assert.equal(forced.length, 2);
 
-  it('force waits on the in-flight mint instead of firing a second one', async () => {
-    const calls = stubFetch(ok);
-    const [a, b] = await Promise.all([ensureUserCookie(ADDRESS, sign), ensureUserCookie(ADDRESS, sign, { force: true })]);
+    forgetUserCookie();
+    const inflight = stubFetch(ok);
+    const [a, b] = await Promise.all([
+      ensureUserCookie(ADDRESS, sign),
+      ensureUserCookie(ADDRESS, sign, { force: true }),
+    ]);
     assert.deepEqual([a, b], [true, true]);
-    assert.equal(calls.length, 1);
+    assert.equal(inflight.length, 1);
   });
 });

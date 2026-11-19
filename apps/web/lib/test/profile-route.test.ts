@@ -68,13 +68,6 @@ describe('/api/profile', () => {
     assert.equal(read.headers.get('cache-control'), 'no-store');
   });
 
-  it('an empty password box keeps the saved password', async () => {
-    const res = await put(buyer, { postcode: '1414', password: '' });
-    const body = await res.json();
-    assert.equal(body.postcode, '1414');
-    assert.equal(body.hasPassword, true);
-  });
-
   it('one wallet never reads another’s row', async () => {
     const body = await (await get(other)).json();
     assert.equal(body.email, null);

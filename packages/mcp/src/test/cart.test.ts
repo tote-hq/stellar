@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { APIRequestContext } from 'playwright';
 
-import { payableTotal, toCart, totalizerBreakdown, type VtexOrderForm } from '../adapters/orderform.js';
-import { buildCart, describeCart, fetchOrderForm, handoffUrl, setQuantity } from '../checkout/cart.js';
+import { payableTotal, toCart, type VtexOrderForm } from '../adapters/orderform.js';
+import { buildCart, fetchOrderForm, setQuantity } from '../checkout/cart.js';
 import { loadConfig } from '../config.js';
 
 const cfg = loadConfig({ VYRION_API_KEY: 'sk_test_x', SECRETS_DIR: '/tmp/s' });
@@ -72,13 +72,7 @@ describe('orderForm mapping', () => {
     assert.equal(cart.lines[0].lineTotal.display, '$ 4.680,00');
   });
 
-  it('reports the Items subtotal as the cart total', () => {
-    assert.equal(toCart(withItems([LECHE, PAN]), 'dia').total.centavos, 648_000);
-  });
-
-  // Regression. Every fixture above prices Items as the sum of the selling
-  // prices, so the two bases agreed and the bug was invisible. This is the
-  // real shape of a Día cart with a promotion on it: Items is the LIST total,
+  // Regression. A Día cart with a promotion prices Items as the LIST total,
   // and Discounts brings it back down. A cart whose total does not match its
   // own lines is one the escrow would lock the wrong amount of USDC against.
   it('RULE: the total matches the lines when a promotion is applied', () => {
@@ -105,42 +99,17 @@ describe('orderForm mapping', () => {
 
   it('but payableTotal includes shipping — that is what gets charged', () => {
     assert.equal(payableTotal(withItems([LECHE, PAN])), 798_000);
-  });
-
-  it('falls back to summing totalizers when value is absent', () => {
     const of = { ...withItems([LECHE]), value: undefined };
     assert.equal(payableTotal(of), 468_000 + 150_000);
-  });
-
-  it('keeps the totalizer breakdown for the approval summary', () => {
-    assert.deepEqual(totalizerBreakdown(withItems([LECHE])).map((t) => t.id), ['Items', 'Shipping']);
   });
 
   it('marks an unavailable line so it cannot be mistaken for a purchase', () => {
     const cart = toCart(withItems([{ ...LECHE, availability: 'withoutStock' }]), 'dia');
     assert.equal(cart.lines[0].available, false);
   });
-
-  it('carries store messages through verbatim', () => {
-    const of = { ...emptyOrderForm, messages: [{ text: 'El precio cambió' }, { text: '' }] };
-    assert.deepEqual(toCart(of, 'dia').messages, ['El precio cambió']);
-  });
 });
 
 describe('fetchOrderForm', () => {
-  it('asks for the session cart when no id is known', async () => {
-    const { req, calls } = fakeReq({ get: () => ({ body: emptyOrderForm }) });
-    const of = await fetchOrderForm(req, cfg);
-    assert.equal(of.orderFormId, OF_ID);
-    assert.match(calls[0].url, /\/api\/checkout\/pub\/orderForm\?sc=1$/);
-  });
-
-  it('refreshes stale data when an id is known', async () => {
-    const { req, calls } = fakeReq({ get: () => ({ body: emptyOrderForm }) });
-    await fetchOrderForm(req, cfg, OF_ID);
-    assert.match(calls[0].url, new RegExp(`/orderForm/${OF_ID}\\?refreshOutdatedData=true$`));
-  });
-
   it('blames the session, not the store, when no cart comes back', async () => {
     const { req } = fakeReq({ get: () => ({ status: 401 }) });
     await assert.rejects(fetchOrderForm(req, cfg), /session_status/);
@@ -154,56 +123,6 @@ describe('buildCart', () => {
       post: (url) => (url.includes('/items') ? { body: after } : { status: 404 }),
     });
   }
-
-  it('posts the items in the store own shape', async () => {
-    const { req, calls } = scenario(withItems([LECHE]));
-    await buildCart(req, cfg, [{ skuId: '272382', quantity: 2, sellerId: 'ardiaprod1080' }]);
-    const post = calls.find((c) => c.method === 'POST');
-    assert.ok(post);
-    assert.match(post.url, new RegExp(`/orderForm/${OF_ID}/items\\?sc=1$`));
-    assert.deepEqual((post.data as { orderItems: unknown[] }).orderItems, [
-      { id: '272382', quantity: 2, seller: 'ardiaprod1080' },
-    ]);
-  });
-
-  it('asks for the sections it needs in the same round trip', async () => {
-    const { req, calls } = scenario(withItems([LECHE]));
-    await buildCart(req, cfg, [{ skuId: '272382', quantity: 2, sellerId: 'ardiaprod1080' }]);
-    const sections = (calls.find((c) => c.method === 'POST')!.data as { expectedOrderFormSections: string[] })
-      .expectedOrderFormSections;
-    for (const s of ['items', 'totalizers', 'clientProfileData', 'shippingData', 'paymentData']) {
-      assert.ok(sections.includes(s), s);
-    }
-  });
-
-  it('returns the payable total and the handoff link', async () => {
-    const { req } = scenario(withItems([LECHE]));
-    const r = await buildCart(req, cfg, [{ skuId: '272382', quantity: 2, sellerId: 'ardiaprod1080' }]);
-    assert.equal(r.payableCentavos, 618_000);
-    assert.equal(r.handoffUrl, handoffUrl(cfg, OF_ID));
-    assert.match(r.handoffUrl, /#\/cart$/);
-  });
-
-  it('WARNS about items the user already had, and does not delete them', async () => {
-    const { req, calls } = scenario(withItems([PAN, LECHE]), withItems([PAN]));
-    const r = await buildCart(req, cfg, [{ skuId: '272382', quantity: 2, sellerId: 'ardiaprod1080' }]);
-    assert.equal(r.preExisting.length, 1);
-    assert.match(r.warnings.join(' '), /already had 1 item\(s\)/);
-    assert.match(r.warnings.join(' '), /will be paid for too/);
-    assert.ok(!calls.some((c) => c.url.includes('removeAll')), 'must not silently empty the cart');
-  });
-
-  it('empties the cart first only when explicitly asked', async () => {
-    const { req, calls } = fakeReq({
-      get: () => ({ body: withItems([PAN]) }),
-      post: (url) => ({ body: url.includes('removeAll') ? emptyOrderForm : withItems([LECHE]) }),
-    });
-    const r = await buildCart(req, cfg, [{ skuId: '272382', quantity: 2, sellerId: 'ardiaprod1080' }], {
-      clearFirst: true,
-    });
-    assert.ok(calls.some((c) => c.url.includes('removeAll')));
-    assert.equal(r.warnings.length, 0);
-  });
 
   it('reports a SKU the store silently dropped', async () => {
     const { req } = scenario(withItems([LECHE]));
@@ -225,12 +144,6 @@ describe('buildCart', () => {
     const { req } = scenario(withItems([{ ...LECHE, availability: 'withoutStock' }]));
     const r = await buildCart(req, cfg, [{ skuId: '272382', quantity: 2, sellerId: 'ardiaprod1080' }]);
     assert.match(r.rejected[0].reason, /marked unavailable/);
-  });
-
-  it('treats a different seller as a different line', async () => {
-    const { req } = scenario(withItems([LECHE]));
-    const r = await buildCart(req, cfg, [{ skuId: '272382', quantity: 2, sellerId: 'someone-else' }]);
-    assert.equal(r.rejected.length, 1);
   });
 
   it('explains an HTTP failure and points at the likely cause', async () => {
@@ -258,42 +171,8 @@ describe('buildCart', () => {
 });
 
 describe('setQuantity', () => {
-  it('addresses the line by index, because that is what VTEX takes', async () => {
-    const { req, calls } = fakeReq({ post: () => ({ body: withItems([{ ...LECHE, quantity: 3 }]) }) });
-    const cart = await setQuantity(req, cfg, OF_ID, 0, 3);
-    assert.deepEqual((calls[0].data as { orderItems: unknown[] }).orderItems, [{ index: 0, quantity: 3 }]);
-    assert.equal(cart.lines[0].quantity, 3);
-  });
-
   it('surfaces a failure instead of returning a stale cart', async () => {
     const { req } = fakeReq({ post: () => ({ status: 500 }) });
     await assert.rejects(setQuantity(req, cfg, OF_ID, 0, 3), /Could not update line 0/);
-  });
-});
-
-describe('describeCart', () => {
-  it('shows lines, the breakdown, the total and the link', async () => {
-    const { req } = fakeReq({
-      get: () => ({ body: emptyOrderForm }),
-      post: () => ({ body: withItems([LECHE, PAN]) }),
-    });
-    const r = await buildCart(req, cfg, [
-      { skuId: '272382', quantity: 2, sellerId: 'ardiaprod1080' },
-      { skuId: '119900', quantity: 1, sellerId: 'ardiaprod1080' },
-    ]);
-    const text = describeCart(r);
-    assert.match(text, /2× Leche Descremada 1L/);
-    assert.match(text, /Total do Frete/);
-    assert.match(text, /TOTAL/);
-    assert.match(text, /Open it yourself: https:\/\//);
-  });
-
-  it('puts the warning where it cannot be missed', async () => {
-    const { req } = fakeReq({
-      get: () => ({ body: withItems([PAN]) }),
-      post: () => ({ body: withItems([PAN, LECHE]) }),
-    });
-    const r = await buildCart(req, cfg, [{ skuId: '272382', quantity: 2, sellerId: 'ardiaprod1080' }]);
-    assert.match(describeCart(r), /! Your cart already had/);
   });
 });

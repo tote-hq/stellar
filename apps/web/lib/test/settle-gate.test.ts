@@ -51,14 +51,11 @@ const settle = (extra: Record<string, unknown> = {}) => ({
 });
 
 describe('POST /api/settle gate', () => {
-  it('refuses an anonymous settle — order id and basket alone', async () => {
-    const res = await gateSettle(await post({ action: 'settle', orderId: ORDER, basketHash: BASKET }), env, now);
-    assert.deepEqual(await refusal(res), { status: 401, error: 'buyer_proof_required' });
-  });
-
-  it('refuses an anonymous refund', async () => {
-    const res = await gateSettle(await post({ action: 'refund', orderId: ORDER, address: buyer.publicKey() }), env, now);
-    assert.deepEqual(await refusal(res), { status: 401, error: 'buyer_proof_required' });
+  it('refuses an anonymous settle or refund — order id and basket alone', async () => {
+    const settleRes = await gateSettle(await post({ action: 'settle', orderId: ORDER, basketHash: BASKET }), env, now);
+    assert.deepEqual(await refusal(settleRes), { status: 401, error: 'buyer_proof_required' });
+    const refundRes = await gateSettle(await post({ action: 'refund', orderId: ORDER, address: buyer.publicKey() }), env, now);
+    assert.deepEqual(await refusal(refundRes), { status: 401, error: 'buyer_proof_required' });
   });
 
   it('refuses a stranger signing in the buyer’s name', async () => {
@@ -92,6 +89,7 @@ describe('POST /api/settle gate', () => {
       address: buyer.publicKey(),
       network: DEFAULT_NETWORK,
     });
+    assert.equal(res.network, 'testnet');
   });
 });
 
@@ -103,13 +101,6 @@ describe('POST /api/settle gate', () => {
 describe('POST /api/settle in modo real', () => {
   const asMainnet = (extra: Record<string, unknown> = {}) => settle({ network: 'mainnet', ...extra });
 
-  it('defaults to the safe network when the body says nothing', async () => {
-    const res = await gateSettle(await post(settle({ proof: signed(buyer, 'settle', ORDER) })), env, now);
-    assert.ok(!(res instanceof Response));
-    assert.equal(res.network, DEFAULT_NETWORK);
-    assert.equal(res.network, 'testnet');
-  });
-
   it('refuses a network nobody has heard of rather than falling back to one', async () => {
     const res = await gateSettle(await post(settle({ network: 'mainet', proof: signed(buyer, 'settle', ORDER) })), env, now);
     assert.equal((await refusal(res)).status, 400);
@@ -118,6 +109,18 @@ describe('POST /api/settle in modo real', () => {
   it('RULE: refuses modo real from an address that is not on the list', async () => {
     const res = await gateSettle(await post(asMainnet({ proof: signed(buyer, 'settle', ORDER) })), env, now);
     assert.deepEqual(await refusal(res), { status: 403, error: 'network_not_allowed' });
+    const refund = await gateSettle(
+      await post({
+        action: 'refund',
+        orderId: ORDER,
+        address: buyer.publicKey(),
+        network: 'mainnet',
+        proof: signed(buyer, 'refund', ORDER),
+      }),
+      env,
+      now,
+    );
+    assert.deepEqual(await refusal(refund), { status: 403, error: 'network_not_allowed' });
   });
 
   it('RULE: checks the list only after the signature — an unsigned request is still a 401', async () => {
@@ -149,14 +152,6 @@ describe('POST /api/settle in modo real', () => {
     }
   });
 
-  it('gates a refund exactly like a settle — the escape hatch is not a back door', async () => {
-    const res = await gateSettle(
-      await post({ action: 'refund', orderId: ORDER, address: buyer.publicKey(), network: 'mainnet', proof: signed(buyer, 'refund', ORDER) }),
-      env,
-      now,
-    );
-    assert.deepEqual(await refusal(res), { status: 403, error: 'network_not_allowed' });
-  });
 });
 
 describe('buyerMayClose', () => {

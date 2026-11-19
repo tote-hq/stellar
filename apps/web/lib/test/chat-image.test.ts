@@ -7,9 +7,7 @@ const jpeg = { mediaType: 'image/jpeg', data: 'aaaa' };
 
 test('a short jpeg passes', () => {
   assert.equal(isChatImage(jpeg), true);
-});
-
-test('padding and the alphabet are checked', () => {
+  // Padding and the alphabet ride with acceptance: a short photo of a known type.
   assert.equal(isChatImage({ mediaType: 'image/png', data: 'abc' }), false);
   assert.equal(isChatImage({ mediaType: 'image/webp', data: 'ab+/' }), true);
   assert.equal(isChatImage({ mediaType: 'image/gif', data: '@@@@' }), false);

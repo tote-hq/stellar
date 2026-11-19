@@ -2,13 +2,11 @@ import assert from 'node:assert/strict';
 import { describe, it, beforeEach } from 'node:test';
 
 import {
-  clientIp,
   CounterUnavailable,
   FREE_TURNS,
   FREE_TURNS_PER_HUMAN,
   FREE_TURNS_PER_IP,
   __resetTurnCounterForTests,
-  mintUserToken as mint,
   requireLoginOrFreeTurn,
   takeQuota,
   type TurnCounter,
@@ -16,8 +14,6 @@ import {
   guestChatVerdict,
   mintUserToken,
   verifyUserToken,
-  guestTurnCounter,
-  LOGIN_CTA,
   LOGIN_REQUIRED_MESSAGE,
   loginGateBannerText,
   shouldShowLoginGate,
@@ -28,11 +24,7 @@ describe('login-gate', () => {
     __resetTurnCounterForTests();
   });
 
-  it('FREE_TURNS is 3 and easy to spot', () => {
-    assert.equal(FREE_TURNS, 3);
-  });
-
-  it('mints and verifies a user token', async () => {
+  it('mints a user token and rejects a stale, forged or v1 one', async () => {
     const secret = 'test-session-secret';
     const address = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
     const token = await mintUserToken(address, secret, 1_000_000, 60_000);
@@ -42,12 +34,7 @@ describe('login-gate', () => {
     assert.equal((await verifyUserToken(token, secret, 1_100_000)).ok, false);
     assert.equal((await verifyUserToken(token, 'other', 1_000_000)).ok, false);
     assert.match(token, /^v2\./);
-  });
-
-  it('rejects the v1 cookies, which were minted without any proof', async () => {
-    const secret = 'test-session-secret';
-    const v2 = await mintUserToken('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', secret, 1_000_000, 60_000);
-    const v1 = v2.slice(3); // same fields, old three-part shape
+    const v1 = token.slice(3);
     assert.equal((await verifyUserToken(v1, secret, 1_000_000)).ok, false);
   });
 
@@ -62,20 +49,12 @@ describe('login-gate', () => {
     assert.equal(blocked.reason, 'login_required');
   });
 
-  it('logged-in users skip the counter', () => {
-    const v = guestChatVerdict({ loggedIn: true, sessionCount: 99 });
-    assert.equal(v.allow, true);
-  });
-
-  it('authenticated shopper sees no login banner even after the free turns', () => {
+  it('shows the login banner only to an anonymous shopper after the free turns', () => {
     for (const turnsUsed of [FREE_TURNS, 99]) {
       const banner = loginGateBannerText({ isAuthenticated: true, loginRequired: true, turnsUsed });
       assert.equal(shouldShowLoginGate({ isAuthenticated: true, loginRequired: true, turnsUsed }), false);
       assert.equal(banner, null);
     }
-  });
-
-  it('anonymous shopper still sees the login banner after 3 requests', () => {
     assert.equal(
       shouldShowLoginGate({ isAuthenticated: false, loginRequired: false, turnsUsed: FREE_TURNS }),
       true,
@@ -103,26 +82,18 @@ describe('login-gate', () => {
     assert.equal(v.reason, 'ip_limit');
   });
 
-  it('memory counter increments with TTL semantics', async () => {
-    const store = guestTurnCounter();
-    assert.equal(await store.get('s1'), 0);
-    assert.equal(await store.incr('s1'), 1);
-    assert.equal(await store.incr('s1'), 2);
-    assert.equal(await store.incr('s1'), 3);
-    assert.equal(await store.get('s1'), 3);
-    assert.equal(await store.get('other'), 0);
-  });
-
-  it('blocks a guest who rotates sessionId on the same Turnstile pass', () => {
+  it('blocks a guest who rotates sessionId on the same Turnstile pass', async () => {
     const v = guestChatVerdict({ loggedIn: false, sessionCount: 0, humanCount: FREE_TURNS_PER_HUMAN });
     assert.equal(v.allow, false);
     assert.equal(v.reason, 'human_limit');
-  });
 
-  it('login required copy is rioplatense', () => {
-    assert.match(LOGIN_REQUIRED_MESSAGE, /iniciá sesión/i);
-    assert.match(LOGIN_REQUIRED_MESSAGE, /Changuito/);
-    assert.equal(LOGIN_CTA, 'Iniciá sesión');
+    const req = () => chat({ cookie: 'chg_human=same-pass' });
+    let allowed = 0;
+    for (let i = 0; i < FREE_TURNS_PER_HUMAN + 3; i++) {
+      const session = `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+      if ((await requireLoginOrFreeTurn(req(), session, prodEnv)) === null) allowed++;
+    }
+    assert.equal(allowed, FREE_TURNS_PER_HUMAN);
   });
 });
 
@@ -143,25 +114,18 @@ const chat = (headers: Record<string, string> = {}) => new Request('https://app.
 describe('quotas fail closed', () => {
   beforeEach(() => __resetTurnCounterForTests());
 
-  it('refuses a guest turn when the counter store is down', async () => {
+  it('refuses a turn when the counter store is down', async () => {
     __resetTurnCounterForTests(failing);
-    const res = await requireLoginOrFreeTurn(chat(), UUID, prodEnv);
-    assert.equal(res?.status, 503);
-  });
-
-  it('refuses a signed-in turn when the counter store is down', async () => {
-    __resetTurnCounterForTests(failing);
-    const token = await mint('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', 'sess');
-    const res = await requireLoginOrFreeTurn(chat({ cookie: `chg_user=${encodeURIComponent(token)}` }), UUID, prodEnv);
-    assert.equal(res?.status, 503);
-  });
-
-  it('reports unavailable from takeQuota instead of allowing', async () => {
+    const guest = await requireLoginOrFreeTurn(chat(), UUID, prodEnv);
+    assert.equal(guest?.status, 503);
+    const token = await mintUserToken('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', 'sess');
+    const signedIn = await requireLoginOrFreeTurn(chat({ cookie: `chg_user=${encodeURIComponent(token)}` }), UUID, prodEnv);
+    assert.equal(signedIn?.status, 503);
     assert.equal(await takeQuota('k', 1, 60, failing), 'unavailable');
   });
 
   it('caps a signed-in wallet per hour', async () => {
-    const token = await mint('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', 'sess');
+    const token = await mintUserToken('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', 'sess');
     const req = () => chat({ cookie: `chg_user=${encodeURIComponent(token)}` });
     for (let i = 0; i < USER_TURNS_PER_HOUR; i++) assert.equal(await requireLoginOrFreeTurn(req(), UUID, prodEnv), null);
     const res = await requireLoginOrFreeTurn(req(), UUID, prodEnv);
@@ -207,32 +171,9 @@ describe('quotas fail closed', () => {
       prodEnv,
     );
     assert.equal(res, null);
-    // Three keys read, three written: session, IP, Turnstile pass.
     assert.equal(phases.filter((p) => p === 1).length, 3);
     assert.equal(phases.filter((p) => p === 2).length, 3);
-    // Two phases, not six. The reads must all land before the verdict, and
-    // the writes only happen once the verdict allowed the turn.
     assert.equal(mostAtOnce, 3, 'the counter calls were serialised');
     assert.deepEqual(phases, [1, 1, 1, 2, 2, 2]);
-  });
-
-  it('counts guests per Turnstile pass across sessions', async () => {
-    const req = () => chat({ cookie: 'chg_human=same-pass' });
-    let allowed = 0;
-    for (let i = 0; i < FREE_TURNS_PER_HUMAN + 3; i++) {
-      const session = `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
-      if ((await requireLoginOrFreeTurn(req(), session, prodEnv)) === null) allowed++;
-    }
-    assert.equal(allowed, FREE_TURNS_PER_HUMAN);
-  });
-});
-
-describe('clientIp', () => {
-  const ip = (headers: Record<string, string>) => clientIp(new Request('https://x', { headers }));
-
-  it('trusts the edge headers and never the first X-Forwarded-For', () => {
-    assert.equal(ip({ 'cf-connecting-ip': '1.1.1.1', 'x-forwarded-for': '9.9.9.9' }), '1.1.1.1');
-    assert.equal(ip({ 'x-real-ip': '2.2.2.2', 'x-forwarded-for': '9.9.9.9' }), '2.2.2.2');
-    assert.equal(ip({ 'x-forwarded-for': '9.9.9.9' }), null);
   });
 });

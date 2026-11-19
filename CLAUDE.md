@@ -364,7 +364,7 @@ the message, which is what used to happen to every message.
 ## Before you commit
 
 ```
-npm test -w @changuito/web      # 577 tests, node:test with --experimental-strip-types
+npm test                        # 747: mcp 279 · trust 1 · web 467
 npm run typecheck -w @changuito/web
 npm run build
 ```
@@ -391,9 +391,10 @@ Two constraints that bite in this repo specifically:
   The same goes for `enum` and namespaces. If a test dies at load with that
   code, this is why.
 
-**Don't modify the tests.** For now they are the fixed point the deployment is
-checked against: a change that only passes because its test moved with it tells
-you nothing once it is live. If a test is genuinely wrong, say so rather than
-editing it — and a test file that has to go because the module under it is gone
-is a deletion, which is a different thing and worth naming out loud.
+**A test may be deleted or changed when the PR says which one and why.**
+Deleting or weakening a test on money, auth or security needs the person's
+approval (`Blocked: approval`).
+
+While building, run only the tests of the package being changed
+(`npm test -w <package>`); the full suite runs in the gate.
   

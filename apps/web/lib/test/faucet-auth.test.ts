@@ -31,34 +31,15 @@ describe('faucet view', () => {
     assert.deepEqual(faucetView('testnet', { admitted: true, openToAll: false }), { mode: 'allowlist', allowed: true });
     assert.deepEqual(faucetView('testnet', { admitted: true, openToAll: true }), { mode: 'public', allowed: true });
   });
-
-  it('RULE: opening the faucet to everyone still does not waive the signature', () => {
-    const address = stranger.publicKey();
-    const bare = authorizeFaucet({ address, now, net: 'testnet', admitted: true });
-    assert.equal(bare.ok, false);
-    assert.equal(bare.ok === false && bare.status, 401);
-
-    const signed = authorizeFaucet({ address, proof: proofFor(stranger), now, net: 'testnet', admitted: true });
-    assert.equal(signed.ok, true);
-
-    const forged = authorizeFaucet({ address, proof: proofFor(tester, address), now, net: 'testnet', admitted: true });
-    assert.equal(forged.ok, false);
-  });
 });
 
 describe('the faucet is a testnet idea', () => {
-  it('RULE: exists only where there is a friendbot', () => {
+  it('RULE: exists only where there is a friendbot, and refuses modo real', () => {
     assert.equal(faucetOnNetwork(DEFAULT_NETWORK), true, 'the demo has to be fundable');
     for (const net of NETWORK_IDS) {
       if (net === DEFAULT_NETWORK) continue;
       assert.equal(faucetOnNetwork(net), false, `no free money on ${net}`);
       assert.deepEqual(faucetView(net, { admitted: true, openToAll: true }), { mode: 'disabled', allowed: false });
-    }
-  });
-
-  it('RULE: refuses to mint in modo real even for a granted wallet, with a proof', () => {
-    for (const net of NETWORK_IDS) {
-      if (net === DEFAULT_NETWORK) continue;
       const auth = authorizeFaucet({ address: tester.publicKey(), proof: proofFor(tester), now, net, admitted: true });
       assert.equal(auth.ok, false);
       assert.equal(auth.ok === false && auth.status, 403);
@@ -73,37 +54,51 @@ describe('authorizeFaucet', () => {
 
   it('lets a granted wallet through with a fresh signature', () => {
     assert.deepEqual(run(tester.publicKey(), proofFor(tester)), { ok: true });
+    const open = authorizeFaucet({
+      address: stranger.publicKey(),
+      proof: proofFor(stranger),
+      now,
+      net: 'testnet',
+      admitted: true,
+    });
+    assert.equal(open.ok, true);
   });
 
-  it('refuses a wallet the database has not granted, before looking at a proof', () => {
-    const r = run(tester.publicKey(), proofFor(tester), false);
-    assert.equal(r.ok === false && r.status, 403);
-    assert.equal(r.ok === false && r.error, 'faucet_not_allowed');
-  });
+  it('asks for a proof, and refuses a wallet the database has not granted', () => {
+    const denied = run(tester.publicKey(), proofFor(tester), false);
+    assert.equal(denied.ok === false && denied.status, 403);
+    assert.equal(denied.ok === false && denied.error, 'faucet_not_allowed');
 
-  it('asks for a session when the granted address arrives without a proof', () => {
     for (const proof of [undefined, null, {}, { message: 'x' }, { signature: 'y' }]) {
       const r = run(tester.publicKey(), proof);
       assert.equal(r.ok === false && r.status, 401);
       assert.equal(r.ok === false && r.error, 'faucet_session_required');
     }
+    const bare = authorizeFaucet({ address: stranger.publicKey(), now, net: 'testnet', admitted: true });
+    assert.equal(bare.ok, false);
+    assert.equal(bare.ok === false && bare.status, 401);
   });
 
-  it('refuses a stranger signing for the granted address', () => {
+  it('refuses a stranger, another address, or another purpose', () => {
     const message = faucetProofMessage(tester.publicKey(), now);
-    const r = run(tester.publicKey(), { message, signature: sep53(stranger, message) });
-    assert.equal(r.ok === false && r.status, 401);
-  });
+    const strangerSigned = run(tester.publicKey(), { message, signature: sep53(stranger, message) });
+    assert.equal(strangerSigned.ok === false && strangerSigned.status, 401);
 
-  it('refuses a proof made for another address', () => {
-    const r = run(tester.publicKey(), proofFor(tester, stranger.publicKey()));
-    assert.equal(r.ok === false && r.error, 'faucet_proof_invalid');
-  });
+    const otherAddress = run(tester.publicKey(), proofFor(tester, stranger.publicKey()));
+    assert.equal(otherAddress.ok === false && otherAddress.error, 'faucet_proof_invalid');
 
-  it('refuses a proof signed for another purpose', () => {
-    const message = walletProofMessage('login', tester.publicKey(), now);
-    const r = run(tester.publicKey(), { message, signature: sep53(tester, message) });
-    assert.equal(r.ok === false && r.error, 'faucet_proof_invalid');
+    const otherPurpose = walletProofMessage('login', tester.publicKey(), now);
+    const rebound = run(tester.publicKey(), { message: otherPurpose, signature: sep53(tester, otherPurpose) });
+    assert.equal(rebound.ok === false && rebound.error, 'faucet_proof_invalid');
+
+    const forged = authorizeFaucet({
+      address: stranger.publicKey(),
+      proof: proofFor(tester, stranger.publicKey()),
+      now,
+      net: 'testnet',
+      admitted: true,
+    });
+    assert.equal(forged.ok, false);
   });
 
   it('refuses a stale proof, and one from too far in the future', () => {

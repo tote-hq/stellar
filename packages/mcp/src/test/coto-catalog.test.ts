@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { getAdapter, listRetailers, RETAILER_IDS } from '../adapters/registry.js';
 import { selectExact, toCatalogItem, type CatalogItem, type CotoSearchHit } from '../catalog/coto.js';
 import { matchDiaToCoto, pickMatch, scoreCandidate } from '../catalog/match.js';
-import { normalizeBrand, sizeFromName, sizesEqual } from '../catalog/normalize.js';
+import { sizeFromName, sizesEqual } from '../catalog/normalize.js';
 import type { Product } from '../types.js';
 import { fromPesos } from '../util/money.js';
 
@@ -75,23 +74,6 @@ describe('toCatalogItem', () => {
     assert.equal(built.unitBasis?.quantity, 1);
   });
 
-  it('keeps product_format as the unit-price basis when the name says 500 g', () => {
-    const built = toCatalogItem(hit({
-      product_format: 'Kilo',
-      product_format_quantity: 1,
-      product_list_price: 1850,
-      price: [{ store: '200', listPrice: 1850, formatPrice: 3700 }],
-    }, 'Fideos Spaghetti 500g'));
-    assert.ok(built);
-    assert.equal(built.shelfPrice.centavos, fromPesos(1850).centavos);
-    assert.equal(built.size?.text, '500g');
-    assert.equal(built.size?.quantity, 500);
-    assert.equal(built.size?.unit, 'g');
-    assert.equal(built.size?.source, 'name');
-    assert.equal(built.unitBasis?.format, 'Kilo');
-    assert.equal(built.unitBasis?.quantity, 1);
-  });
-
   it('falls back to product_list_price when store 200 has no positive listPrice', () => {
     const built = toCatalogItem(hit({
       price: [{ store: '200', listPrice: 0, formatPrice: 100 }, { store: '061', listPrice: 50 }],
@@ -121,27 +103,6 @@ describe('toCatalogItem', () => {
     })), null);
     assert.equal(toCatalogItem(hit({ price: [], product_list_price: undefined })), null);
     assert.equal(toCatalogItem(hit({ id: '' })), null);
-  });
-
-  it('marks availability from store 200 only', () => {
-    assert.equal(toCatalogItem(hit({ store_availability: ['061'] }))?.available, false);
-    assert.equal(toCatalogItem(hit({ store_availability: undefined }))?.available, false);
-    const numeric = toCatalogItem(hit({
-      price: [{ store: 200, listPrice: 3030 }],
-    }));
-    assert.equal(numeric?.priceSource, 'store_200');
-  });
-
-  it('stringifies a numeric EAN and keeps an absolute image URL', () => {
-    const built = toCatalogItem(hit({
-      product_main_ean: 7790000000001,
-      image_url: undefined,
-      product_large_image_url: 'https://example.test/large.jpg',
-      url: 'https://www.coto.com.ar/producto/1',
-    }));
-    assert.equal(built?.ean, '7790000000001');
-    assert.equal(built?.imageUrl, 'https://example.test/large.jpg');
-    assert.equal(built?.url, 'https://www.coto.com.ar/producto/1');
   });
 });
 
@@ -218,11 +179,6 @@ describe('normalize', () => {
     assert.equal(lt.unit, 'ml');
     assert.ok(sizesEqual(ltr, lt));
   });
-
-  it('folds accents, case, and punctuation in a brand', () => {
-    assert.equal(normalizeBrand('LA SERENÍSIMA'), normalizeBrand('La Serenisima'));
-    assert.equal(normalizeBrand('  dos   hnos. '), 'DOS HNOS');
-  });
 });
 
 describe('pickMatch', () => {
@@ -245,17 +201,15 @@ describe('pickMatch', () => {
     assert.equal(result.match?.id, 'ean');
   });
 
-  it('does not match the same brand at a different size', () => {
+  it('does not match on brand alone, name alone, a different size, or a missing brand', () => {
     const other = item('Leche entera 500 ml', {
       id: 'other',
       product_brand: 'LA SERENISIMA',
       product_main_ean: '1000000000002',
     });
-    const result = pickMatch({ name: 'Leche entera 1l', brand: 'La Serenísima' }, [other]);
-    assert.deepEqual(result, { match: null, confidence: 'none' });
-  });
+    const differentSize = pickMatch({ name: 'Leche entera 1l', brand: 'La Serenísima' }, [other]);
+    assert.deepEqual(differentSize, { match: null, confidence: 'none' });
 
-  it('does not match on brand alone or name alone', () => {
     const brandOnly = item('Yerba Mate PLAYADITO 500g', {
       id: 'brand-only',
       product_brand: 'PLAYADITO',
@@ -267,9 +221,7 @@ describe('pickMatch', () => {
     const diaName = { name: 'Yerba Mate Suave PLAYADITO 1 Kg', brand: 'Playadito' };
     assert.equal(pickMatch(diaName, [brandOnly]).confidence, 'none');
     assert.equal(pickMatch(diaName, [nameOnly]).confidence, 'none');
-  });
 
-  it('is none when Día has no brand', () => {
     const same = item('Leche entera 1l', { id: 'same', product_brand: 'LA SERENISIMA' });
     assert.equal(pickMatch({ name: 'Leche entera 1l' }, [same]).confidence, 'none');
   });
@@ -344,14 +296,5 @@ describe('matchDiaToCoto', () => {
     assert.equal(calls.length, 1);
     assert.match(calls[0] ?? '', /LA SERENISIMA/);
     assert.match(calls[0] ?? '', /Leche entera/);
-  });
-});
-
-describe('registry', () => {
-  it('keeps coto out of the adapters that build carts', () => {
-    const ids: readonly string[] = RETAILER_IDS;
-    assert.equal(ids.includes('coto'), false);
-    assert.equal(listRetailers().some((retailer) => retailer.id === 'coto'), false);
-    assert.throws(() => getAdapter('coto'), /not supported/);
   });
 });

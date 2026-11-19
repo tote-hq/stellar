@@ -151,9 +151,9 @@ to Upstash in December 2024. This app talks to Upstash's REST API directly.
 ## Tests
 
 ```
-npm test                          # 1178 — mcp 520 · trust 2 · web 583 · landing 73
-npm test -w @changuito/mcp        #  520 — adapters, money, FX, cart maths
-npm test -w @changuito/web        #  583 — chat-state, order-check, deposit, copy, …
+npm test                          # 747 — mcp 279 · trust 1 · web 467
+npm test -w @changuito/mcp        # 279 — adapters, money, FX, cart maths
+npm test -w @changuito/web        # 467 — chat-state, order-check, deposit, copy, …
 npm run contracts:test            #   34 — escrow 19 · mock_usdc 15
 npm run typecheck -w @changuito/web
 npm run build
