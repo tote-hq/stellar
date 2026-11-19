@@ -17,7 +17,7 @@ import { useNetwork } from './NetworkProvider';
 export function WalletBridge({ children }: { children: React.ReactNode }) {
   const { wallet, isAuthenticated, openLoginModal, logout, configStatus } = usePollar();
   const sign = useWalletSigner();
-  const { signAuthEntry } = useWalletSigners();
+  const { signAuthEntry, walletKind } = useWalletSigners();
   const { network } = useNetwork();
   const address = isAuthenticated ? (wallet?.address ?? null) : null;
 
@@ -43,8 +43,9 @@ export function WalletBridge({ children }: { children: React.ReactNode }) {
       basketHash: order.basketHash,
       timeoutSecs: order.timeoutSecs,
       signAuthEntry,
+      walletKind: walletKind(),
     });
-  }, [address, network, signAuthEntry]);
+  }, [address, network, signAuthEntry, walletKind]);
 
   const value = useMemo<WalletState>(() => ({
     enabled: true,

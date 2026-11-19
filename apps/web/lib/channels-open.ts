@@ -6,12 +6,14 @@
  * sends a host function.
  */
 
-import { track } from './analytics';
-import { AuthEntryError, preimageForWallet, walletAuthEntry } from './auth-entry.ts';
+import { track } from './analytics.ts';
+import { AuthEntryError, entryForCustodial, preimageForWallet, walletAuthEntry } from './auth-entry.ts';
 import { OpenConfirmationPending } from './checkout/open-submission.ts';
 import { DEPLOYMENTS } from './deployments.ts';
+import type { WalletKind } from './wallet-signers.ts';
 
 export interface ChannelSigner {
+  walletKind: WalletKind;
   signAuthEntry(
     entryXdr: string,
     options: { validUntilLedger: number },
@@ -27,6 +29,7 @@ export interface ChannelOpen {
   basketHash: string;
   timeoutSecs: number;
   signAuthEntry: ChannelSigner['signAuthEntry'];
+  walletKind: ChannelSigner['walletKind'];
 }
 
 export async function openThroughChannels(input: ChannelOpen): Promise<string> {
@@ -42,7 +45,13 @@ export async function openThroughChannels(input: ChannelOpen): Promise<string> {
   try {
     const first = await post({ ...body, step: 'prepare' });
     if (typeof first.hash === 'string') return first.hash;
-    const hash = await signAndSubmit(body, first, input.signAuthEntry, passphrase(input.network));
+    const hash = await signAndSubmit(
+      body,
+      first,
+      input.signAuthEntry,
+      input.walletKind,
+      passphrase(input.network),
+    );
     return hash;
   } catch (err) {
     if (err instanceof OpenConfirmationPending && !err.tx) {
@@ -77,6 +86,7 @@ async function signAndSubmit(
   body: Record<string, unknown>,
   prepared: ChannelResponse,
   signAuthEntry: ChannelOpen['signAuthEntry'],
+  walletKind: ChannelOpen['walletKind'],
   networkPassphrase: string,
   renewed = false,
 ): Promise<string> {
@@ -87,18 +97,20 @@ async function signAndSubmit(
   }
   const auth: string[] = [];
   for (const entry of entries) {
-    let preimage: string;
+    let toSign: string;
     try {
-      preimage = preimageForWallet(entry, networkPassphrase);
+      // External wallets parse a V1 preimage. Custodial wallets are given
+      // the entry itself. Either result is checked again below.
+      toSign = walletKind === 'custodial'
+        ? entryForCustodial(entry)
+        : preimageForWallet(entry, networkPassphrase);
     } catch (err) {
       if (err instanceof AuthEntryError) {
         throw new ChannelRequestError(400, 'channels_auth', err.message);
       }
       throw err;
     }
-    // The wallet parses a preimage. The signature comes back as raw bytes,
-    // and the entry submitted below is the one the host will check.
-    const signed = await signAuthEntry(preimage, { validUntilLedger });
+    const signed = await signAuthEntry(toSign, { validUntilLedger });
     if (signed.status === 'error') {
       throw new ChannelRequestError(400, 'channels_rejected', signed.details || 'No se firmó el pago.');
     }
@@ -119,7 +131,7 @@ async function signAndSubmit(
     if (err instanceof ChannelRequestError && err.code === 'channels_auth_expiry' && !renewed) {
       const again = await post({ ...body, step: 'prepare' });
       if (typeof again.hash === 'string') return again.hash;
-      return signAndSubmit(body, again, signAuthEntry, networkPassphrase, true);
+      return signAndSubmit(body, again, signAuthEntry, walletKind, networkPassphrase, true);
     }
     throw err;
   }

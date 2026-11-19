@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { Address, Keypair, hash, xdr } from '@stellar/stellar-sdk';
 
-import { AuthEntryError, preimageForWallet, walletAuthEntry } from '../auth-entry.ts';
+import { AuthEntryError, entryForCustodial, preimageForWallet, walletAuthEntry } from '../auth-entry.ts';
 
 const PASS = 'Test SDF Network ; September 2015';
 const BUYER = 'GDFF477UQUWOFIHSOEXPPOD5GPUSEW6OLGZB5FCPS6AFRAOPTMINA55X';
@@ -66,5 +66,50 @@ describe('auth entry for Freighter', () => {
     const parsed = xdr.HashIdPreimage.fromXDR(preimage, 'base64');
     const signature = Buffer.from(Keypair.random().sign(hash(parsed.toXDR()))).toString('base64');
     assert.throws(() => walletAuthEntry(entry, signature, PASS), AuthEntryError);
+  });
+});
+
+describe('auth entry for a custodial wallet', () => {
+  it('rewrites ADDRESS_V2 as a V1 entry with a void signature', () => {
+    const signer = Keypair.random();
+    const entry = entryV2(signer.publicKey());
+    const original = xdr.SorobanAuthorizationEntry.fromXDR(entry, 'base64');
+    assert.equal(original.credentials.type, 'sorobanCredentialsAddressV2');
+
+    const out = entryForCustodial(entry);
+    const parsed = xdr.SorobanAuthorizationEntry.fromXDR(out, 'base64');
+    assert.equal(parsed.credentials.type, 'sorobanCredentialsAddress');
+    if (parsed.credentials.type !== 'sorobanCredentialsAddress') return;
+    assert.equal(Address.fromScAddress(parsed.credentials.address.address).toString(), signer.publicKey());
+    assert.equal(parsed.credentials.address.nonce, 7n);
+    assert.equal(parsed.credentials.address.signatureExpirationLedger, 4321);
+    assert.equal(parsed.credentials.address.signature.toXDR('base64'), xdr.ScVal.scvVoid().toXDR('base64'));
+    assert.equal(parsed.rootInvocation.toXDR('base64'), original.rootInvocation.toXDR('base64'));
+  });
+
+  it('submits a complete signed entry as is and rejects a different invocation', () => {
+    const signer = Keypair.random();
+    const entry = entryV2(signer.publicKey());
+    const preimage = xdr.HashIdPreimage.fromXDR(preimageForWallet(entry, PASS), 'base64');
+    const signature = Buffer.from(signer.sign(hash(preimage.toXDR()))).toString('base64');
+    const complete = walletAuthEntry(entry, signature, PASS);
+    assert.equal(walletAuthEntry(entry, complete, PASS), complete);
+
+    const got = xdr.SorobanAuthorizationEntry.fromXDR(complete, 'base64');
+    const other = new xdr.SorobanAuthorizedInvocation({
+      function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+        new xdr.InvokeContractArgs({
+          contractAddress: new Address('CA4BDF4U65OHCO6AB4KRJWBRZ4BJBZURDFNFKJDEZAKQRCUNJZFLN72S').toScAddress(),
+          functionName: 'close',
+          args: [],
+        }),
+      ),
+      subInvocations: [],
+    });
+    const mismatched = new xdr.SorobanAuthorizationEntry({
+      credentials: got.credentials,
+      rootInvocation: other,
+    }).toXDR('base64');
+    assert.throws(() => walletAuthEntry(entry, mismatched, PASS), AuthEntryError);
   });
 });

@@ -20,8 +20,16 @@ export type TxSignResult =
   | { status: 'signed'; signedXdr: string }
   | { status: 'error'; details?: string; code?: string; message?: string };
 
+/** External when Pollar has an adapter attached; custodial when it does not. */
+export type WalletKind = 'external' | 'custodial';
+
 /** The slice of PollarClient these helpers need. */
 export interface WalletSignClient {
+  /**
+   * Adapter id for an external wallet, or null for a custodial one.
+   * Mirrors `PollarClient.getWalletType`.
+   */
+  getWalletType(): string | null;
   signAuthEntry(
     entryXdr: string,
     options: { validUntilLedger: number },
@@ -35,6 +43,11 @@ export interface WalletSignClient {
 
 function asErrorDetails(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** A named adapter is an external wallet. No adapter is custodial. */
+export function walletKindFrom(client: Pick<WalletSignClient, 'getWalletType'>): WalletKind {
+  return client.getWalletType() ? 'external' : 'custodial';
 }
 
 /**
