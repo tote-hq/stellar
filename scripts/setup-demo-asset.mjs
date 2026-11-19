@@ -23,7 +23,7 @@
  * the command line. The secrets stay in the CLI keystore — they are never read
  * here, never printed, never put in argv where `ps` would show them, and never
  * written to an env file. The demo wallet's secret reaches the deployment by a
- * separate route (`DEMO_WALLET_SECRET` in Vercel, set by hand), and the deposit
+ * separate route (`DEMO_WALLET_SECRET` on the Worker, set by hand), and the deposit
  * account's secret reaches it not at all.
  *
  * The issuer's secret is discarded outright. The last thing this script does

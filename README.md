@@ -100,7 +100,7 @@ flowchart TB
         PW[PollarProvider<br/><i>login · address · SEP-53 · pay</i>]
     end
 
-    subgraph N["NEXT.JS ON VERCEL — Node runtime, never edge"]
+    subgraph N["VINEXT ON CLOUDFLARE WORKERS — Node runtime"]
         direction TB
         CHAT["/api/chat<br/><i>Anthropic tool loop, streamed</i>"]
         MCP["MCP Client ⇄ McpServer<br/><i>InMemoryTransport — real tools/call</i>"]
@@ -145,8 +145,9 @@ Model Context Protocol server for four Argentine VTEX supermarkets — it was
 written first, and changuito exists to drive it from something other than a chat
 client. The web app speaks to it over `InMemoryTransport`: the actual protocol
 (`initialize`, `tools/list`, `tools/call`) with a pair of queues instead of a
-pipe. Its checkout half opens a headed browser on the host, so it cannot run on
-Vercel at all — three independent barriers keep Playwright out of the lambda.
+pipe. Its checkout half opens a headed browser on the host, so the web build
+never loads it: `@changuito/mcp/server` has no path to that module, and the
+checkout tools sit behind a dynamic import.
 
 More: **[docs/architecture.md](docs/architecture.md)**.
 
@@ -267,7 +268,7 @@ defensively. Without `KV_REST_API_*` conversation history falls back to an
 in-process `Map`.
 
 The contracts are already deployed; you only need to redeploy if you change
-them. See **[DEPLOY.md](DEPLOY.md)** for that and for putting it on Vercel.
+them. See **[DEPLOY.md](DEPLOY.md)** for that and for putting it on Cloudflare Workers.
 
 ### Environment
 
@@ -329,8 +330,8 @@ and balances reconcile exactly across both `open → settle` and `open → refun
 ### Redis (Testcontainers)
 
 `apps/web/lib/test/kv-stand-in.ts` starts a Redis container behind an
-Upstash-compatible HTTP proxy. That REST shape is what Vercel KV is, so the
-session store can be pointed at the container the same way it is pointed at KV.
+Upstash-compatible HTTP proxy. That REST shape is what Upstash is, so the
+session store can be pointed at the container the same way it is pointed at Upstash.
 `apps/web/lib/test/turn-store.redis.test.ts` is the integration test that uses
 it. It is part of `npm test` and skips when Docker is not available, so a
 machine or a build without Docker still passes.
@@ -371,5 +372,5 @@ deployments.json     what is deployed, and where — committed on purpose
 | [docs/stellar.md](docs/stellar.md) | every Stellar technology used and what each is doing |
 | [docs/tech-stack.md](docs/tech-stack.md) | the dependency list with versions, and why each one is there |
 | [docs/e2e.md](docs/e2e.md) | Playwright, and the mainnet checks the e2e cannot cover |
-| [DEPLOY.md](DEPLOY.md) | the contracts, then Vercel, then the database |
+| [DEPLOY.md](DEPLOY.md) | the contracts, then Cloudflare Workers, then the database |
 | [CLAUDE.md](CLAUDE.md) | how the agent's behaviour was arrived at, and which decisions not to undo |

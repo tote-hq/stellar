@@ -321,7 +321,7 @@ chromium`, then `uvicorn server:app` on `$PORT` (default 8080).
    | `SANDBOX_TOKEN` | shared bearer token with the web app (long random string) |
 
 3. Deploy; check `GET https://<service>/health` returns `{"ok": true, …}`.
-4. In the web app (Vercel) set `SANDBOX_URL=https://<service>` and the same
+4. In the web app (the Worker) set `SANDBOX_URL=https://<service>` and the same
    `SANDBOX_TOKEN`, and `npm run config -- set sandbox_mock false`.
 5. Make sure `shared_card` has the card (a `testnet` or `mainnet` row), and
    allow the wallets that may buy with it: `npm run members -- add <address> <who>`. Everyone else gets the demo run: up to payment, then settled.

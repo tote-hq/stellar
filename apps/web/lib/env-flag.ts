@@ -2,7 +2,7 @@
  * An opt-in switch read from the environment. Server-only.
  *
  * It exists because the obvious spelling is wrong. `Boolean(env.X)` and
- * `env.X !== undefined` are both true for the string "false", and a Vercel
+ * `env.X !== undefined` are both true for the string "false", and a dashboard
  * variable set to `false` or `0` is exactly how somebody turns a thing *off*
  * in a dashboard that has no checkbox. Every flag here opens a door that is
  * otherwise shut, so the failure that matters is the one where a value meant

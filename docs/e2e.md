@@ -11,7 +11,7 @@ browser.
 
 The first two are smokes, and production is their target on purpose. A local
 preview needs Pollar, Turnstile, and the model keys the app already has on
-Vercel; CI does not have those, and a preview would not be what visitors hit.
+the Worker; CI does not have those, and a preview would not be what visitors hit.
 Neither smoke pays, opens a store checkout, or clicks **Cargar USDC**.
 
 `checkout` is the odd one and has to be. It runs the whole frame-checkout flow

@@ -23,7 +23,7 @@
  * the shopper looking at a spinner and nothing behind it.
  *
  * The counters lived in Redis once, and the client there had no timeout at
- * all and retried five times, so one hung connection sat until Vercel cut the
+ * all and retried five times, so one hung connection sat until the host cut the
  * request; and the guest path made seven of those calls in a row. Two fixes
  * came out of that and both are kept here: every round trip is raced against
  * a deadline, and the independent reads and writes are batched into two. The
@@ -352,8 +352,8 @@ export async function takeQuota(
 /**
  * The caller's IP, from a header the edge sets rather than the client.
  *
- * `cf-connecting-ip` is written by Cloudflare, which fronts app.changuito.me.
- * `x-real-ip` is Vercel's own, from the TCP peer. The first X-Forwarded-For
+ * `cf-connecting-ip` is written by Cloudflare and is what a Worker trusts.
+ * `x-real-ip` is the fallback when that header is absent. The first X-Forwarded-For
  * value is whatever the client typed, so it is never read.
  */
 export function clientIp(req: Request): string | null {
