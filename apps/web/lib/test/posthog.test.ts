@@ -29,7 +29,6 @@ function withCookie(cookie: string, run: () => void): void {
   }
 }
 
-
 describe('posthog client', { concurrency: 1 }, () => {
   test('an empty key does nothing, and a set key identifies only a uuid', () => {
     const previous = process.env.NEXT_PUBLIC_POSTHOG_KEY;
