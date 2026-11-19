@@ -103,6 +103,9 @@ describe('ensureUserCookie', () => {
       capture() {},
     };
     process.env.NEXT_PUBLIC_POSTHOG_KEY = 'phc_test';
+    const host = globalThis as { document?: { cookie: string } };
+    const previousDocument = host.document;
+    host.document = { cookie: 'chg_consent=granted' };
     initPostHog(client);
     try {
       const analyticsId = '11111111-1111-4111-8111-111111111111';
@@ -118,6 +121,8 @@ describe('ensureUserCookie', () => {
     } finally {
       if (previous === undefined) delete process.env.NEXT_PUBLIC_POSTHOG_KEY;
       else process.env.NEXT_PUBLIC_POSTHOG_KEY = previous;
+      if (previousDocument === undefined) delete host.document;
+      else host.document = previousDocument;
     }
   });
 });
