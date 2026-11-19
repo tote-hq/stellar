@@ -135,7 +135,7 @@ function clientRunning(injected?: PostHogClient): PostHogClient | null {
  * client), then opts in. `null` and `denied` do not import and do not call
  * `init`. A decline after an accept in the same page opts the running client
  * out. A decline that arrives while that first import is still in flight is
- * remembered, so the client does not opt in when the import settles.
+ * remembered, so `init` is not called when the import settles.
  */
 export function applyPostHogConsent(
   choice: 'granted' | 'denied' | null,
@@ -171,10 +171,16 @@ export function initPostHog(injected?: PostHogClient, key: string = currentKey()
   loading = true;
   void import('posthog-js')
     .then((mod) => {
+      loading = false;
+      // `init()` always fetches remote config. A decline that landed while
+      // this import was in flight must not start that request.
+      if (pending === 'out') {
+        pending = null;
+        return;
+      }
       const ph = mod.default as unknown as PostHogClient;
       ph.init(projectKey, initOptions());
       active = ph;
-      loading = false;
       applyPending();
       notifyReady();
     })
