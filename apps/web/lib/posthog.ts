@@ -22,6 +22,11 @@ import { POSTHOG_PROXY_PATH } from './posthog-path.ts';
  * default. Logout still calls it, then opts back in and starts recording
  * when `chg_consent` is still `granted`, so signing out does not turn
  * measurement off.
+ *
+ * Pageviews follow client-side navigations (`history_change`) and only
+ * after Accept, because init stays opted out until `opt_in_capturing`.
+ * `$pageview` and `$pageleave` keep the path and drop the query string:
+ * `/dev/checkout` puts an amount in `total`, and a captured URL must not.
  */
 
 export const POSTHOG_KEY = (process.env.NEXT_PUBLIC_POSTHOG_KEY ?? '').trim();
@@ -39,12 +44,18 @@ function browserConsent(): ConsentChoice | null {
 
 type CaptureValue = string | number | boolean;
 
+/** The slice of a PostHog event `before_send` is allowed to edit. */
+export interface PostHogSentEvent {
+  event: string;
+  properties: Record<string, unknown>;
+}
+
 export interface PostHogInitOptions {
   api_host: string;
   ui_host: string;
   autocapture: false;
-  capture_pageview: false;
-  capture_pageleave: false;
+  capture_pageview: 'history_change';
+  capture_pageleave: 'if_capture_pageview';
   opt_out_capturing_by_default: true;
   disable_session_recording: true;
   persistence: 'localStorage+cookie';
@@ -54,6 +65,43 @@ export interface PostHogInitOptions {
     maskTextSelector: string;
     blockSelector: string;
   };
+  before_send: (event: PostHogSentEvent) => PostHogSentEvent;
+}
+
+const PAGE_URL_PROPS = ['$current_url', '$referrer'] as const;
+
+/**
+ * `$pageview` and `$pageleave` carry the document URL. Drop the query
+ * string and keep the path and hash. Other events are left as they are:
+ * a fetch to `/api/balance?address=` is not a pageview.
+ */
+export function stripPageviewQuery(event: PostHogSentEvent): PostHogSentEvent {
+  if (event.event !== '$pageview' && event.event !== '$pageleave') return event;
+  let properties = event.properties;
+  let changed = false;
+  for (const key of PAGE_URL_PROPS) {
+    const value = properties[key];
+    if (typeof value !== 'string') continue;
+    const next = dropQuery(value);
+    if (next === value) continue;
+    if (!changed) {
+      properties = { ...properties };
+      changed = true;
+    }
+    properties[key] = next;
+  }
+  return changed ? { ...event, properties } : event;
+}
+
+/** Cut `?…` out of a URL. A `?` that sits inside the hash is part of the fragment. */
+function dropQuery(url: string): string {
+  const query = url.indexOf('?');
+  if (query === -1) return url;
+  const hash = url.indexOf('#');
+  if (hash !== -1 && hash < query) return url;
+  const hashAfter = url.indexOf('#', query);
+  const path = url.slice(0, query);
+  return hashAfter === -1 ? path : path + url.slice(hashAfter);
 }
 
 /** The slice of `posthog-js` this app calls. Tests pass a stand-in. */
@@ -80,8 +128,9 @@ export function initOptions(): PostHogInitOptions {
     api_host: POSTHOG_PROXY_PATH,
     ui_host: 'https://us.posthog.com',
     autocapture: false,
-    capture_pageview: false,
-    capture_pageleave: false,
+    capture_pageview: 'history_change',
+    capture_pageleave: 'if_capture_pageview',
+    before_send: stripPageviewQuery,
     opt_out_capturing_by_default: true,
     disable_session_recording: true,
     persistence: 'localStorage+cookie',
