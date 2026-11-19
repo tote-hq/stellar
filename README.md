@@ -288,7 +288,7 @@ The annotated list is `apps/web/.env.example`. The ones that change what works:
 ## Tests
 
 ```bash
-npm test                    # 602: mcp 180 · trust 1 · web 421
+npm test                    # 603: mcp 180 · trust 1 · web 422
 npm run contracts:test      #   34: escrow 19 · mock_usdc 15
 npm run typecheck -w @changuito/web
 npm run build

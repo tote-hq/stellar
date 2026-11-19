@@ -24,7 +24,7 @@ automated is stated by us, before you find it.
 | **Contracts** | escrow [`CCA3ES6A…JG7EX`](https://stellar.expert/explorer/testnet/contract/CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX) *(testnet, mintable `mock_usdc`, mounted on the login-network checkout)* · mintable USDC [`CAOPLEE4…BNN3E`](https://stellar.expert/explorer/testnet/contract/CAOPLEE4NVOVEBYRO7NHG5K4FEML5O5C5AATYBK4FCDLYRAJFZWBNN3E) |
 | **SEPs used** | SEP-53 (signed messages, for identity), SEP-41 (the token interface), SEP-7 (the receive URI) |
 | **Wallet** | Pollar (`@pollar/react` 0.11.3) — email or Google login, so a shopper needs no prior wallet |
-| **Tests** | `npm test` → 602 · `npm run contracts:test` → 34. Neither needs an API key |
+| **Tests** | `npm test` → 603 · `npm run contracts:test` → 34. Neither needs an API key |
 | **Pitch video** | sources in [`creatives/`](../creatives) (Remotion, three cuts: ES, EN, promo). There is no hosted link in this repo — `npm run render` in any of those folders produces the mp4 |
 
 ## 1. The one-paragraph version
@@ -112,7 +112,7 @@ printf 'changuito/receipt/v1\nretailer|dia\ncart|live-check-1\nhandoff|https://d
 And the suites, from a clean clone with only `npm install`:
 
 ```bash
-npm test                 # 602: mcp 180 · trust 1 · web 421
+npm test                 # 603: mcp 180 · trust 1 · web 422
 npm run contracts:test   #   34: escrow 19 · mock_usdc 15
 npm run build
 ```
