@@ -47,7 +47,7 @@ type Phase = 'review' | 'signing' | 'failed';
 
 function PayWithPollar({ cart, handoffUrl, onClose, onOpened }: Props) {
   const { wallet, isAuthenticated, verified, openLoginModal, setTrustline } = usePollar();
-  const { signAuthEntry } = useWalletSigners();
+  const { signAuthEntry, walletKind } = useWalletSigners();
   const { network, mode: appMode } = useNetwork();
   const address = isAuthenticated ? (wallet?.address ?? null) : null;
   const { data: balance, refresh } = useBalances(address, network);
@@ -175,6 +175,7 @@ function PayWithPollar({ cart, handoffUrl, onClose, onOpened }: Props) {
         basketHash: toHex(basket),
         timeoutSecs: DEFAULT_TIMEOUT_SECS,
         signAuthEntry,
+        walletKind: walletKind(),
       });
 
       track('payment_success', { flow: 'checkout' });

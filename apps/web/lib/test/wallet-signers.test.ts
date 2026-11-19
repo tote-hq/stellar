@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   signAuthEntryWith,
   signTransactionWith,
+  walletKindFrom,
   type AuthEntryResult,
   type TxSignResult,
   type WalletSignClient,
@@ -11,6 +12,7 @@ import {
 
 function fakeClient(overrides: Partial<WalletSignClient>): WalletSignClient {
   return {
+    getWalletType: () => null,
     signAuthEntry: async () => ({ status: 'error', details: 'unset' }),
     signTx: async () => ({ status: 'error', details: 'unset' }),
     ...overrides,
@@ -65,6 +67,13 @@ describe('signAuthEntryWith', () => {
     });
     const smartResult = await signAuthEntryWith(smart, 'entry-xdr', { validUntilLedger: 42 });
     assert.equal(smartResult.status, 'error');
+  });
+});
+
+describe('walletKindFrom', () => {
+  it('treats a missing adapter as custodial and a named adapter as external', () => {
+    assert.equal(walletKindFrom(fakeClient({})), 'custodial');
+    assert.equal(walletKindFrom(fakeClient({ getWalletType: () => 'freighter' })), 'external');
   });
 });
 
