@@ -1,3 +1,4 @@
+import { readConsent, type ConsentChoice } from './consent.ts';
 import { POSTHOG_PROXY_PATH } from './posthog-path.ts';
 
 /**
@@ -8,9 +9,17 @@ import { POSTHOG_PROXY_PATH } from './posthog-path.ts';
  * An empty key makes every export a no-op, so local dev and the tests do
  * not need a project.
  *
- * The shopper starts opted out. Accept opts in and starts recording; Decline
- * opts out. `identify` takes the random `analytics_id` only — a `G…` address
+ * The library is not imported, and `init` is not called, until `chg_consent`
+ * is `granted`. Accept (or a return visit that already accepted) is the only
+ * path that loads it. `opt_out_capturing_by_default` stays on as a second
+ * guard for the moment between `init` and `opt_in_capturing`. Decline never
+ * loads it. `identify` takes the random `analytics_id` only — a `G…` address
  * is refused, because that string is the wallet.
+ *
+ * `reset()` clears the PostHog consent flag and returns to the default,
+ * which is opted out. Logout still calls it, then opts back in when the
+ * shopper's own cookie is still `granted`, so signing out does not turn
+ * measurement off.
  */
 
 export const POSTHOG_KEY = (process.env.NEXT_PUBLIC_POSTHOG_KEY ?? '').trim();
@@ -18,6 +27,12 @@ export const POSTHOG_KEY = (process.env.NEXT_PUBLIC_POSTHOG_KEY ?? '').trim();
 /** Read at call time. Next still inlines the literal; tests can set the env before a call. */
 function currentKey(): string {
   return (process.env.NEXT_PUBLIC_POSTHOG_KEY ?? '').trim();
+}
+
+/** The first-party cookie, read where the banner wrote it. No `document` means no choice. */
+function browserConsent(): ConsentChoice | null {
+  const doc = (globalThis as { document?: { cookie?: string } }).document;
+  return readConsent(doc?.cookie);
 }
 
 type CaptureValue = string | number | boolean;
@@ -105,9 +120,47 @@ function applyPending(): void {
   if (pendingId && active) active.identify(pendingId);
 }
 
+/** The client already created for this page, or null when `posthog-js` has not been loaded. */
+function clientRunning(injected?: PostHogClient): PostHogClient | null {
+  if (injected) return active === injected ? injected : null;
+  return active;
+}
+
+/**
+ * Load PostHog only after an explicit accept.
+ *
+ * `granted` initialises once (dynamic `import('posthog-js')` on the real
+ * client), then opts in. `null` and `denied` do not import and do not call
+ * `init`. A decline after an accept in the same page opts the running client
+ * out. A decline that arrives while that first import is still in flight is
+ * remembered, so the client does not opt in when the import settles.
+ */
+export function applyPostHogConsent(
+  choice: 'granted' | 'denied' | null,
+  injected?: PostHogClient,
+  key: string = currentKey(),
+): void {
+  if (!key.trim()) return;
+  if (choice === 'granted') {
+    if (!clientRunning(injected)) initPostHog(injected, key);
+    grantPostHog();
+    return;
+  }
+  if (choice !== 'denied') return;
+  const running = clientRunning(injected);
+  if (running) {
+    running.opt_out_capturing();
+    return;
+  }
+  if (!injected && loading) pending = 'out';
+}
+
 export function initPostHog(injected?: PostHogClient, key: string = currentKey()): void {
   const projectKey = key.trim();
   if (!projectKey) return;
+  // `posthog-js` `init()` always fetches remote config. Opt-out does not
+  // stop that request, so the import itself waits for Accept.
+  if (browserConsent() !== 'granted') return;
   if (injected) {
     injected.init(projectKey, initOptions());
     active = injected;
@@ -164,7 +217,11 @@ export function identifyWallet(analyticsId: unknown, injected?: PostHogClient, k
 
 export function resetPostHog(): void {
   pendingId = null;
-  active?.reset();
+  if (!active) return;
+  active.reset();
+  if (browserConsent() !== 'granted') return;
+  active.opt_in_capturing();
+  active.startSessionRecording();
 }
 
 export function capturePostHog(event: string, props?: Record<string, CaptureValue>): void {

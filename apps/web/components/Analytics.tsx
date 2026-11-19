@@ -6,16 +6,16 @@ import { useEffect, useRef, useState } from 'react';
 import { ANALYTICS_IDS, analyticsConfigured, flushAnalytics, track } from '../lib/analytics';
 import { readConsent, subscribeConsent } from '../lib/consent.ts';
 import type { Lang } from '../lib/lang.ts';
-import { denyPostHog, grantPostHog, initPostHog, onPostHogReady } from '../lib/posthog.ts';
+import { applyPostHogConsent, onPostHogReady } from '../lib/posthog.ts';
 import { ConsentBanner } from './ConsentBanner';
 
 /**
- * Loads GA4, Meta Pixel and Clarity only when a public id is set and the
- * shopper has accepted. PostHog is initialised opted out, then opted in or
- * out with that same choice. `session_start` fires once after the choice,
- * once the snippets that are configured have defined their functions.
- * PageView is the vendors' own hit. CompleteRegistration is not sent from
- * the shopper.
+ * Loads GA4, Meta Pixel, Clarity and PostHog only when a public id is set
+ * and the shopper has accepted. PostHog is imported on Accept, or on mount
+ * when `chg_consent` is already `granted`. Unset and Decline never import
+ * it. `session_start` fires once after the choice, once the snippets that
+ * are configured have defined their functions. PageView is the vendors'
+ * own hit. CompleteRegistration is not sent from the shopper.
  */
 export function Analytics({ initialLang }: { initialLang: Lang }) {
   const started = useRef(false);
@@ -23,12 +23,13 @@ export function Analytics({ initialLang }: { initialLang: Lang }) {
   const [granted, setGranted] = useState(false);
 
   useEffect(() => {
-    initPostHog();
     const apply = () => {
       const choice = readConsent(document.cookie);
       setGranted(choice === 'granted');
-      if (choice === 'granted') grantPostHog();
-      else if (choice === 'denied') denyPostHog();
+      if (choice === 'granted') {
+        initPostHog();
+        grantPostHog();
+      } else if (choice === 'denied') denyPostHog();
     };
     apply();
     const stopConsent = subscribeConsent(apply);
