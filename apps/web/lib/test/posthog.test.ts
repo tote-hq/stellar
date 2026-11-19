@@ -73,8 +73,28 @@ describe('posthog client', { concurrency: 1 }, () => {
     assert.equal(options?.opt_out_capturing_by_default, true);
     assert.equal(options?.disable_session_recording, true);
     assert.equal(options?.autocapture, false);
-    assert.equal(options?.capture_pageview, false);
-    assert.equal(options?.capture_pageleave, false);
+    assert.equal(options?.capture_pageview, 'history_change');
+    assert.equal(options?.capture_pageleave, 'if_capture_pageview');
+    assert.equal(options?.before_send, initOptions().before_send);
+    const hook = options?.before_send;
+    assert.ok(hook);
+    const plain = 'https://app.changuito.me/privacidad';
+    assert.equal(hook({ event: '$pageview', properties: { $current_url: plain } }).properties.$current_url, plain);
+    const dirty = 'https://app.changuito.me/dev/checkout?retailer=dia&total=%241.234#paid';
+    const cleaned = hook({
+      event: '$pageview',
+      properties: { $current_url: dirty, $referrer: dirty, $pathname: '/dev/checkout' },
+    });
+    assert.equal(cleaned.properties.$current_url, 'https://app.changuito.me/dev/checkout#paid');
+    assert.equal(cleaned.properties.$referrer, 'https://app.changuito.me/dev/checkout#paid');
+    assert.equal(cleaned.properties.$pathname, '/dev/checkout');
+    const hashed = hook({
+      event: '$pageleave',
+      properties: { $current_url: 'https://app.changuito.me/path#a?b' },
+    });
+    assert.equal(hashed.properties.$current_url, 'https://app.changuito.me/path#a?b');
+    const other = hook({ event: 'session_start', properties: { $current_url: dirty } });
+    assert.equal(other.properties.$current_url, dirty);
     assert.equal(options?.persistence, 'localStorage+cookie');
     assert.equal(options?.disable_surveys, true);
     assert.equal(options?.api_host, POSTHOG_PROXY_PATH);
