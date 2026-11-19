@@ -79,20 +79,21 @@ Details worth knowing:
 
 ---
 
-## 2. Funding a wallet (testnet, and no longer on the shopper's path)
+## 2. Funding a wallet (testnet)
 
-The faucet route is live and gated, but the **Fondear** button that calls it
-now renders only in `/dev/ui` — preview pays from the demo wallet instead, so a
-visitor never needs a balance of their own. Kept here because the route is one
-of the four SEP-53 gates and because the ordering below is the interesting part.
+The faucet route is live. **Cargar USDC** calls it from the wallet widget and
+from checkout. Preview can still pay from the demo wallet, so a visitor on
+that path never needs a balance of their own.
 
 Two steps, and the order is the point.
 
 ```
 [Fondear]  ──►  POST /api/faucet { address, proof }
                    │
-                   │ 0. SEP-53 proof, then the allowlist — deny-by-default
-                   │      in production
+                   │ 0. A banned wallet is refused. Then the database:
+                   │      config.faucet_open_to_all, or a wallet.faucet_allowed
+                   │      row. With no database the faucet is closed.
+                   │      The SEP-53 proof is still required.
                    │
                    │ 1. friendbot, if XLM < 5
                    │      an address nobody funded is just a public key: every
@@ -285,12 +286,12 @@ BROWSER                            /api/card                   STELLAR / DB
 
 ---
 
-## 6. Dormant: the escrow
+## 6. The escrow
 
-Everything below is deployed on testnet, covered by 19 tests, and reachable
-only from `/dev/ui`. No shopper path calls it. Kept because bringing it back is
-a concrete next step — see
-[stellar.md](stellar.md#the-escrow-contract-dormant).
+Deployed on testnet over the mintable `mock_usdc` and covered by 19 tests. On the
+login network, checkout mounts `PaymentModal` and calls `open`. Other networks
+keep the memo deposit rail. See
+[stellar.md](stellar.md#the-escrow-contract).
 
 ### 6a. Opening
 

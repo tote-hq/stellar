@@ -144,7 +144,7 @@ Failed MCP tools stay visible. Do not "clean up" the trail by hiding those.
 *`c88332d`.*
 
 History used to be a module-scope `Map`. On one developer's machine that is
-correct and free. On Vercel it is not: module scope is a cache, not a database,
+correct and free. On a serverless host it is not: module scope is a cache, not a database,
 and a cold start, a deploy or a scale-out mid-basket wipes it. The symptom was
 the agent re-asking a question the user had already answered while the page
 still showed every bubble — the user sees continuity the server does not have,
@@ -223,8 +223,9 @@ along with their tests, and `loop.ts` calls `anthropicProvider()` directly.
 answer "is the machine really being used?", because `auto` succeeds either way
 by design. But it made two variables that had to agree — the provider name and
 the URL — and they were set in different moments, so removing `OLLAMA_URL` from
-Vercel while the provider name stayed behind asked for a model that could not
-be reached and forbade the only fallback. Every turn died at the first hop, in
+the deployment's environment while the provider name stayed behind asked for a
+model that could not be reached and forbade the only fallback. Every turn died
+at the first hop, in
 Spanish, saying the local model was unavailable. A working deployment turned
 off by deleting a variable that was no longer used.
 
@@ -336,55 +337,6 @@ model; a false negative on the postal-code regex only means the model gets
 the message, which is what used to happen to every message.
 
 ---
-
-## Two repos, one product
-
-This repo is one of two under `tote-hq`: **`stellar`** and **`solana`**. They
-share everything up to `419304d` and diverge from there — the chain layer
-(escrow, wallet, checkout) is different, and the agent, the MCP package, the
-landing, the gates and the migrations are the same code twice. The split
-exists so each chain's judges see only that chain's work, with real PRs,
-reviews and CI; it is not a monorepo with a mirror, and nothing syncs by
-itself.
-
-The rules, enforced by `.github/workflows/shared-label.yml` and carried out
-by `.github/workflows/sync.yml`:
-
-- **A PR that touches a path in `.github/shared-paths.txt` must carry one of
-  two labels**, or the check fails and it cannot merge. `shared` means: when
-  this merges, cherry-pick it into the sibling repo and open a PR there.
-  `chain-only` means: this touches shared paths but stays here on purpose —
-  the sibling already has it, or it must not have it.
-- **A `shared` PR becomes an ordinary PR in the sibling**, on a
-  `sync/<source branch>` branch, labelled `chain-only`, with the source PR's
-  title and body and the original author on the commit. Review it there like
-  any other PR, and merge it the same day: an unmerged sync PR is exactly the
-  drift the labels exist to make visible.
-- **Nothing in the sibling names where a change came from** — not the
-  branch, title, body, commit or issue — because each repo is judged on its
-  own. The link is recorded on the source PR instead, as a comment with the
-  sibling PR number inside a code span. Keep it in one: a plain `org/repo#N`
-  or URL anywhere public puts a "mentioned this" entry on the sibling PR's
-  timeline, which is the link this avoids. Write shared PR descriptions and
-  commit messages without naming either chain; when one does, the workflow
-  gives the sibling PR a neutral body and drops the commit messages.
-- **A conflict opens a neutral issue in the sibling, not a broken branch.**
-  The commands to resolve it go on the source PR. Whoever owns the sibling
-  resolves it on a `sync/` branch, labelled `chain-only`, committed as the
-  original author without `-x`.
-- **Never label a `sync/…` PR `shared`.** The workflow skips those branches
-  anyway, but the label would be a lie.
-- **Merge by squash or merge commit, never rebase.** Rebase merging is off in
-  both repos because its `merge_commit_sha` is only the last of N commits and
-  the sync would carry one commit out of N.
-- **`.github/shared-paths.txt` is itself a shared path.** Edit it in one repo
-  with the `shared` label and let the sync carry it, so the two lists cannot
-  disagree about what is shared.
-
-Prefix PR titles with what the PR is — `stellar:`, `solana:` or `shared:` —
-because judges read titles, not diffs. Needs that are not in the repo:
-`SYNC_TOKEN` (a fine-grained PAT with Contents, Pull requests and Issues on
-both repos) as a secret in each, and the two labels.
 
 ## Things that are the way they are on purpose
 

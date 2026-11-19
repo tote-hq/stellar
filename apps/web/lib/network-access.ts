@@ -19,8 +19,8 @@ import { envFlag } from './env-flag.ts';
  * money — so the allowlist is checked against an address that has *already*
  * been proven by a SEP-53 signature, never one the browser merely claims.
  *
- * Deny by default: in production an empty list means nobody, which also covers
- * Vercel previews, since those run as production too. Testnet is never gated;
+ * Deny by default: in production an empty list means nobody. The Worker sets
+ * `NODE_ENV=production`, so that is the live app. Testnet is never gated;
  * it is the default and it cannot spend anything.
  *
  * REAL_MODE_OPEN_TO_ALL drops the allowlist entirely and lets any wallet into

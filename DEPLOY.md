@@ -1,7 +1,7 @@
 # Deploying changuito
 
 Two halves, in this order: the contracts on Stellar testnet, then the app on
-Vercel. The contracts are already deployed and their ids are committed in
+Cloudflare Workers. The contracts are already deployed and their ids are committed in
 `deployments.json`, so **if you are only deploying the app, skip to part 2.**
 
 ---
@@ -62,6 +62,35 @@ contract. To force new ids:
 ```bash
 npm run deploy:testnet -- --force
 ```
+
+#### Live testnet escrow (mintable `mock_usdc`)
+
+The Circle USDC SAC path is withdrawn. Run without `USDC_ISSUER` so the script
+deploys a new `mock_usdc` (resolver as admin) and an escrow over that token.
+The live ids:
+
+| | |
+|---|---|
+| escrow | `CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX` |
+| mintable token | `CAOPLEE4NVOVEBYRO7NHG5K4FEML5O5C5AATYBK4FCDLYRAJFZWBNN3E` |
+| classic deposit issuer | `GCGV3225QTJFJ32KTPJNOR5SYANP4QWNUGKKGKVK7ILMK4QACZHJTGJB` (memo rail only; not the escrow token) |
+
+```bash
+npm run deploy:testnet
+```
+
+Two accounts need to exist and hold XLM before it runs, and a person funds them:
+`changuito-resolver` and `changuito-treasury` in the `stellar keys ls` keystore.
+The only keystore identity for the resolver is `changuito-resolver`
+(`GBXBAOFWG4Y4ZQEDXH73BACYYCE7ODSKXHLXYVRPLJOYFRDCPWHGYGN5`). Do not redeploy
+with another resolver. A person sets `STELLAR_RESOLVER_SECRET` to that identity
+so it matches `deployments.json`. The treasury
+(`GBKJHIKIZONKCCV2JVOGUDXEOPTQUZ2OKYZNV3R3LDALNZHCSF2JJEIF`) stays. The escrow
+token is Soroban-only, so the treasury needs no classic USDC trustline for
+`settle`.
+
+`USDC_ISSUER=…` still exists in the script for a SAC deploy, but that is not the
+live escrow and must not be used for this redeploy.
 
 ### 1.4 Commit what changed
 
@@ -131,78 +160,147 @@ escrow; it is simply no longer on the deposit rail.
 
 ---
 
-## Part 2 — the app on Vercel
+## Part 2 — the app on Cloudflare Workers
+
+The app is the Worker **`changuito-web`**, which owns `app.changuito.me`.
+It is deployed by **Workers Builds** from this repository's `main` branch,
+not from a laptop. Which variables exist, and what each name means, is under
+[Variables and services](#variables-and-services) below.
+
+The build is vinext on Vite (`apps/web/vite.config.ts`, `worker.ts`,
+`cloudflare.config.ts`). It needs **Node 22.18 or newer**, because the config
+loader refuses anything older; `.nvmrc` pins it, and Workers Builds reads
+that file. `next build` keeps working for local checks.
+
+### Workers Builds settings (`changuito-web` → Settings → Build)
+
+| Setting | Value |
+|---|---|
+| Git repository / branch | `tote-hq/stellar`, `main` |
+| Root directory | `/` (the repository root: the build is an npm workspace) |
+| Build command | `npm run build:vinext -w @changuito/web` |
+| Deploy command | `npm run deploy:vinext -w @changuito/web` |
+| Builds for non-production branches | off |
+| API token | the one Workers Builds creates. The deploy reads it from `CLOUDFLARE_API_TOKEN`, so nothing logs in interactively |
+
+The build command compiles `packages/mcp` and runs the Vite build. It does
+not read `DIRECT_URL` and it applies no SQL. A person runs `npm run db:migrate`
+on a machine that has that URL when the schema should change; that command is
+the approval, including for a migration that drops or rewrites something. The
+deploy command uploads the build (`--skip-build`), so run it only after the
+build command.
+
+**Build variables and secrets.** `NEXT_PUBLIC_*` is inlined into the bundle
+at build time, so it is set here, not under the Worker's runtime variables:
+
+| Name | Kind | Value |
+|---|---|---|
+| `NEXT_PUBLIC_POLLAR_API_KEY` | variable | the **testnet** Pollar publishable key |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | variable | the Turnstile site key for `app.changuito.me` |
+| `NEXT_PUBLIC_GA_MEASUREMENT_ID`, `NEXT_PUBLIC_META_PIXEL_ID`, `NEXT_PUBLIC_CLARITY_PROJECT_ID` | variable | optional |
+
+`CHG_HYPERDRIVE_ID` and `DIRECT_URL` are not build settings. Without the
+Hyperdrive id the Worker deploys with no database binding and the app runs
+the way a fresh clone does. `DIRECT_URL` stays on the laptop that runs
+`npm run db:migrate`.
+
+**Contract ids are runtime variables, not build variables.** Set them on
+`changuito-web` → Settings → Variables and Secrets, as variables of the
+running Worker. The browser asks `/api/contracts` on each checkout, and the
+server reads the value for that request. Changing one does not take a new
+build. Unset, the request uses the id recorded in `deployments.json`.
+
+| Name | Network |
+|---|---|
+| `STELLAR_ESCROW_ID` | testnet escrow |
+| `STELLAR_USDC_ID` | testnet token |
+| `STELLAR_ESCROW_ID_MAINNET` | mainnet escrow |
+| `STELLAR_USDC_ID_MAINNET` | mainnet token |
+
+A value that is not a `C…` contract id is ignored. Do not put these names in
+the build variables: the build does not read them, and a value inlined there
+would not be the one a later request sees.
+
+Never set `NEXT_PUBLIC_POLLAR_API_KEY_MAINNET` there: whatever it holds is
+inlined. On a local machine the same public names can come from the shell.
+
+**Worker secrets** (`changuito-web` → Settings → Variables and Secrets, type
+*Secret*). Same names and meanings as the tables in
+[2.4](#24-environment-variables): `ANTHROPIC_API_KEY`, `TURNSTILE_SECRET_KEY`,
+`CHG_SESSION_SECRET`, and for payments `STELLAR_RESOLVER_SECRET`,
+`DEPOSIT_ADDRESS_TESTNET`, `DEMO_WALLET_SECRET`, plus optionally
+`VYRION_API_KEY`, `FX_ARS_PER_USD`. Without the
+three payment ones the app runs and checkout answers 503 "los pagos no están
+habilitados" (`lib/test/go-live-without-payments.test.ts`).
+
+`OZ_CHANNELS_API_KEY` is the OpenZeppelin Channels key for testnet, from
+[channels.openzeppelin.com/testnet/gen](https://channels.openzeppelin.com/testnet/gen).
+Channels pays the fee for the escrow `open`, so the buyer signs only an
+authorization entry and spends no XLM. Set it here as a *Secret*, never as a
+build variable and never in `cloudflare.config.ts`: a value there is
+committed, and declaring a binding the dashboard does not have yet makes the
+strict deploy abort. The hosted service caps the fees one key may spend and
+resets that cap every 24 hours; past it, a request fails with
+`FEE_LIMIT_EXCEEDED`.
+
+The faucet list is the database, not a Worker secret. Apply
+`supabase/migrations/0011_wallet.sql` first. `config.faucet_open_to_all`
+(default false) lets any wallet that is not banned mint; otherwise only a
+`wallet` row with `faucet_allowed` does.
+`node scripts/config.mjs set faucet_open_to_all true` flips the flag, and
+`npm run wallet -- allow G...` grants one address. A `banned` row refuses
+the login cookie and the faucet. With no database the faucet is closed.
+The SEP-53 proof is still required.
+
+No Redis. The chat and faucet quotas count in Postgres (`quota` table,
+`lib/kv.ts`). Production without `DATABASE_URL` refuses them. `KV_REST_API_URL`
+/ `KV_REST_API_TOKEN` are still read by `lib/agent/turn-store.ts` alone, and
+are optional. Without them a conversation's history lives in the isolate's
+memory: it survives while the same isolate serves the shopper, and is lost on
+a cold start or a deploy. Moving the turn store to the `kv` table is a
+separate change.
+
+`NODE_ENV=production` is set by `cloudflare.config.ts` itself. It is not
+optional: the app reads it at runtime, and on a Worker `process.env` holds
+only the bindings, so without it every fail-closed rule takes its
+development branch.
+
+`DATABASE_URL` is not a secret here. `worker.ts` copies the Hyperdrive
+binding's connection string onto it for each request.
+
+---
+
+### Variables and services
 
 ### 2.1 Get the two API keys
 
 - **Anthropic** — [console.anthropic.com](https://console.anthropic.com) → API
   keys. This is what runs the shopping agent.
 - **Pollar** — the [Pollar dashboard](https://pollar.xyz) → your application →
-  API key, with the network set to **mainnet**. This one is publishable and
+  API key, with the network set to **testnet**. This one is publishable and
   ships in the browser bundle by design.
 
-Mainnet, and only mainnet. A Pollar dashboard key is network-scoped, this
-project holds one, and [2.3](#23-preview-and-production) is why that is a
-design rather than a gap.
-
-### 2.2 Import the repository
-
-In Vercel: **Add New → Project**, import `tote-hq/stellar`.
+Testnet, while D1 runs. A Pollar dashboard key is network-scoped — the key is
+the network, and the login network in `lib/pollar.ts` follows whichever key is
+set rather than a variable of its own. In the dashboard, on that testnet app:
 
 | Setting | Value |
 |---|---|
-| Framework preset | Next.js |
-| Root directory | `apps/web` |
-| Build command | *(leave as the default)* |
-| Install command | *(leave as the default)* |
-| Node.js version | **22.x** |
+| Network | **testnet** |
+| Allowed domains | `app.changuito.me`, `ste.changuito.me`, and the Stellar Worker `*.workers.dev` URL |
+| Login methods | Freighter enabled, plus the existing email and Google |
+| Fee sponsorship | **off** — OZ Channels pays fees |
+| Reserve sponsorship | **off** — Changuito's sponsor account pays reserves |
 
-Two of these are not optional:
-
-- **Root directory `apps/web`.** It is a workspace, and Vercel still installs
-  from the repo root, so the MCP package and the bindings resolve normally.
-- **Node 22.x.** `@stellar/stellar-sdk@17` requires ≥ 22.12 and the install
-  fails outright on 20.
-
-### 2.3 Preview and production
-
-One deployment, one URL, two apps — and **which one a visitor is in is decided
-by whether Pollar has a session**, evaluated in the browser (`lib/app-mode.ts`).
-
-| | **preview** | **production** |
-|---|---|---|
-| who is it | nobody signed in | a Pollar session |
-| network | testnet | mainnet |
-| who pays | **the demo wallet, server-signed** | their own wallet |
-| money | the USDC issued in [1.6](#16-issue-the-testnet-usdc-preview-pays-with) | real Circle USDC |
-| Postgres | **never touched** | chat, orders, the card binding |
-| the card | one per código, given back with the basket | one per customer, kept |
-
-**Signing in *is* the crossing.** There is no mode variable, no toggle and no
-second deployment, and there must not be one: a mode derived from the session
-cannot disagree with who you are, which deletes the entire class of bug where
-somebody spends real money in what the screen calls the demo. The control
-beside the balance is a read-only badge saying which of the two you are in.
-
-Preview exists so that anyone with the link can search, fill a basket, watch a
-**real on-chain payment settle and a real card appear** without connecting
-anything. It is a demo with a ledger behind it, not a mock: the only step that
-differs from production is who signs the payment.
-
-Two consequences worth knowing before you configure anything:
-
-- **A deployment that sets only the preview half is complete**, not broken. No
-  Pollar key, no Vyrion key and no database still gives you the whole demo;
-  what is missing is the way out of it, and the sign-in button says so.
-- **A guest who runs out of free turns is told to sign in**, which now means
-  "switch to spending real money". That is the honest crossing and the copy
-  names it. Raise `FREE_TURNS` if the demo feels cramped — the ceiling is your
-  Anthropic bill on a public URL, held back by Turnstile and the per-IP cap.
+The mainnet key (`NEXT_PUBLIC_POLLAR_API_KEY_MAINNET`) stays empty on a
+testnet deployment; with the testnet key set it is not read for sign-in.
 
 ### 2.4 Environment variables
 
-Under **Settings → Environment Variables**, for Production *and* Preview.
-Grouped by which of the two apps needs them.
+On the Worker (`changuito-web` → Settings → Variables and Secrets). A
+`NEXT_PUBLIC_*` name is a build variable instead, from the table above,
+because it is inlined into the bundle. Grouped by which of the two apps
+needs them.
 
 **Always:**
 
@@ -211,9 +309,10 @@ Grouped by which of the two apps needs them.
 | `ANTHROPIC_API_KEY` | `sk-ant-…` | server only |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | from Cloudflare → Turnstile | the browser, by design |
 | `TURNSTILE_SECRET_KEY` | **required**, the matching secret | server only |
-| `KV_REST_API_URL` | set by the Redis integration | server only |
-| `KV_REST_API_TOKEN` | set by the Redis integration | server only |
 | `FX_ARS_PER_USD` | optional, e.g. `1500` | server only |
+
+`KV_REST_API_URL` and `KV_REST_API_TOKEN` are optional and are not a quota
+store. See [2.6](#26-conversation-history-and-quotas).
 
 **Preview — the demo pays for itself:**
 
@@ -226,7 +325,8 @@ Grouped by which of the two apps needs them.
 
 | Name | Value | Exposed to |
 |---|---|---|
-| `NEXT_PUBLIC_POLLAR_API_KEY_MAINNET` | the Pollar key from [2.1](#21-get-the-two-api-keys) | the browser, by design |
+| `NEXT_PUBLIC_POLLAR_API_KEY` | the **testnet** Pollar key from [2.1](#21-get-the-two-api-keys) | the browser, by design |
+| `NEXT_PUBLIC_POLLAR_API_KEY_MAINNET` | empty while D1 runs on testnet | the browser, by design |
 | `CHG_SESSION_SECRET` | **required**, `openssl rand -base64 32` | server only |
 | `DEPOSIT_ADDRESS_MAINNET` | the `G…` operator account real deposits are paid into | server only |
 | `VYRION_API_KEY` | `sk_test_…`, or `sk_live_…` with `ALLOW_LIVE=1` | server only |
@@ -235,12 +335,13 @@ Grouped by which of the two apps needs them.
 | `REAL_MODE_ALLOWLIST_ADDRESSES` | who may pay — see [2.8](#28-who-may-pay) | server only |
 | `REAL_MODE_OPEN_TO_ALL` | optional, `1` to drop that list — read [2.8](#28-who-may-pay) first | server only |
 
-**Still configured, no longer reachable from the UI:**
-`STELLAR_RESOLVER_SECRET`, `STELLAR_RESOLVER_SECRET_MAINNET`,
-`FAUCET_ALLOWLIST_ADDRESSES`, `FAUCET_OPEN_TO_ALL`. These belong to the escrow
-rail and the testnet faucet, and neither has a button any more — see
-[docs/flows.md](docs/flows.md#6-dormant-the-escrow). Leave them set if they
-are set; nothing calls them.
+**Still configured for the escrow:**
+`STELLAR_RESOLVER_SECRET` and `STELLAR_RESOLVER_SECRET_MAINNET`. Settle and
+refund need the resolver secret. The faucet is not an environment variable:
+after `0011_wallet.sql`, `config.faucet_open_to_all` or a
+`wallet.faucet_allowed` row decides who may mint, and a ban wins over both.
+Set them with `node scripts/config.mjs` and `npm run wallet`. See
+[docs/flows.md](docs/flows.md#2-funding-a-wallet-testnet).
 
 `DEPOSIT_ADDRESS_*` is **public by nature** — it is printed on screen for the
 shopper to pay — and no secret for either one is anywhere near this deployment.
@@ -289,7 +390,7 @@ Production only. Preview writes nothing, by design and by construction — there
 is no proven address in preview, so `archiveChat` answers `'guest'`, the card
 binding has no owner to key on, and the order table is never reached.
 
-1. **supabase.com → New project.** Region: match your Vercel functions.
+1. **supabase.com → New project.** Region: the same region as the Worker.
 2. **Project Settings → Database → Connection string.** Take both: the
    *transaction pooler* on port **6543** and the *direct* connection on **5432**.
 3. Put them in `apps/web/.env` locally as `DATABASE_URL` and `DIRECT_URL`, with
@@ -302,14 +403,17 @@ npm run db:status      # what is applied, what is pending
 npm run db:invariants  # the constraints, against the real database
 ```
 
-5. In Vercel, set **`DATABASE_URL` only**. Migrations are a laptop operation.
+5. On the Worker, do not set **`DATABASE_URL`** by hand. `worker.ts` copies
+   the Hyperdrive binding's connection string onto it for each request.
+   Migrations are a laptop operation. Workers Builds does not run them and
+   does not need `DIRECT_URL`.
 
 **The 6543/5432 difference is the part that fails only under load**, which is
 why it is spelled out here rather than left to the connection-string picker.
 6543 is transaction-mode pooling: a connection is held for one statement and
-given back, which is exactly the shape of a lambda per request. 5432 is a
-session, which DDL and advisory locks need and which a request handler must
-never open — `lib/db.ts` reads `DATABASE_URL` and deliberately does not read
+given back, which is exactly the shape of one request at a time on a Worker.
+5432 is a session, which DDL and advisory locks need and which a request
+handler must never open — `lib/db.ts` reads `DATABASE_URL` and deliberately does not read
 `DIRECT_URL`, because a route that quietly took a session connection would work
 perfectly in development and exhaust the database at traffic rather than at
 deploy.
@@ -329,65 +433,30 @@ moved (`supabase/migrations/0002_order_identity.sql`).
 
 ### 2.6 Conversation history and quotas
 
-Redis, and it is **no longer on the money path** — that moved to Postgres in
-2.5. What it still holds is the agent's in-flight turn, the chat and faucet
-quotas, and the local model's breaker and lanes. Losing it costs chat
-continuity and the breaker, not a deposit.
+The chat and faucet quotas count in Postgres (`quota`, through `lib/kv.ts`).
+Production without `DATABASE_URL` refuses them, so `/api/chat` and the faucet
+answer 503 instead of running with no ceiling. Redis is not that store, and
+the Upstash integration this section used to prescribe is not part of the
+current deploy.
 
-Required in production all the same, because the quotas fail closed: without
-it (or with Redis down) `/api/chat` answers 503 instead of running unlimited
-turns on your Anthropic key.
+`KV_REST_API_URL` and `KV_REST_API_TOKEN` are optional. `lib/agent/turn-store.ts`
+reads them for the in-flight conversation, with a one hour TTL. Without the
+pair the turn lives in the isolate's memory and is lost on a cold start or a
+deploy. A signed-in transcript is also written to Postgres, which is the
+record that outlives that hour and a cleared browser. `chat-store.ts` keeps
+the blocks the shopper sees in localStorage.
 
-1. **Storage → Create Database → Marketplace → Upstash for Redis.**
-2. Region: match your functions (Vercel's default is `iad1`). Leave Read
-   Regions empty.
-3. **Turn Eviction on.** Off means writes *fail* once the database is full.
-   This is a cache — dropping the oldest session is the right answer, and a
-   conversation is roughly 100 KB with a one hour TTL.
-4. **Connect Project.** That injects `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
-
-Use the REST pair, not `REDIS_URL` or `KV_URL`: those are `rediss://` strings
-for a TCP client, and one TCP connection per lambda is the connection-limit
-problem an HTTP client exists to avoid.
-
-Locally, copy the two into `apps/web/.env`. Leave them out and an in-process
-Map stands in, which on one machine is the same guarantee for free.
-
-A reload starts a new chat and the old one is still there: `chat-store.ts`
-keeps the blocks in localStorage and the rail lists them. For a signed-in
-shopper the transcript is also in Postgres, which is what outlives the TTL and
-a cleared browser.
-
-### 2.7 Deploy a preview first
-
-Push to a branch, let Vercel build it, and check on the preview URL before
-promoting.
-
-The rate comes back:
-
-```bash
-curl "https://<preview>/api/quote?centavos=1234500"
-```
-
-And the chat **streams** rather than arriving in one lump. If it arrives all at
-once something is buffering the SSE response — the route sets
-`X-Accel-Buffering: no` for exactly this, and the runtime must be `nodejs`,
-never edge.
-
-Then walk preview end to end, which is the whole point of it: load with no
-session, build a basket, pay with the demo wallet, watch the deposit go from
-waiting to confirmed, and see the card. Then open the payment on Horizon and
-confirm it is **`USDC:<issuer>` with the código in the memo** — not XLM, and
-not a Soroban event. Then confirm no row landed in `chat`, `orders` or
-`card_owner`.
-
-Then **Promote to Production**.
+Leave the pair unset unless you want that turn store in Redis. If you do,
+use the REST names, not `REDIS_URL` or `KV_URL`: those are `rediss://` strings
+for a TCP client. A database created at upstash.com names the same endpoint
+`UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`; both are read.
 
 ### 2.8 Who may pay
 
 `REAL_MODE_ALLOWLIST_ADDRESSES` decides who may pay with real money. Same
 format and the same deny-by-default rule as the old faucet list: empty in
-production means nobody, Previews included. It is enforced **after** the
+production means nobody. The Worker sets `NODE_ENV=production`, so that is
+the live app. It is enforced **after** the
 wallet's SEP-53 signature is verified, so it is checked against a proven
 address rather than a claimed one. Passkey wallets (`C…`) cannot sign that
 message, so testers need a custodial `G…` account.
@@ -466,7 +535,7 @@ different moments. There is now one, and nothing left to disagree with it.
 
 `AGENT_PROVIDER`, `OLLAMA_URL`, `OLLAMA_MODEL`, `OLLAMA_HEADERS`,
 `OLLAMA_LANES`, `OLLAMA_FIRST_BYTE_MS` and `OLLAMA_KEEP_ALIVE` are read by
-nothing. Delete them from Vercel; leaving them is harmless but misleading.
+nothing. Delete them from the Worker's variables; leaving them is harmless but misleading.
 
 ### 3.1 The two knobs that are left
 
@@ -503,21 +572,19 @@ console, which is how you check the second one is working rather than assuming.
 
 ## Part 4 — www.changuito.me
 
-The marketing site is a second Vercel project. It is `apps/landing`
-(`@changuito/landing`), not a route inside `apps/web`. Do not point
-`www.changuito.me` at the shopper project, and do not point `app.changuito.me`
-at the landing.
+The marketing site is `apps/landing` (`@changuito/landing`), not a route
+inside `apps/web`. Do not point `www.changuito.me` at the shopper app, and do
+not point `app.changuito.me` at the landing. The landing has no Workers
+config in this repo.
 
-| Setting | Value |
+| | |
 |---|---|
-| Framework preset | Next.js |
 | Root directory | `apps/landing` |
-| Install / build | defaults (install from the repo root, `next build` in this package) |
-| Node.js version | **22.x** |
-| Environment variables | none |
+| Node.js | **22** (the repo's `.nvmrc`) |
+| Build | `npm run build -w @changuito/landing` |
+| Variables | Turnstile and the waitlist webhook for `/whitelist`; analytics ids are optional. Names are in [apps/landing/README.md](apps/landing/README.md) |
 
-Details, including the manual install/build commands if Vercel does not detect
-the workspace, are in [apps/landing/README.md](apps/landing/README.md). Locally:
+Locally:
 
 ```bash
 npm run dev -w @changuito/landing     # http://localhost:3125

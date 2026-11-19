@@ -1,10 +1,10 @@
-# Product mocks — leche con proteína
+# Product mocks — protein milk
 
-Piezas de marketing para Meta y el perk de beta. No son un SKU lácteo real ni un producto de góndola.
+Marketing pieces for Meta and the beta perk. They are not a real dairy SKU and not a shelf product.
 
-| Archivo | Rol |
+| File | Role |
 |---------|-----|
-| `leche-proteina-changuito-botella.png` | **Canónica.** Botella blanca, PROTEÍNA ∞g (chiste nerd), wordmark + mascota, Edición beta. |
-| `leche-proteina-changuito-brick.png` | Alternativa Tetra Pak. Misma broma y misma edición; no reemplaza a la botella. |
+| `leche-proteina-changuito-botella.png` | **Canonical.** White bottle, PROTEÍNA ∞g (a nerd joke), wordmark + mascot, Edición beta. |
+| `leche-proteina-changuito-brick.png` | Tetra Pak alternative. Same joke and same edition; it does not replace the bottle. |
 
-Los archivos se commitean con los bytes aprobados. No regenerarlos ni recomprimirlos.
+The files are committed with the approved bytes. Do not regenerate or recompress them.

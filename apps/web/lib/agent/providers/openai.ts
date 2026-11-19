@@ -168,7 +168,7 @@ export function openaiProvider(): Provider {
         console.error('[openai]', res.status, MODEL, { type: err?.type, code: err?.code, param: err?.param });
         throw new Error(
           res.status === 401
-            ? 'OpenAI rechazó la clave. Revisá OPENAI_API_KEY en Vercel.'
+            ? 'OpenAI rechazó la clave. Revisá OPENAI_API_KEY.'
             : `OpenAI respondió ${res.status}.`,
         );
       }

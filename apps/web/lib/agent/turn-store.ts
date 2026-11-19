@@ -108,13 +108,12 @@ export interface TurnStore {
 }
 
 /**
- * The Upstash integration on Vercel injects KV-compatible names
- * (`KV_REST_API_URL`), while a database created straight from Upstash uses its
- * own (`UPSTASH_REDIS_REST_URL`). Both are the same REST endpoint, so both are
+ * `KV_REST_API_URL` / `KV_REST_API_TOKEN` and `UPSTASH_REDIS_REST_URL` /
+ * `UPSTASH_REDIS_REST_TOKEN` are the same REST endpoint, so both pairs are
  * accepted and neither is worth making the reader care about.
  *
  * The REST pair is the one to use, not `REDIS_URL` or `KV_URL`: those are
- * `rediss://` strings for a TCP client, and a TCP connection per lambda is the
+ * `rediss://` strings for a TCP client, and a TCP connection per isolate is the
  * connection-limit problem that picking an HTTP client avoids.
  */
 function credentials(): { url: string; token: string } | undefined {
@@ -188,7 +187,7 @@ function memoryStore(): TurnStore {
  * A store aimed at one REST endpoint.
  *
  * `turnStore()` reads the environment once and keeps that answer for the
- * process. A test that starts its own Redis — standing in for Vercel KV —
+ * process. A test that starts its own Redis — standing in for Upstash —
  * has to point at that endpoint without changing the one already chosen.
  */
 export function turnStoreAt(url: string, token: string): TurnStore {

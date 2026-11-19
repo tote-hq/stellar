@@ -15,9 +15,10 @@ changuito is four things that happen to live in one repository:
    `/api/card`) — a classic Stellar payment identified by a memo, confirmed
    through the ledger port (Horizon today), which unlocks a card the shopper
    types into the store's own payment form.
-4. **A Soroban escrow** (`contracts/escrow`) that held USDC between "the user
-   approved this basket" and "the basket actually happened". Deployed, tested,
-   and **dormant**: see [Why the escrow is not on the rail](#why-the-escrow-is-not-on-the-rail).
+4. **A Soroban escrow** (`contracts/escrow`) that holds USDC between "the user
+   approved this basket" and "the basket actually happened". Deployed on
+   testnet over the mintable `mock_usdc` and mounted on the login-network checkout.
+   See [the escrow contract](stellar.md#the-escrow-contract).
 
 The app is the reason the first two exist: the MCP server had never been used by
 anything except a chat client, and this proves it works inside a product.
@@ -55,7 +56,7 @@ flowchart TB
         LS[("localStorage<br/><i>the transcript the shopper sees</i>")]
     end
 
-    subgraph VERCEL["NEXT.JS ON VERCEL — Node runtime, never edge"]
+    subgraph WORKERS["VINEXT ON CLOUDFLARE WORKERS — Node runtime"]
         direction TB
         API_CHAT["/api/chat<br/><i>the agent loop, streamed as SSE</i>"]
         MCPC["MCP Client ⇄ McpServer<br/><i>InMemoryTransport</i>"]
@@ -69,7 +70,7 @@ flowchart TB
         direction TB
         VTEX["Día — VTEX<br/><i>catalogue · cart · public orderForm</i>"]
         HORIZON["Stellar Horizon<br/><i>the only confirmation source</i>"]
-        RPC["Soroban RPC<br/><i>balances · the dormant escrow</i>"]
+        RPC["Soroban RPC<br/><i>balances · escrow open</i>"]
         ISSUER["Card issuer"]
         REDIS[("Upstash Redis<br/><i>turn history, 1h TTL</i>")]
         PG[("Postgres<br/><i>orders · chat · cards</i>")]
@@ -177,7 +178,7 @@ server does, so the protocol has to be on the wire.
 
 Spawning the published binary as a subprocess would also be real MCP, but the
 binary registers the checkout tools, which open a **headed browser on the server
-host** so a human can type their supermarket password. That cannot run on Vercel.
+host** so a human can type their supermarket password. That cannot run in the web app.
 `@changuito/mcp/server` is the half that can, and it has no path to the checkout
 module at all — the checkout tools sit behind a dynamic `import()`, so nothing in
 the web app's import graph can even resolve Playwright.
@@ -216,8 +217,8 @@ produced that rule.
 | The transcript the shopper sees | **localStorage** (`chat-store.ts`) | it is theirs, it must survive a reload, and a chat the server can no longer continue comes back **read-only** rather than pretending |
 | The record | **Postgres** (`chat-archive.ts`, `db.ts`) | it outlives the Redis TTL, survives a cleared browser, and is what an order is joined back to |
 
-Both server-side stores exist because a Vercel lambda's module scope is a cache,
-not a database: instances are recycled on deploy, on idle and on scale-out, and
+Both server-side stores exist because a Worker isolate's module scope is a cache,
+not a database: isolates are recycled on deploy, on idle and on scale-out, and
 two messages from the same user can land on different ones. With no Redis
 configured the history falls back to an in-process `Map`, which on one
 developer's machine is the same guarantee for free.
@@ -306,7 +307,7 @@ It is not what the shopper's path uses, for two reasons that are worth separatin
 
 The second reason is the one that has since weakened: `orderGroup` is real
 evidence, read server-side from the store's own document. Wiring it to `settle`
-is the honest next step. [stellar.md](stellar.md#the-escrow-contract-dormant)
+is the honest next step. [stellar.md](stellar.md#the-escrow-contract)
 carries the rest.
 
 ---
@@ -339,8 +340,8 @@ merely claims. `REAL_MODE_OPEN_TO_ALL` drops the allowlist; it does **not** drop
 the signature, because "anybody may pay" and "nobody has to prove who they are"
 are different sentences and only the first was ever asked for.
 
-**Deny by default.** In production an empty allowlist means nobody, which also
-covers Vercel previews, since those run as production too. Testnet is never
+**Deny by default.** In production an empty allowlist means nobody. The Worker
+sets `NODE_ENV=production`, so that is the live app. Testnet is never
 gated; it is the default and it cannot spend anything.
 
 ---
@@ -372,7 +373,7 @@ changuito/
 ├── apps/landing/            marketing site for www.changuito.me
 ├── apps/branding/           brand kit, sibling of the two apps (not a package)
 ├── contracts/
-│   ├── escrow/              open, settle, refund, events — 19 tests, dormant
+│   ├── escrow/              open, settle, refund, events — 19 tests, login-network checkout
 │   └── mock_usdc/           SEP-41 token, admin-gated mint — 15 tests
 ├── packages/
 │   ├── mcp/                 the vendored MCP server — 520 tests

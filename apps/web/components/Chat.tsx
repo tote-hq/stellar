@@ -1,6 +1,5 @@
 'use client';
 
-import { usePollar } from '@pollar/react';
 import { useEffect, useRef, useState } from 'react';
 
 import type { Cart } from '@changuito/mcp/types';
@@ -20,14 +19,12 @@ import {
   loginGateBannerText,
   loginRequiredMessage,
 } from '../lib/login-constants';
-import { pollarEnabled } from '../lib/pollar';
-import { ensureUserCookie } from '../lib/session-login';
+import { ensureUserCookie, type TokenSource } from '../lib/session-login';
 import { storeOrderUrl, storeOrdersUrl } from '../lib/storefront.ts';
 import { progressCopy } from '../lib/turn-progress.ts';
 import { uiCopy } from '../lib/ui-copy.ts';
 import { useChat } from '../lib/use-chat';
-import { useWalletSigner } from '../lib/use-wallet-signer.ts';
-import type { WalletSigner } from '../lib/wallet-proof.ts';
+import { useWallet } from '../lib/use-wallet.ts';
 import { CartCard } from './CartCard';
 import { useLang } from './LangProvider';
 import { useNetwork } from './NetworkProvider';
@@ -50,6 +47,27 @@ const VOICE_NOTE: Record<DictationError, 'voiceUnsupported' | 'voiceDenied' | 'v
 };
 
 /**
+ * The cart offer belongs in the thread, after the products it would buy.
+ *
+ * It stays out of the composer: that row is 44px icon buttons, and a label
+ * there spills under them. It also stays out while a turn is running and
+ * once a cart is already the newest thing on screen — pointing at an order
+ * that is already there is the card's job.
+ */
+function offerBuildCart(blocks: Block[], streaming: boolean, readOnly: boolean): boolean {
+  if (streaming || readOnly) return false;
+  let products = -1;
+  let cart = -1;
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+    if (!block) continue;
+    if (block.kind === 'products') products = i;
+    else if (block.kind === 'cart') cart = i;
+  }
+  return products > cart;
+}
+
+/**
  * The placeholder for this screen.
  *
  * The server renders the first one; the random pick and the phone variant
@@ -58,7 +76,8 @@ const VOICE_NOTE: Record<DictationError, 'voiceUnsupported' | 'voiceDenied' | 'v
  *
  * Each prompt has a short twin for phones. The long ones run four lines in a
  * 390px field, which is past the height cap, so an empty box showed a
- * scrollbar and a sentence cut in half. The short ones fit two lines at 360px.
+ * scrollbar and a sentence cut in half. The short ones fit one line at 360px
+ * (with the 14px phone placeholder, globals.css), so the field stays one line.
  * Both halves live in `ui-copy.ts`, in both languages.
  */
 function useComposerPlaceholder(lang: Lang): string {
@@ -76,15 +95,16 @@ function useComposerPlaceholder(lang: Lang): string {
 }
 
 export function Chat() {
-  // Same split as WalletWidget: usePollar only mounts inside a real provider.
-  return pollarEnabled ? <ChatWithPollar /> : <ChatCore />;
-}
-
-function ChatWithPollar() {
-  const { isAuthenticated, openLoginModal, wallet } = usePollar();
-  const sign = useWalletSigner();
-  const address = isAuthenticated ? (wallet?.address ?? null) : null;
-  return <ChatCore isAuthenticated={isAuthenticated} openLoginModal={openLoginModal} address={address} sign={sign} />;
+  const wallet = useWallet();
+  if (!wallet.enabled) return <ChatCore />;
+  return (
+    <ChatCore
+      isAuthenticated={wallet.authenticated && Boolean(wallet.address)}
+      openLoginModal={wallet.login}
+      address={wallet.address}
+      sign={wallet.accessToken}
+    />
+  );
 }
 
 function ChatCore({
@@ -96,8 +116,8 @@ function ChatCore({
   isAuthenticated?: boolean;
   address?: string | null;
   openLoginModal?: () => void;
-  /** The wallet's SEP-53 signer. Absent in a build without Pollar. */
-  sign?: WalletSigner;
+  /** The Pollar SEP-53 signer. Absent in a build without Pollar. */
+  sign?: TokenSource;
 }) {
   const { network } = useNetwork();
   const lang = useLang();
@@ -133,6 +153,18 @@ function ChatCore({
     if (!publish || state.streaming) return;
     publish({ state, sessionId: currentSessionId() });
   }, [publish, state, currentSessionId]);
+
+  // The cart rail's Pagar (ShopProvider.requestPay): the same dialog, over the
+  // basket as it is now. Keyed on the counter so a re-render does not reopen it.
+  const payRequest = shop?.payRequest ?? 0;
+  const seenPay = useRef(payRequest);
+  useEffect(() => {
+    if (payRequest === seenPay.current) return;
+    seenPay.current = payRequest;
+    if (!shop?.canOrder || !shop.cart) return;
+    track('payment_start', { flow: 'rail' });
+    setPaying({ cart: shop.cart, handoffUrl: shop.handoffUrl ?? undefined });
+  }, [payRequest, shop]);
 
   // The provider asks, this answers. Both halves of a restore land together —
   // transcript and session id — which is the whole point of CLAUDE.md §4.
@@ -179,7 +211,7 @@ function ChatCore({
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }, [state.blocks]);
 
-  // After Pollar login, drop the guest latch and any soft-limit line already
+  // After login, drop the guest latch and any soft-limit line already
   // written into the transcript. The banner also keys off isAuthenticated, so
   // a signed-in shopper never keeps the red gate for this render.
   useEffect(() => {
@@ -373,6 +405,22 @@ function ChatCore({
     sawGate.current = gated;
   }, [gated]);
 
+  // cart_built: once per cart block that arrives in this tab. Carts already
+  // on screen at first render (a restored chat) are not new.
+  const seenCarts = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const ids = state.blocks.filter((b) => b.kind === 'cart').map((b) => b.id);
+    if (!seenCarts.current) {
+      seenCarts.current = new Set(ids);
+      return;
+    }
+    for (const id of ids) {
+      if (seenCarts.current.has(id)) continue;
+      seenCarts.current.add(id);
+      track('cart_built');
+    }
+  }, [state.blocks]);
+
   const seenError = useRef<string | null>(null);
   useEffect(() => {
     const lastError = [...state.blocks].reverse().find((b) => b.kind === 'error');
@@ -380,6 +428,8 @@ function ChatCore({
     seenError.current = lastError.id;
     track('error_shown', { code: errorCode(lastError.message) });
   }, [state.blocks]);
+
+  const showBuildCart = offerBuildCart(state.blocks, state.streaming, readOnly);
 
   return (
     // `is-empty` is the hook for the mobile first-screen layout. The class is
@@ -485,6 +535,19 @@ function ChatCore({
               height={36}
             />
           </p>
+        ) : null}
+        {showBuildCart ? (
+          <div className="chat-build">
+            <button
+              type="button"
+              className="btn"
+              data-testid="chat-build-cart"
+              disabled={gated}
+              onClick={() => submit(copy.buildCartAsk)}
+            >
+              {copy.buildCart}
+            </button>
+          </div>
         ) : null}
         {receipt ? <ReceiptCard receipt={receipt} /> : null}
         <ReportBug />
@@ -626,7 +689,6 @@ function ChatCore({
             {composerNote}
           </p>
         ) : null}
-        {state.streaming ? <TurnProgressLine state={state} /> : null}
         <input
           ref={fileRef}
           className="composer-file"
@@ -668,6 +730,7 @@ function ChatCore({
       {paying ? (
         <CheckoutModal
           cart={paying.cart}
+          location={state.snapshot?.location}
           handoffUrl={paying.handoffUrl}
           // The chat the server knows, which is the one `archiveChat` wrote —
           // `publish` files the record under the agent's session id, so this
@@ -695,7 +758,7 @@ function ChatCore({
  * carried through storage untouched. Nothing here is recomputed from a number
  * now: a receipt that re-prices itself when a rate moves is not a receipt.
  */
-function ReceiptCard({ receipt }: { receipt: Receipt }) {
+export function ReceiptCard({ receipt }: { receipt: Receipt }) {
   const lang = useLang();
   const copy = uiCopy(lang).chat;
   // The order's own page when the store named it, the orders list when it did
@@ -820,11 +883,12 @@ export function UserBubble({
 }
 
 /**
- * What the turn is doing and for how long, under the composer.
+ * What the turn is doing and for how long.
  *
- * Mounted only while a turn streams, so its first render is the turn's start.
- * The seconds are aria-hidden: announcing a counter every second would drown
- * the stage changes, which are the part worth hearing.
+ * The fixture gallery mounts this. The composer does not: the same sentence
+ * was painting under the icon row while a search ran. The seconds are
+ * aria-hidden: announcing a counter every second would drown the stage
+ * changes, which are the part worth hearing.
  */
 export function TurnProgressLine({ state }: { state: ChatState }) {
   const lang = useLang();

@@ -7,10 +7,11 @@ import type { Cart } from '@changuito/mcp/types';
 
 import { track, trackLoginStart } from '../lib/analytics';
 import type { QuoteResponse } from '../app/api/quote/route.ts';
-import { deployment } from '../lib/deployments.ts';
-import { modeCopy, trustlineCopy } from '../lib/mode-copy.ts';
-import { basketHash, newOrderId, openArgs, toHex, type OpenedOrder } from '../lib/order.ts';
-import { pollarEnabledOn, shortAddress } from '../lib/pollar.ts';
+import { modeCopyFor, trustlineCopy } from '../lib/mode-copy.ts';
+import { openThroughChannels } from '../lib/channels-open.ts';
+import { basketHash, DEFAULT_TIMEOUT_SECS, newOrderId, toHex, type OpenedOrder } from '../lib/order.ts';
+import { useWalletSigners } from '../lib/use-wallet-signers.ts';
+import { LOGIN_NETWORK, pollarEnabled, shortAddress } from '../lib/pollar.ts';
 import { usdcAsset } from '../lib/trustline.ts';
 import { useBalances } from '../lib/use-balances.ts';
 import { useFaucetAccess } from '../lib/use-faucet-access.ts';
@@ -30,7 +31,9 @@ export function PaymentModal(props: Props) {
   // Same split as WalletWidget, and the same condition as WalletProvider, so
   // `usePollar()` never runs outside a provider that exists.
   const { network } = useNetwork();
-  return pollarEnabledOn(network) ? <PayWithPollar {...props} /> : null;
+  return pollarEnabled && LOGIN_NETWORK !== null && network === LOGIN_NETWORK ? (
+    <PayWithPollar {...props} />
+  ) : null;
 }
 
 interface Props {
@@ -43,20 +46,23 @@ interface Props {
 type Phase = 'review' | 'signing' | 'failed';
 
 function PayWithPollar({ cart, handoffUrl, onClose, onOpened }: Props) {
-  const { wallet, isAuthenticated, verified, openLoginModal, runTx, setTrustline } = usePollar();
-  const { network } = useNetwork();
+  const { wallet, isAuthenticated, verified, openLoginModal, setTrustline } = usePollar();
+  const { signAuthEntry } = useWalletSigners();
+  const { network, mode: appMode } = useNetwork();
   const address = isAuthenticated ? (wallet?.address ?? null) : null;
   const { data: balance, refresh } = useBalances(address, network);
   // Point at "Cargar USDC" only for wallets that actually have the button.
   const canFund = useFaucetAccess(address, network)?.allowed === true;
   const lang = useLang();
   const copy = uiCopy(lang).payment;
-  const mode = modeCopy(network, lang);
+  const mode = modeCopyFor(appMode, network, lang);
   const trustlineText = trustlineCopy(lang);
 
-  // The one-time step before the first real payment. `not-needed` in modo
-  // prueba, always — the demo token has no issuer, so there is nothing to
-  // open. See lib/trustline.ts.
+  // The escrow id comes from the Worker on this request, via /api/contracts.
+  // The recorded id in deployments.ts is only the default the server uses
+  // when the runtime variable is unset.
+  const [escrowId, setEscrowId] = useState<string | null>(null);
+  const [escrowError, setEscrowError] = useState<string | null>(null);
   const needsTrustline = balance?.trustline === 'needed';
   const [opening, setOpening] = useState(false);
   const [trustlineError, setTrustlineError] = useState<string | null>(null);
@@ -66,6 +72,26 @@ function PayWithPollar({ cart, handoffUrl, onClose, onOpened }: Props) {
   const [phase, setPhase] = useState<Phase>('review');
   const [failure, setFailure] = useState<string | null>(null);
   const confirm = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/contracts?network=${network}`, { cache: 'no-store' })
+      .then(async (res) => {
+        const json = await res.json();
+        if (cancelled) return;
+        if (!res.ok || typeof json.escrowId !== 'string') {
+          throw new Error(json.error ?? `contracts failed (${res.status})`);
+        }
+        setEscrowId(json.escrowId);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setEscrowError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [network]);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,28 +160,22 @@ function PayWithPollar({ cart, handoffUrl, onClose, onOpened }: Props) {
   const short = balance !== null && quote !== null && held < amountUnits;
 
   async function pay() {
-    if (!address || !quote) return;
+    if (!address || !quote || !escrowId) return;
     setPhase('signing');
     setFailure(null);
     try {
       const orderId = newOrderId();
       const basket = await basketHash(cart);
-      const outcome = await runTx('invoke_contract', {
-        contractId: deployment(network).escrowId,
+      const hash = await openThroughChannels({
+        network,
+        contractId: escrowId,
         method: 'open',
-        args: openArgs({ buyer: address, orderId, amountUnits, basketHash: basket }),
+        orderId: toHex(orderId),
+        amount: amountUnits.toString(),
+        basketHash: toHex(basket),
+        timeoutSecs: DEFAULT_TIMEOUT_SECS,
+        signAuthEntry,
       });
-
-      if (outcome.status === 'error') {
-        // resultCode is the ledger's own verdict and the only part worth
-        // pasting into a search; message is for the human.
-        throw new Error(
-          outcome.message ??
-            outcome.details ??
-            outcome.resultCode ??
-            copy.networkRefused,
-        );
-      }
 
       track('payment_success', { flow: 'checkout' });
       refresh();
@@ -166,7 +186,7 @@ function PayWithPollar({ cart, handoffUrl, onClose, onOpened }: Props) {
         buyer: address,
         basketHash: toHex(basket),
         amountUnits: amountUnits.toString(),
-        hash: outcome.hash,
+        hash,
         retailer: cart.retailer,
         cartId: cart.cartId,
         totalDisplay: cart.total.display,
@@ -178,7 +198,9 @@ function PayWithPollar({ cart, handoffUrl, onClose, onOpened }: Props) {
       });
       onClose();
     } catch (err) {
-      track('payment_fail', { flow: 'checkout', code: 'rejected' });
+      if (!(err instanceof Error) || !('code' in err)) {
+        track('payment_fail', { flow: 'checkout', code: 'rejected' });
+      }
       setFailure(err instanceof Error ? err.message : String(err));
       setPhase('failed');
     }
@@ -240,6 +262,7 @@ function PayWithPollar({ cart, handoffUrl, onClose, onOpened }: Props) {
         </dl>
 
         {quoteError ? <p className="pay-error">{quoteError}</p> : null}
+        {escrowError ? <p className="pay-error">{escrowError}</p> : null}
         {failure ? <p className="pay-error">{failure}</p> : null}
         {short ? (
           <p className="pay-warn">
@@ -280,7 +303,7 @@ function PayWithPollar({ cart, handoffUrl, onClose, onOpened }: Props) {
               type="button"
               className="btn"
               onClick={() => void pay()}
-              disabled={!quote || !verified || short || phase === 'signing'}
+              disabled={!quote || !escrowId || !verified || short || phase === 'signing'}
             >
               {phase === 'signing'
                 ? copy.signing
