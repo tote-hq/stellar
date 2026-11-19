@@ -80,8 +80,8 @@ npm run deploy:testnet
 ```
 
 Two accounts need to exist and hold XLM before it runs, and a person funds them:
-`changuito-resolver` and `changuito-treasury` in the `stellar keys ls` keystore.
-The only keystore identity for the resolver is `changuito-resolver`
+`changuito-resolver` and `changuito-treasury` in `stellar keys ls`.
+The only identity for the resolver is `changuito-resolver`
 (`GBXBAOFWG4Y4ZQEDXH73BACYYCE7ODSKXHLXYVRPLJOYFRDCPWHGYGN5`). Do not redeploy
 with another resolver. A person sets `STELLAR_RESOLVER_SECRET` to that identity
 so it matches `deployments.json`. The treasury
@@ -142,7 +142,7 @@ deletes the identity. That last step is the point — it
 locks the account, so no further issuance is possible by anyone including us,
 and "a billion is the supply" becomes a property of the ledger rather than a
 promise in a comment. **No secret passes through the process**: every signature
-is made by the `stellar` CLI from its own keystore.
+is made by the `stellar` CLI from a local identity.
 
 Then record the issuer and regenerate — do not hand-edit the generated module,
 it carries a do-not-edit header:
@@ -229,7 +229,7 @@ inlined. On a local machine the same public names can come from the shell.
 [2.4](#24-environment-variables): `ANTHROPIC_API_KEY`, `TURNSTILE_SECRET_KEY`,
 `CHG_SESSION_SECRET`, and for payments `STELLAR_RESOLVER_SECRET`,
 `DEPOSIT_ADDRESS_TESTNET`, `DEMO_WALLET_SECRET`, plus optionally
-`VYRION_API_KEY`, `FX_ARS_PER_USD`. Without the
+`FX_ARS_PER_USD`. Without the
 three payment ones the app runs and checkout answers 503 "los pagos no están
 habilitados" (`lib/test/go-live-without-payments.test.ts`).
 
@@ -329,8 +329,6 @@ store. See [2.6](#26-conversation-history-and-quotas).
 | `NEXT_PUBLIC_POLLAR_API_KEY_MAINNET` | empty while D1 runs on testnet | the browser, by design |
 | `CHG_SESSION_SECRET` | **required**, `openssl rand -base64 32` | server only |
 | `DEPOSIT_ADDRESS_MAINNET` | the `G…` operator account real deposits are paid into | server only |
-| `VYRION_API_KEY` | `sk_test_…`, or `sk_live_…` with `ALLOW_LIVE=1` | server only |
-| `ALLOW_LIVE` | `1`, and only when you mean it | server only |
 | `DATABASE_URL` | the Supabase **pooler** string, port 6543 | server only |
 | `REAL_MODE_ALLOWLIST_ADDRESSES` | who may pay — see [2.8](#28-who-may-pay) | server only |
 | `REAL_MODE_OPEN_TO_ALL` | optional, `1` to drop that list — read [2.8](#28-who-may-pay) first | server only |
@@ -361,11 +359,6 @@ the asset is play money from a locked issuer, the destination is
 on mainnet so a mainnet secret can never match the derived public key, and the
 value is read at call time so a build without it still succeeds. Never
 `NEXT_PUBLIC_`, and never echoed — not even a prefix.
-
-`VYRION_API_KEY` decides whether the card exists: unset, the card button is
-never rendered rather than rendered and broken. `ALLOW_LIVE=1` is the second
-catch — an `sk_live_` key is refused without it, and an `sk_test_` key ignores
-it, so spending real money takes both.
 
 `TURNSTILE_SECRET_KEY` is the one that fails *shut*. Set it and the gate
 enforces; leave it unset in production and `middleware.ts` answers 403
@@ -498,17 +491,6 @@ Two things that are **not** variables, and will stop a first real payment dead:
    `GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN` on mainnet. The
    buyer's own trustline the app handles, as a one-time step in the payment
    screen.
-2. **A 3DS-capable BIN on the Vyrion account.** An empty list is a 502 *after*
-   the deposit has landed, which is the wrong order to find out in.
-
-Three more Vyrion questions only a live key answers, listed because they decide
-whether a kept card is one object topped up or a new card each basket: does
-`POST /cards/{id}/fund` raise the spendable balance on a card created without a
-`spending_limit`; does a card created *with* a limit refuse to fund past it
-(there is no update-limit endpoint, which is why the persistent path sets none);
-and does `fundCard` implicitly un-freeze. `allowedCategories` is set at creation
-and unchangeable, so a standing balance stays locked to `5411,5499,5311`.
-
 ---
 
 ## Part 3 — the agent's model

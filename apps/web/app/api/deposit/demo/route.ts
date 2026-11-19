@@ -29,9 +29,8 @@
  *    `''` in deployments.json, so a future third network cannot quietly
  *    inherit a spender by being added to the enum.
  * 3. The memo must be one of ours — `isMemo`, the same check the poll does.
- * 4. The amount must parse as a Stellar amount and sit under the card ceiling.
- *    Reusing `CARD_MAX_CENTS` rather than inventing a number: the deposit
- *    exists to fund a card, so an amount no card could hold is not a deposit.
+ * 4. The amount must parse as a Stellar amount and sit under the demo cap.
+ *    `MAX_DEMO_DEPOSIT_CENTS` is the same ceiling the route always used.
  * 5. A quota, in the shape `lib/faucet-gate.ts` established. That gate is the
  *    house pattern for "we are about to spend something on your behalf", and
  *    two gates answering the same question in two shapes is how one ends up
@@ -41,7 +40,6 @@
  * against the demo wallet being drained of *reserve* by someone holding the
  * button down, which would take preview down for everybody else.
  */
-import { CARD_MAX_CENTS } from '@changuito/mcp/pay';
 import { Asset, BASE_FEE, Memo, Operation, TransactionBuilder } from '@stellar/stellar-sdk';
 
 import { DEPLOYMENTS, type NetworkId } from '../../../../lib/deployments.ts';
@@ -67,8 +65,9 @@ export const DEMO_PAY_COOLDOWN_SECONDS = 30;
 /** Everybody together, per hour. The demo wallet pays a fee for each one. */
 export const DEMO_PAYS_PER_HOUR = 200;
 
-/** The card cannot hold more, so a deposit that large is not for a card. */
-const MAX_STROOPS = BigInt(CARD_MAX_CENTS) * 100_000n;
+/** Same cap the route always used: 5,000 dollars, in stroops. */
+const MAX_DEMO_DEPOSIT_CENTS = 500_000;
+const MAX_STROOPS = BigInt(MAX_DEMO_DEPOSIT_CENTS) * 100_000n;
 
 /**
  * Two accounts sharing one sequence number is the failure a public demo will

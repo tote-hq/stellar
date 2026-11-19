@@ -1,14 +1,32 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { db } from '../db.ts';
-import { cardNetwork, isCardMember } from '../shared-card.ts';
+import { db, hasDatabase } from '../db.ts';
+import { DEFAULT_NETWORK } from '../deployments.ts';
 import { checkoutStore, type CheckoutRecord } from './store.ts';
 import { readOrder, settleOrder, refundOrder } from './escrow-server.ts';
 import { feeVerdict, type ManualEvent, SERVICE_FEE_UNITS } from './manual-policy.ts';
 import type { StatusResponse } from './types.ts';
 
-export async function manualMember(buyer: string): Promise<boolean> {
-  const network = await cardNetwork();
-  return Boolean(network && await isCardMember(network, buyer));
+/**
+ * Whether this wallet may open a manual checkout.
+ *
+ * The allowlist is `shared_card_member` for the default network. The table
+ * name is historical: this read never touches `shared_card` and never sees a
+ * PAN, an expiry or a CVV. No database, or a query that fails, is not a member.
+ */
+export async function manualMember(buyer: string, env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
+  if (!hasDatabase(env)) return false;
+  try {
+    const rows = await db(env)`
+      select 1 from shared_card_member
+       where network = ${DEFAULT_NETWORK} and address = ${buyer}`;
+    return rows.length > 0;
+  } catch (err) {
+    console.error(
+      '[checkout/manual] member list unreadable; treating as not a member:',
+      err instanceof Error ? err.name : err,
+    );
+    return false;
+  }
 }
 
 export function workerAuthorized(header: string | null, token = process.env.SANDBOX_TOKEN): boolean {

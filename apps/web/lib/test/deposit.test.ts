@@ -5,7 +5,7 @@ import { describe, it } from 'node:test';
 import { Keypair } from '@stellar/stellar-sdk';
 
 import { POST } from '../../app/api/deposit/route.ts';
-import { depositorOf } from '../card.ts';
+import { depositorOf } from '../pay/deposit-rail.ts';
 import { DEPLOYMENTS } from '../deployments.ts';
 import {
   canDeposit,
@@ -246,7 +246,7 @@ describe('POST /api/deposit under the modo real flags', () => {
 describe('who the memo was issued to', () => {
   const tester = Keypair.random();
 
-  it('is written down in a gated mode, so the card route can re-check it', async () => {
+  it('is written down in a gated mode, and not when the address was only claimed', async () => {
     await withEnv(
       { REAL_MODE_ALLOWLIST_ADDRESSES: tester.publicKey(), DEPOSIT_ADDRESS_MAINNET: OPERATOR },
       async () => {

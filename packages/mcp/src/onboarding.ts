@@ -7,9 +7,9 @@ import type { AppConfig } from './config.js';
  *
  * A user of this server does not have the repository open. They registered a
  * command in an MCP client and started talking. So "see SETUP.md" is useless to
- * them unless we say *where* SETUP.md is, and a tool surface of twenty
- * functions is useless to the model unless something says which order they go
- * in. Both of those are what this file is for.
+ * them unless we say *where* SETUP.md is, and a tool surface of many functions
+ * is useless to the model unless something says which order they go in. Both
+ * of those are what this file is for.
  *
  * Everything here is pure and string-shaped so it can be asserted on.
  */
@@ -27,11 +27,12 @@ export function setupRef(section: string): string {
 /**
  * Sent to the MCP client at connect time and shown to the model once per
  * session, so it pays for itself only if it is short. It covers what the tool
- * descriptions cannot: the order, and the two rules that must not be broken.
+ * descriptions cannot: the order, and the rules that must not be broken.
  */
 export const SERVER_INSTRUCTIONS = `
-Search Argentine supermarkets, build a cart in the user's own account, and pay for it
-with a single-use virtual card funded from crypto.
+Search Argentine supermarkets and build a cart in the user's own account.
+The checkout tools drive a real Día checkout as far as the payment form and
+stop. This server does not pay and does not create a card.
 
 TWO HALVES.
   Read-only (works immediately, no setup): set_location → search_products →
@@ -40,8 +41,11 @@ TWO HALVES.
 
 THE CHECKOUT FLOW IS ORDERED. Each tool refuses until the one before it has run,
 and names what is missing:
-  link_marketplace_account → set_delivery_address → build_cart → review_order →
-  check_funds → approve_payment
+  link_marketplace_account → set_delivery_address → build_cart → review_order
+
+review_order walks the real checkout to the payment step and shows the total.
+It does not type a card and it does not submit a payment. The user pays in
+their own browser from the cart link, if they choose to.
 
 START WITH diagnose. On a fresh install it prints what is still missing and the
 next concrete step. If a tool reports a configuration problem, run diagnose rather
@@ -51,20 +55,19 @@ TWO RULES THAT ARE NOT NEGOTIABLE.
   1. Never ask the user for their supermarket password, and never offer to type it.
      link_marketplace_account opens a real browser window and they type it there.
      This server never sees it.
-  2. Never ask the user for their name or DNI. Both are already on their store
-     profile and are read from it. Asking for them is a bug, not a courtesy.
+  2. Never ask the user for their name or DNI, or for a card number. Name and DNI are
+     already on their store profile. A card number is not something this server
+     collects or types.
 
-SPENDING. approve_payment and replenish_wallet each require the user to restate the
-exact amount, and both refuse unless ALLOW_LIVE is set. Relay what they return; do
-not paraphrase an amount. If a tool escalates with a question, put it to the user —
-that is the designed behaviour, not a failure.
+If a tool escalates with a question, put it to the user — that is the designed
+behaviour, not a failure.
 `.trim();
 
 /**
  * Instructions for a server that registers only the catalog tools.
  *
  * Kept separate rather than trimmed at runtime because instructions are a
- * promise: naming `approve_payment` to a host that never registered it sends
+ * promise: naming a checkout tool to a host that never registered it sends
  * the model to call a tool that does not exist. A read-only server has a
  * different, shorter story, and the honest part of it is where it stops.
  */
@@ -107,12 +110,11 @@ export interface ReadinessInput {
 /**
  * What is configured, what is not, and the single next thing to do about it.
  *
- * Ordered by dependency, so the first incomplete step is always the right one to
- * show. Steps 1–2 are enough to buy groceries; 3 is only for topping the wallet
- * up from an EOA, which is why it is last despite being the fiddliest.
+ * The checkout tools need a linked store session. Search does not.
  */
 export function readiness(input: ReadinessInput): SetupStep[] {
-  const { cfg, sessionExists, sessionPassphraseSet } = input;
+  const { cfg: _cfg, sessionExists, sessionPassphraseSet } = input;
+  void _cfg;
   const guide = setupGuidePath();
 
   return [
@@ -124,30 +126,11 @@ export function readiness(input: ReadinessInput): SetupStep[] {
         ? 'Run link_marketplace_account. A browser window opens and you log in yourself.'
         : `Set SESSION_PASSPHRASE (8+ characters) in your MCP client's env block, restart it, then run link_marketplace_account. ${guide} — "Linking your Día account".`,
     },
-    {
-      n: 2,
-      label: 'Card issuer configured',
-      done: Boolean(cfg.vyrion.apiKey),
-      next: `Set VYRION_API_KEY. Start with a sandbox key (sk_test_…). ${guide} — "Vyrion".`,
-    },
-    {
-      n: 3,
-      label: 'Wallet top-ups available (optional)',
-      done: Boolean(cfg.wallet.rpcUrl),
-      next: `Only needed for replenish_wallet. Set RPC_URL and create a keystore with \`npm run keystore -- --new\`. ${guide} — "Crypto wallet".`,
-    },
-    {
-      n: 4,
-      label: 'Live spending enabled',
-      done: cfg.allowLiveRun,
-      next: 'Deliberately off. Everything works in rehearsal without it; set ALLOW_LIVE=1 only when you intend to spend real money.',
-    },
   ];
 }
 
-/** Whether the user can complete a purchase right now. Step 3 is not required. */
-export const canPurchase = (steps: SetupStep[]): boolean =>
-  steps.filter((s) => s.n <= 2).every((s) => s.done);
+/** Whether the checkout tools can run: a store session is linked. */
+export const canPurchase = (steps: SetupStep[]): boolean => steps.every((s) => s.done);
 
 export function renderReadiness(steps: SetupStep[]): string {
   const lines = steps.map((s) => `  ${s.done ? '✓' : '·'} ${s.n}. ${s.label}`);
@@ -162,14 +145,9 @@ export function renderReadiness(steps: SetupStep[]): string {
 
   const first = pending[0]!;
   out.push(`NEXT — ${first.label.toLowerCase()}:`, `  ${first.next}`);
-
-  if (canPurchase(steps)) {
-    out.push('', 'Nothing above blocks a purchase; the remaining items are optional.');
-  } else {
-    out.push(
-      '',
-      'Search and price comparison work right now regardless — set_location, then search_products.',
-    );
-  }
+  out.push(
+    '',
+    'Search and price comparison work right now regardless — set_location, then search_products.',
+  );
   return out.join('\n');
 }

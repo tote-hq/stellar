@@ -8,7 +8,6 @@ import {
   assertCheckoutSupported,
   explain,
   postalCodeNote,
-  sameAmount,
   toDeliveryAddress,
   type AddressInput,
 } from '../tools.js';
@@ -49,24 +48,6 @@ describe('postalCodeNote', () => {
     assert.match(note ?? '', /1425/);
     assert.match(note ?? '', /5000/);
     assert.match(note ?? '', /review_order/);
-  });
-});
-
-describe('sameAmount', () => {
-  it('accepts a restatement that differs only in formatting', () => {
-    assert.equal(sameAmount('1.5', '1.50'), true);
-    assert.equal(sameAmount('25', ' 25 '), true);
-    assert.equal(sameAmount('1_000', '1000'), true);
-  });
-
-  it('rejects a different number', () => {
-    assert.equal(sameAmount('25', '250'), false);
-    assert.equal(sameAmount('25', '25.01'), false);
-  });
-
-  it('rejects anything unparseable rather than treating it as zero', () => {
-    assert.equal(sameAmount('25', 'twenty five'), false);
-    assert.equal(sameAmount('', ''), false);
   });
 });
 

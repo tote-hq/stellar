@@ -223,7 +223,7 @@ describe('the default network is untouched by any of this', () => {
   });
 });
 
-describe('realModeFor / realModeNeedsProof — what the card route asks', () => {
+describe('realModeFor / realModeNeedsProof — what the deposit gate asks', () => {
   it('reports the mode with no address to ask about', () => {
     assert.equal(realModeFor('mainnet', OPEN), 'open');
     assert.equal(realModeFor('mainnet', ALLOWLIST), 'allowlist');

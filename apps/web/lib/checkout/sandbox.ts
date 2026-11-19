@@ -1,16 +1,14 @@
 /**
  * The client for services/sandbox: a Jev + Playwright worker on Railway that
- * logs into the shopper's Día account, fills its cart with the basket, walks
- * checkout and pays with the operator's card.
+ * logs into the shopper's Día account, fills its cart with the basket and
+ * walks checkout.
  *
  *   POST {SANDBOX_URL}/jobs        { order_id, items, shopper }   -> { job_id }
  *   GET  {SANDBOX_URL}/jobs/{id}                                  -> SandboxJob
  *
- * `shopper` carries the shopper's Día login and `card` the operator's card
- * (lib/shared-card.ts). Both go from the start route straight into this
- * request body and nowhere else: not the checkout record, not a log line.
- * The sandbox holds them in memory for the run and drops them. A job with no
- * card stops at the payment step and the order refunds.
+ * `shopper` carries the shopper's Día login. A job may still carry a card in
+ * the request body — the sandbox schema is unchanged — but this app no longer
+ * sends one. A job with no card stops at the payment step and the order refunds.
  *
  * The mock is switched in the `config` table (lib/config.ts), not the
  * environment: `npm run config -- set sandbox_mock true` makes every new
@@ -108,8 +106,8 @@ function remote(env: NodeJS.ProcessEnv) {
 }
 
 /**
- * `demo` is the run for a wallet that may not use the shared card
- * (lib/shared-card.ts `checkoutMode`): always the mock, whatever the flags
+ * `demo` is the run for a wallet that is not on an admitted manual checkout
+ * (lib/checkout/mode.ts): always the mock, whatever the flags
  * and SANDBOX_URL say, and it stops at the payment step instead of placing,
  * so the order refunds and the shopper finishes in Día from the cart link.
  * No Día login is needed for it, so `shopper` may be absent.

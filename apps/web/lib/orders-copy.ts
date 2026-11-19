@@ -40,42 +40,6 @@ export interface PurchasesCopy {
   error: string;
   empty: string;
   codeLabel: string;
-  /** Under a line that ended in a card of ours rather than the shopper's own. */
-  cardNote: string;
-}
-
-/**
- * The card the shopper keeps, and the one deliberate way to give it back.
- *
- * Its own block because it is its own dialog. It used to sit at the top of the
- * purchases list, which was wrong twice over: everything in `PurchasesCopy` is
- * a record of something that already happened, and this is the only place in
- * the app where pressing something changes the world irreversibly. The record
- * and the card are two dialogs now, from two icons, and these are the words of
- * the second one.
- */
-export interface KeptCardCopy {
-  title: string;
-  lead: string;
-  loading: string;
-  /** Not an error: most people have never had one, and the first shop makes it. */
-  none: string;
-  /** Offered beside `none`: the card no longer has to wait for a basket. */
-  createCta: string;
-  creating: string;
-  createError: string;
-  error: string;
-  balanceLabel: string;
-  /** Said plainly, with nothing offered, because there is no way back today. */
-  frozen: string;
-  retireCta: string;
-  /** The whole warning, before the second press rather than after it. */
-  retireWarn: string;
-  retireConfirm: string;
-  retireCancel: string;
-  retiring: string;
-  retired: string;
-  retireError: string;
 }
 
 export const PURCHASES: PurchasesCopy = {
@@ -92,40 +56,13 @@ export const PURCHASES: PurchasesCopy = {
   error: 'No pudimos traer tus compras ahora. Probá de nuevo en un rato.',
   empty: 'Todavía no compraste nada con esta cuenta.',
   codeLabel: 'Código',
-  cardNote: 'Pagada con una tarjeta que te dimos nosotros.',
-};
-
-export const KEPT_CARD: KeptCardCopy = {
-  title: 'Mi tarjeta',
-  // Says what to do with it and claims nothing about whose it is or where
-  // the balance comes from — neither of which holds for every card this
-  // dialog can now show. See app/api/card/mine/route.ts.
-  lead: 'Usá esta tarjeta para pagar en el súper.',
-  loading: 'Buscando tu tarjeta…',
-  none: 'Todavía no tenés una. Podés generarla acá, o se crea sola con tu primera compra.',
-  createCta: 'Generar mi tarjeta',
-  creating: 'Generando tu tarjeta…',
-  createError: 'No pudimos generar tu tarjeta ahora. Probá de nuevo en un rato.',
-  error: 'No pudimos leer tu tarjeta ahora. Probá de nuevo en un rato.',
-  balanceLabel: 'Saldo',
-  frozen: 'Está bloqueada y por ahora no se puede usar.',
-  retireCta: 'Dar de baja',
-  retireWarn: 'Se cierra para siempre y te devolvemos el saldo a tu cuenta. No se puede deshacer.',
-  retireConfirm: 'Sí, darla de baja',
-  retireCancel: 'No, dejarla',
-  retiring: 'Dando de baja…',
-  retired: 'Listo, la dimos de baja y te devolvimos el saldo.',
-  retireError: 'No pudimos darla de baja ahora. Probá de nuevo en un rato.',
 };
 
 /**
  * What each status is called in front of the person who owns the order.
  *
- * `paid` and `carded` read the same on purpose. The difference between them is
- * that a card was issued, which is machinery — it is not a step the shopper
- * took and not one they can act on, and a separate word for it would invite
- * them to wonder what they are supposed to do about it. Whether a card exists
- * is its own line (`cardNote`), where it belongs.
+ * `paid` and `carded` read the same on purpose. `carded` is a status the
+ * table still has; it is not a step the shopper took.
  *
  * `quoted` says "sin pagar" rather than "esperando", because an order can sit
  * there for ever: the shopper was given a código and never sent anything, and
@@ -143,7 +80,6 @@ export const ORDER_STATUS: Record<OrderStatus, string> = {
 export const PURCHASES_COPY: readonly string[] = [
   ...Object.values(PURCHASES),
   ...Object.values(ORDER_STATUS),
-  ...Object.values(KEPT_CARD),
 ];
 
 /**
@@ -198,15 +134,8 @@ export function purchaseDate(iso: string, lang: Lang = DEFAULT_LANG): string {
 /* ------------------------------------------------------------------------- *
  * English
  *
- * `PURCHASES`, `KEPT_CARD`, `ORDER_STATUS` and `PURCHASES_COPY` above are the
- * Spanish originals and do not move — `lib/test/orders-copy.test.ts` reads them
- * by name and asserts the voseo, the retire warning word for word, and that
- * `paid` and `carded` read alike. Every rule that test encodes is a rule about
- * the *product*, not about Spanish, so the English below keeps all of them:
- * `none` still does not read as an error, the retire warning still says both
- * that it cannot be undone and where the money goes, the two answers still say
- * yes and no rather than OK and Cancel, `frozen` still promises nothing, and
- * `paid` and `carded` are still the same word.
+ * `PURCHASES`, `ORDER_STATUS` and `PURCHASES_COPY` above are the Spanish
+ * originals. `paid` and `carded` are still the same word.
  * ------------------------------------------------------------------------- */
 
 const PURCHASES_EN: PurchasesCopy = {
@@ -224,32 +153,6 @@ const PURCHASES_EN: PurchasesCopy = {
   error: "We couldn't fetch your purchases just now. Try again in a bit.",
   empty: "You haven't bought anything with this account yet.",
   codeLabel: 'Code',
-  cardNote: 'Paid with a card we gave you.',
-};
-
-const KEPT_CARD_EN: KeptCardCopy = {
-  title: 'My card',
-  lead: 'Use this card to pay at the store.',
-  loading: 'Looking for your card…',
-  // Still not an error, and still says the first purchase makes one.
-  none: "You don't have one yet. You can create it here, or it appears on its own with your first purchase.",
-  createCta: 'Create my card',
-  creating: 'Creating your card…',
-  createError: "We couldn't create your card just now. Try again in a bit.",
-  error: "We couldn't read your card just now. Try again in a bit.",
-  balanceLabel: 'Balance',
-  // Says it plainly and offers nothing, because there is no unfreeze.
-  frozen: "It's blocked and cannot be used for now.",
-  retireCta: 'Close it',
-  // Both halves: that it cannot be undone, and where the balance goes.
-  retireWarn:
-    'It closes for good and we return the balance to your account. This cannot be undone.',
-  // Yes and no in that many words, never OK and Cancel.
-  retireConfirm: 'Yes, close it',
-  retireCancel: 'No, keep it',
-  retiring: 'Closing…',
-  retired: "Done. We closed it and returned the balance.",
-  retireError: "We couldn't close it just now. Try again in a bit.",
 };
 
 const ORDER_STATUS_EN: Record<OrderStatus, string> = {
@@ -264,10 +167,6 @@ const ORDER_STATUS_EN: Record<OrderStatus, string> = {
 
 export function purchasesCopy(lang: Lang): PurchasesCopy {
   return lang === 'en' ? PURCHASES_EN : PURCHASES;
-}
-
-export function keptCardCopy(lang: Lang): KeptCardCopy {
-  return lang === 'en' ? KEPT_CARD_EN : KEPT_CARD;
 }
 
 export function orderStatus(lang: Lang): Record<OrderStatus, string> {

@@ -89,9 +89,9 @@ describe('planAction — what the loop is willing to click', () => {
     assert.equal(planAction(v({ state: 'profile' }), emptyPageState(), ctx).kind, 'none');
   });
 
-  it('plans the card only on the payment form', () => {
-    assert.equal(planAction(v({ state: 'payment_form' }), emptyPageState(), ctx).kind, 'fill_payment');
-    assert.equal(planAction(v({ state: 'threeds' }), emptyPageState(), ctx).kind, 'submit_otp');
+  it('does not type a card or answer a bank challenge', () => {
+    assert.equal(planAction(v({ state: 'payment_form' }), emptyPageState(), ctx).kind, 'none');
+    assert.equal(planAction(v({ state: 'threeds' }), emptyPageState(), ctx).kind, 'none');
   });
 
   it('has no plan for a state it does not know', () => {

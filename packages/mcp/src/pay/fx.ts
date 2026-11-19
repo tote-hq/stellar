@@ -1,25 +1,24 @@
 import type { Centavos } from '../types.js';
-import type { UsdCents } from './types.js';
+
+/** Integer US cents. A rate conversion stays exact only if it is not a float. */
+export type UsdCents = number;
 
 /**
- * Día charges ARS. Vyrion funds cards in USD. So "fund the card with the order
- * total" is a conversion, not a number — and the rate the card network applies
- * at settlement is not the rate we can see at funding time.
+ * Día charges ARS. Quotes and deposits are denominated in USD. So "how many
+ * dollars is this basket" is a conversion, not a number — and the rate applied
+ * later is not the rate we can see now.
  *
- * Hence the buffer: we deliberately overfund, cap the card's spending_limit at
- * exactly what we funded, and terminate the card afterwards so the remainder
- * comes straight back to the wallet. The buffer is float, not spend; it costs
- * nothing and it is what stops a 2% rate move turning into a declined payment
- * at the checkout screen.
+ * Hence the buffer: a quote is deliberately a little high. The buffer is float,
+ * not spend; it is what stops a small rate move turning into a short payment.
  */
 
 export const DEFAULT_BUFFER = 0.15;
 
 /**
  * A bad rate is the most dangerous number in this system: it is the difference
- * between loading $20 and loading $20,000 onto a card. If the upstream feed
+ * between quoting $20 and quoting $20,000. If the upstream feed
  * returns 1, or 0, or a number of pesos per dollar that no Argentine has ever
- * seen, we refuse rather than fund. Wide enough not to need touching as the
+ * seen, we refuse rather than quote. Wide enough not to need touching as the
  * peso moves, narrow enough to catch a broken response.
  */
 export const RATE_MIN = 50;
@@ -57,7 +56,7 @@ export function assertSaneRate(rate: number, source: string): number {
   if (rate < RATE_MIN || rate > RATE_MAX) {
     throw new Error(
       `FX source ${source} returned ${rate} ARS/USD, outside the sane range ` +
-        `${RATE_MIN}–${RATE_MAX}. Refusing to size a card funding from it. ` +
+        `${RATE_MIN}–${RATE_MAX}. Refusing to quote from it. ` +
         'Set ARS_PER_USD to pin the rate manually if this range needs widening.',
     );
   }
@@ -93,7 +92,7 @@ export async function getArsPerUsd(opts: FxOptions = {}): Promise<FxRate> {
 /**
  * Pesos (as integer centavos) -> dollars (as integer cents), with the buffer
  * applied and rounded UP. Rounding up matters: rounding down could leave the
- * card a cent short of the authorisation and produce a decline at the till.
+ * quoted amount a cent short of the basket.
  */
 export function arsToUsdCents(
   centavos: Centavos,

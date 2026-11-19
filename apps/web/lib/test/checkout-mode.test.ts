@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { readJob, startJob } from '../checkout/sandbox.ts';
-import { checkoutMode } from '../shared-card.ts';
+import { checkoutMode } from '../checkout/mode.ts';
 
 const ITEMS = [{ name: 'Leche', quantity: 1, sku: '1' }];
 const OFF = { mock: false, mockFail: false };
@@ -16,13 +16,14 @@ function aged(jobId: string, secs: number): string {
 }
 
 describe('which run a checkout gets', () => {
-  it('a card member pays for real', () => {
-    assert.equal(checkoutMode('ok'), 'live');
+  it('an admitted manual checkout pays for real', () => {
+    assert.equal(checkoutMode({ mock: false, manual: true }), 'live');
   });
 
-  it('anyone else gets the demo, never a refusal', () => {
-    assert.equal(checkoutMode('not-member'), 'demo');
-    assert.equal(checkoutMode('no-card'), 'demo');
+  it('anyone else gets the demo, and mock wins over manual', () => {
+    assert.equal(checkoutMode({ mock: false, manual: false }), 'demo');
+    assert.equal(checkoutMode({ mock: true, manual: true }), 'mock');
+    assert.equal(checkoutMode({ mock: true, manual: false }), 'mock');
   });
 });
 

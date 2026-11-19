@@ -159,7 +159,7 @@ function said(body: unknown, lang: Lang = DEFAULT_LANG): string | null {
   return null;
 }
 
-/** A fragment from an API turned into something that can sit in a paragraph. CardPanel has the same one. */
+/** A fragment from an API turned into something that can sit in a paragraph. */
 function sentence(text: string): string {
   const t = text.trim();
   if (!t) return '';

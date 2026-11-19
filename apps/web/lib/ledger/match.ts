@@ -81,11 +81,9 @@ export interface DepositMatch {
   /**
    * The account the payment came from, as the ledger records it.
    *
-   * Here because a signed-in shopper was refused a card for a deposit that had
-   * genuinely landed: the row naming who opened the memo was missing, and that
-   * row was the only thing `POST /api/card` would accept as proof of ownership.
-   * The ledger had the answer the whole time, one field away from the amount
-   * the route was already reading.
+   * Here because a confirmation has to say which account actually paid, not
+   * only that some payment with this memo arrived. The ledger had the answer
+   * the whole time, one field away from the amount the route was already reading.
    *
    * It is better proof than the row, too. The row holds an address a caller
    * *claimed* and a signature vouched for minutes earlier; this is the account

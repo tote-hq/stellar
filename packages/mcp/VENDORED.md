@@ -9,7 +9,7 @@ submodule or a published package.
 | Change | Why |
 |---|---|
 | `name` → `@changuito/mcp` | workspace resolution |
-| `playwright`, `ethers` → `optionalDependencies` | they belong to the checkout half, which the web build never loads. |
+| `playwright` → `optionalDependencies` | it belongs to the checkout half, which the web build never loads. |
 | nested `package-lock.json` removed | workspaces resolve from the root lockfile |
 | `createSupermercadoServer()` factory added | the web app connects an MCP `Client` over an in-memory transport instead of spawning a process |
 | checkout tools became a lazy `await import()` | keeps Playwright out of the read-only import graph |
@@ -24,7 +24,7 @@ with `npm test -w @changuito/mcp`.
 The **read-only half** (search, price check, cart building, handoff links) is plain HTTPS against
 the retailers' public storefront APIs. It runs anywhere, including a serverless function.
 
-The **checkout half** (`link_marketplace_account`, `build_cart`, `approve_payment`, …) opens a
+The **checkout half** (`link_marketplace_account`, `build_cart`, `review_order`, …) opens a
 headed browser *on the host* so a human can type their supermarket password, and it needs
 Playwright plus real payment credentials. It cannot run in the web app and this app does not try. See
 `SETUP.md` for running that half locally.

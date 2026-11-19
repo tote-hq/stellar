@@ -132,7 +132,7 @@ describe('RULE: environment variables are read in exactly one place', () => {
   it('only config.ts and the standalone scripts touch process.env', async () => {
     const allowed = new Set(['config.ts', 'smoke.ts', 'dryrun.ts', 'record.ts']);
     const offenders: string[] = [];
-    for (const sub of ['checkout', 'pay', 'wallet', 'secure', 'adapters', 'util']) {
+    for (const sub of ['checkout', 'pay', 'secure', 'adapters', 'util']) {
       for (const f of await sourceFiles(sub)) {
         if (code(await readFile(f, 'utf8')).includes('process.env')) offenders.push(f);
       }
@@ -150,19 +150,11 @@ describe('RULE: environment variables are read in exactly one place', () => {
 describe('RULE: card data is typed only inside the payment window, and never logged', () => {
   const dia = () => readFile(join(SRC, 'checkout/dia.ts'), 'utf8');
 
-  /** The body of a top-level function, up to the next top-level declaration. */
-  function body(text: string, name: string): string {
-    const start = text.indexOf(`export async function ${name}`);
-    assert.notEqual(start, -1, `${name} is gone — this test needs updating, not deleting`);
-    const rest = text.slice(start + 1);
-    const end = rest.search(/\nexport (async )?(function|const|interface|class)/);
-    return end === -1 ? rest : rest.slice(0, end);
-  }
-
-  it('fillCard and submitOtp run inside duringPaymentWindow', async () => {
+  it('the Día layer no longer types a card or a one-time code', async () => {
     const src = await dia();
-    assert.match(body(src, 'fillCard'), /duringPaymentWindow/);
-    assert.match(body(src, 'submitOtp'), /duringPaymentWindow/);
+    assert.equal(src.includes('export async function fillCard'), false);
+    assert.equal(src.includes('export async function submitOtp'), false);
+    assert.equal(src.includes('duringPaymentWindow'), false);
   });
 
   it('no log line in the Día layer can carry a typed value', async () => {
@@ -175,8 +167,10 @@ describe('RULE: card data is typed only inside the payment window, and never log
     assert.deepEqual(offenders, [], 'log which field was filled, never what went into it');
   });
 
-  it('the driver refuses to reach the card form without an approved card', async () => {
+  it('the driver has no payment source and does not type a card', async () => {
     const driver = code(await readFile(join(SRC, 'checkout/driver.ts'), 'utf8'));
-    assert.match(driver, /if \(!src\) \{[\s\S]*?throw new Error/);
+    assert.equal(driver.includes('cardDetails'), false);
+    assert.equal(driver.includes('fillCard'), false);
+    assert.equal(driver.includes('submitOtp'), false);
   });
 });

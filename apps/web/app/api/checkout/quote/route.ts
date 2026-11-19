@@ -20,12 +20,12 @@ import { quoteRate } from '../../../../lib/checkout/rate.ts';
 import { NO_DELIVERY, quoteShipping, type ShippingLocation } from '../../../../lib/checkout/shipping.ts';
 import { checkoutStore } from '../../../../lib/checkout/store.ts';
 import { sandboxFlags, getConfig, flagOn, memberFlow } from '../../../../lib/config.ts';
-import { manualAvailable, manualStatus } from '../../../../lib/checkout/manual-server.ts';
+import { checkoutMode } from '../../../../lib/checkout/mode.ts';
+import { manualAvailable, manualMember, manualStatus } from '../../../../lib/checkout/manual-server.ts';
 import { MANUAL_KIND, SERVICE_FEE_CENTS, SERVICE_FEE_UNITS, serviceOrderId, VIEWER_SECONDS } from '../../../../lib/checkout/manual-policy.ts';
 import { hasDatabase, db } from '../../../../lib/db.ts';
 import type { CheckoutRecord } from '../../../../lib/checkout/store.ts';
 import { getProfile } from '../../../../lib/profile.ts';
-import { cardAccess, checkoutMode } from '../../../../lib/shared-card.ts';
 import type { QuoteResponse } from '../../../../lib/checkout/types.ts';
 import { DEFAULT_NETWORK } from '../../../../lib/deployments.ts';
 import { contractIds } from '../../../../lib/contract-ids.ts';
@@ -87,14 +87,16 @@ export async function POST(req: Request): Promise<Response> {
     } catch (err) { if ((err as { code?: string }).code !== '42P01') throw err; }
   }
 
-  // Only wallets on the card's member list pay with it (lib/shared-card.ts).
-  // Everyone else gets the demo run: same lock, the mock stops at payment,
-  // refund, and the cart link to finish in Día. Asked here so the modal can
-  // say which run this is before anything is locked; the start asks again.
+  // An admitted manual checkout is a wallet on shared_card_member (the
+  // historical allowlist; the table is not a card) while manual checkout is
+  // enabled. Everyone else gets the demo run: same lock, the mock stops at
+  // payment, refund, and the cart link to finish in Día. Mock mode wins, the
+  // way it always did, so a rehearsal never opens the manual path. Asked here
+  // so the modal can say which run this is before anything is locked.
   const config = await getConfig();
-  const access = await cardAccess(user.address, (await sandboxFlags()).mock);
-  const mode = checkoutMode(access);
-  const manual = access === 'ok' && flagOn(config, 'manual_checkout_enabled');
+  const flags = await sandboxFlags();
+  const manual = !flags.mock && (await manualMember(user.address)) && flagOn(config, 'manual_checkout_enabled');
+  const mode = checkoutMode({ mock: flags.mock, manual });
   const manualFlow = memberFlow(manual, config);
   if (manual && (!hasDatabase() || !(await manualAvailable()))) {
     return Response.json({ error: 'El navegador de pago no está disponible. Probá más tarde.' }, { status: 503 });

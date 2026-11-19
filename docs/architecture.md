@@ -351,11 +351,11 @@ gated; it is the default and it cannot spend anything.
 ```
 changuito/
 ├── apps/web/                Next.js shopper — the agent, the UI, the API routes
-│   ├── app/api/             chat (SSE), deposit, card, order, balance, quote,
+│   ├── app/api/             chat (SSE), deposit, order, balance, quote,
 │   │                          faucet, session, orders, network, human, settle
 │   ├── app/dev/             fixtures: /dev/ui (component gallery, the escrow
 │   │                          panel) and /dev/checkout (the rehearsal store)
-│   ├── components/          Chat, CheckoutModal, CardPanel, CartRail,
+│   ├── components/          Chat, CheckoutModal, CartRail,
 │   │                          WalletWidget, HumanGate, Purchases, …
 │   └── lib/
 │       ├── agent/           loop, prompt, render-tools, turn-store, early-ask,

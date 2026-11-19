@@ -30,9 +30,9 @@ export interface QuoteResponse {
   programId: string;
   usdcMint: string;
   /**
-   * Which run this checkout gets (lib/shared-card.ts `checkoutMode`): `live`
-   * pays with the shared card and needs the Día login; `demo` stops at payment,
-   * refunds and hands off to the cart link; `mock` is the operator's mock.
+   * Which run this checkout gets (lib/checkout/mode.ts): `live` is an admitted
+   * manual checkout and needs the Día login; `demo` stops at payment, refunds
+   * and hands off to the cart link; `mock` is the operator's mock.
    */
   mode: 'live' | 'demo' | 'mock';
 }

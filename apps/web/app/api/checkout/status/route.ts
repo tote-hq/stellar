@@ -9,15 +9,14 @@
  *   - store failed / not placed  -> refund: vault -> buyer
  *   - deadline passed while open -> refund: vault -> buyer
  *
- * "Store failed" includes a declined card, a card that was never tried (the
- * job carried no card because `shared_card` has no row) and a run that never reached payment.
- * A demo run (a wallet not on the card's member list) stops at payment on
- * purpose and still *settles* once it gets there: the treasury takes the
- * testnet USDC so the demo ends like a purchase, and the receipt's basis is
- * `demo-reached-payment`, not `sandbox-order-placed`. The reply carries the
- * cart link so the shopper finishes in Día.
- * The treasury keeps the USDC only when the operator's card actually paid
- * for the shopper's order; the receipt carries Día's order number.
+ * "Store failed" includes a declined payment, a payment that was never tried
+ * (the job carries no card) and a run that never reached payment.
+ * A demo run stops at payment on purpose and still *settles* once it gets
+ * there: the treasury takes the testnet USDC so the demo ends like a purchase,
+ * and the receipt's basis is `demo-reached-payment`, not `sandbox-order-placed`.
+ * The reply carries the cart link so the shopper finishes in Día.
+ * The treasury keeps the USDC only when the store actually placed the order;
+ * the receipt carries Día's order number.
  *
  * Idempotent by reading the chain first: a closed order is reported, never
  * closed again. Settle still passes the on-chain basket_hash, so a different

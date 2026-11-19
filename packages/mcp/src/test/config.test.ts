@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 
 import { ConfigError, bool, describeConfig, loadConfig, requirePassphrase } from '../config.js';
 
-const MIN = { VYRION_API_KEY: 'sk_test_x', SECRETS_DIR: '/tmp/secrets-test' };
+const MIN = { SECRETS_DIR: '/tmp/secrets-test' };
 
 describe('bool', () => {
   it('refuses a value it cannot interpret rather than guessing', () => {
@@ -23,14 +23,6 @@ describe('loadConfig', () => {
     assert.throws(() => loadConfig({ ...MIN, RETAILER: 'coto' }), /Unknown retailer/);
   });
 
-  it('refuses to start with a live key unless live spending is allowed', () => {
-    assert.throws(
-      () => loadConfig({ ...MIN, VYRION_API_KEY: 'sk_live_x' }),
-      /ALLOW_LIVE is not set/,
-    );
-    assert.doesNotThrow(() => loadConfig({ ...MIN, VYRION_API_KEY: 'sk_live_x', ALLOW_LIVE: '1' }));
-  });
-
   it('only accepts an FX override inside the sane-rate window', () => {
     assert.equal(loadConfig({ ...MIN, ARS_PER_USD: '1450' }).fx.override, 1450);
     assert.throws(() => loadConfig({ ...MIN, ARS_PER_USD: '1.5' }), /ARS_PER_USD/);
@@ -38,11 +30,10 @@ describe('loadConfig', () => {
 });
 
 describe('describeConfig', () => {
-  it('never prints the API key itself', () => {
-    const key = 'sk_test_supersecretvalue';
-    const text = describeConfig(loadConfig({ ...MIN, VYRION_API_KEY: key }));
-    assert.ok(!text.includes(key), text);
-    assert.match(text, /vyrion key:\s+set \(sandbox\)/);
+  it('names the retailer and never a secret', () => {
+    const text = describeConfig(loadConfig({ ...MIN, TYPESAFE_API_KEY: 'ts_secret_value' }));
+    assert.ok(!text.includes('ts_secret_value'), text);
+    assert.match(text, /retailer:\s+dia/);
   });
 });
 
@@ -56,9 +47,6 @@ describe('requirePassphrase', () => {
       () => requirePassphrase('SESSION_PASSPHRASE', { SESSION_PASSPHRASE: 'abc' }),
       /supermarket session/,
     );
-    assert.throws(
-      () => requirePassphrase('WALLET_PASSPHRASE', {}),
-      /wallet keystore/,
-    );
+    assert.throws(() => requirePassphrase('SESSION_PASSPHRASE', {}), /SESSION_PASSPHRASE/);
   });
 });

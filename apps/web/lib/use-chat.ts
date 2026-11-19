@@ -223,8 +223,7 @@ export function useChat(auth?: UseChatAuth) {
             // it: `/api/chat` answers in Spanish and always will, since the MCP
             // server and the agent share these routes and neither reads a
             // cookie from this browser. In English the client's own copy wins —
-            // less specific, and readable. CheckoutModal, CardPanel and
-            // Purchases do the same.
+            // less specific, and readable. CheckoutModal and Purchases do the same.
             message = (lang === 'es' ? json.message : null) ?? loginRequiredMessage(lang);
           } else if (json.message && lang === 'es') {
             message = json.message;

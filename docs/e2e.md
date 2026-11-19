@@ -7,26 +7,16 @@ browser.
 |---|---|
 | `landing` | `LANDING_BASE_URL`, default `https://www.changuito.me` |
 | `app` | `APP_BASE_URL`, default `https://app.changuito.me` |
-| `checkout` | `CHECKOUT_BASE_URL`, default a `next dev` Playwright starts on 3124 |
 
 The first two are smokes, and production is their target on purpose. A local
 preview needs Pollar, Turnstile, and the model keys the app already has on
 the Worker; CI does not have those, and a preview would not be what visitors hit.
 Neither smoke pays, opens a store checkout, or clicks **Cargar USDC**.
 
-`checkout` is the odd one and has to be. It runs the whole frame-checkout flow
-— basket, importe, framed store, single-use card, receipt — and it cannot run
-against a deployment, because the fixture it frames in the store's place
-(`app/dev/checkout`) `notFound()`s in production. So it gets its own base URL
-and its own server. Playwright starts that server only when the run includes
-this project; `--project=app` still builds nothing and starts nothing.
-
-**What it does not prove:** that a purchase happened. There is no sandbox
+**What a smoke does not prove:** that a purchase happened. There is no sandbox
 supermarket — Día has no test store — so past "Ya lo pagué" it asserts what the
-app does when the store *says* paid, and nothing about Día. The agent, Horizon
-and the card issuer are scripted too (`e2e/support/checkout-fixtures.ts` says
-why). The deposit leg has been run for real against testnet Horizon by hand;
-the card mint has not yet run against a live Vyrion sandbox account.
+app does when the store *says* paid, and nothing about Día. The deposit leg has
+been run for real against testnet Horizon by hand.
 
 ## Run locally
 

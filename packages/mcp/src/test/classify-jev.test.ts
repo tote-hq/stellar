@@ -5,8 +5,8 @@ import { ask, classifyWithJev, vetoPaymentScreen } from '../checkout/classify/je
 import { emptyPageState } from '../checkout/pagestate.js';
 import { loadConfig } from '../config.js';
 
-const ON = loadConfig({ VYRION_API_KEY: 'sk_test_x', SECRETS_DIR: '/tmp/s', TYPESAFE_API_KEY: 'ts_key_123' });
-const OFF = loadConfig({ VYRION_API_KEY: 'sk_test_x', SECRETS_DIR: '/tmp/s' });
+const ON = loadConfig({ SECRETS_DIR: '/tmp/s', TYPESAFE_API_KEY: 'ts_key_123' });
+const OFF = loadConfig({ SECRETS_DIR: '/tmp/s' });
 
 function stubFetch(result: { status?: number; body?: unknown; throws?: Error }) {
   const sent: Array<{ url: string; headers: Record<string, string>; body: unknown }> = [];

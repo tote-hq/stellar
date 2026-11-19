@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "MCP server to search Argentine supermarket catalogs, build a cart in your own logged-in session, and pay with an ephemeral crypto-funded virtual card.",
+  "description": "MCP server to search Argentine supermarket catalogs and build a cart in your own logged-in session.",
   "bin": {
     "supermercado-mcp": "dist/index.js"
   },
@@ -18,8 +18,7 @@
     "probe:chains": "node dist/probe-chains.js",
     "catalog:coto": "node dist/catalog-search.js",
     "dryrun": "node --env-file-if-exists=.env dist/dryrun.js",
-    "record": "node --env-file-if-exists=.env dist/record.js",
-    "keystore": "node --env-file-if-exists=.env dist/keystore-cli.js"
+    "record": "node --env-file-if-exists=.env dist/record.js"
   },
   "engines": {
     "node": ">=20.12"
@@ -29,7 +28,6 @@
     "zod": "^3.23.8"
   },
   "optionalDependencies": {
-    "ethers": "^6.13.0",
     "playwright": "^1.48.0"
   },
   "devDependencies": {
@@ -64,14 +62,6 @@
     "./fx": {
       "types": "./dist/pay/fx.d.ts",
       "import": "./dist/pay/fx.js"
-    },
-    "./pay": {
-      "types": "./dist/pay/vyrion.d.ts",
-      "import": "./dist/pay/vyrion.js"
-    },
-    "./card": {
-      "types": "./dist/pay/ephemeral-card.d.ts",
-      "import": "./dist/pay/ephemeral-card.js"
     }
   },
   "files": [

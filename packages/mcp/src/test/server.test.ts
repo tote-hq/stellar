@@ -71,7 +71,7 @@ describe('RULE: a read-only server never reaches Playwright or an EVM signer', (
     assert.ok(resolved.length > 50, 'the resolve hook did not run — this test proves nothing');
 
     const forbidden = resolved.filter((s) =>
-      /^(playwright|playwright-core|ethers)$/.test(s) || /\/(checkout|wallet)\//.test(s),
+      /^(playwright|playwright-core)$/.test(s) || /\/checkout\//.test(s),
     );
     assert.deepEqual(forbidden, [], `read-only server pulled in: ${forbidden.join(', ')}`);
   });

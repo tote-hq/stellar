@@ -96,13 +96,8 @@ try {
     check('a binding with no face is still allowed', blank[0].last4 === null && blank[0].brand === null);
     await tx`delete from card_owner where address=${B}`;
 
-    // unbindCard, which `POST /api/card/retire` runs after Vyrion has killed
-    // the card, and which `POST /api/card/mine` runs when it finds a binding
-    // that outlived one. Both name the card id in the WHERE clause, and this
-    // is why: the id is the only thing that distinguishes "give back the card
-    // I have" from "give back whatever card this wallet has now", and the two
-    // differ the moment a deposit lands between reading the page and pressing
-    // the button.
+    // The delete names the card id. The id is the only thing that distinguishes
+    // "remove this binding" from "remove whatever binding this wallet has now".
     const unbind = (net, addr, id) => tx`delete from card_owner
        where network=${net} and address=${addr} and card_id=${id} returning card_id`;
     check('unbinding the wrong card id removes nothing', (await unbind('mainnet', A, 'card_loser')).length === 0);

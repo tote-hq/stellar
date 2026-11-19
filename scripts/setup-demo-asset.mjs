@@ -20,7 +20,7 @@
  * ## No secret passes through this process
  *
  * Every signature is made by the `stellar` CLI from a local identity named on
- * the command line. The secrets stay in the CLI keystore — they are never read
+ * the command line. The secrets stay in the Stellar CLI — they are never read
  * here, never printed, never put in argv where `ps` would show them, and never
  * written to an env file. The demo wallet's secret reaches the deployment by a
  * separate route (`DEMO_WALLET_SECRET` on the Worker, set by hand), and the deposit
@@ -63,7 +63,7 @@ const demoKey = args.get('demo');
 const depositKey = args.get('deposit');
 if (!demoKey || !depositKey) {
   console.error('usage: node scripts/setup-demo-asset.mjs --demo <identity> --deposit <identity>');
-  console.error('       both are `stellar keys ls` names; their secrets never leave the keystore');
+  console.error('       both are `stellar keys ls` names; their secrets never leave the CLI');
   process.exit(2);
 }
 
