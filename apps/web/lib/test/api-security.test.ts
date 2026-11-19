@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { before, describe, it } from 'node:test';
 
 /**
  * Money routes with no Turnstile cookie.
  *
  * Settle and the faucet already have their own gate tests. Quote and network
- * are called as handlers.
+ * are called as handlers. Balance is pinned on the source: `requireHuman(`
+ * is present and comes before `accountBalances(`.
  */
 
 // @types/node marks NODE_ENV readonly. The other route tests write through this cast.
@@ -37,6 +39,16 @@ describe('Stellar money APIs refuse a stranger', () => {
       assert.equal(res.status, 403, name);
       assert.doesNotMatch(await res.text(), /"xlm"|"usdc"|"usdCents"/, name);
     }
+  });
+
+  it('RULE: the balance route asks for a human before it reads an account', () => {
+    const rel = 'app/api/balance/route.ts';
+    const src = readFileSync(new URL(`../../${rel}`, import.meta.url), 'utf8');
+    const human = src.indexOf('requireHuman(');
+    const spend = src.indexOf('accountBalances(');
+    assert.ok(human > 0, `${rel}: requireHuman( is present`);
+    assert.ok(spend > 0, `${rel}: accountBalances( is present`);
+    assert.ok(human < spend, `${rel}: human gate must precede accountBalances`);
   });
 
 });
