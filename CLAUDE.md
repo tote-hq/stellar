@@ -364,7 +364,7 @@ the message, which is what used to happen to every message.
 ## Before you commit
 
 ```
-npm test                        # 747: mcp 279 · trust 1 · web 467
+npm test                        # 772: mcp 304 · trust 1 · web 467
 npm run typecheck -w @changuito/web
 npm run build
 ```

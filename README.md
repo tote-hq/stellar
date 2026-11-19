@@ -292,7 +292,7 @@ The annotated list is `apps/web/.env.example`. The ones that change what works:
 ## Tests
 
 ```bash
-npm test                    # 747: mcp 279 · trust 1 · web 467
+npm test                    # 772: mcp 304 · trust 1 · web 467
 npm run contracts:test      #   34: escrow 19 · mock_usdc 15
 npm run typecheck -w @changuito/web
 npm run build
@@ -350,7 +350,7 @@ node --experimental-strip-types --experimental-test-module-mocks --no-warnings -
 apps/web/            the shopper — chat, checkout, card, API routes (app.changuito.me / ste.changuito.me)
 apps/landing/        marketing site only (www.changuito.me)
 apps/branding/       brand kit (not an npm package): logo, mascot, manuals, social
-packages/mcp/        the supermarket MCP server (vendored, 279 tests)
+packages/mcp/        the supermarket MCP server (vendored, 304 tests)
 packages/trust/      footer trust copy shared by both apps, so they cannot drift
 packages/*-bindings/ generated TypeScript clients for the two contracts
 contracts/escrow/    open / settle / refund, with events — mounted on login-network checkout
