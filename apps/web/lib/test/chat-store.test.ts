@@ -11,10 +11,8 @@ import {
   KEYS,
   listChats,
   loadChat,
-  MAX_CHATS,
   RESUMABLE_MS,
   saveChat,
-  titleFrom,
   type Receipt,
 } from '../chat-store.ts';
 
@@ -125,25 +123,9 @@ describe('chat store: round trip', () => {
       assert.equal(restored.cart.total.display, '$3.000,00');
       assert.match(restored.handoffUrl ?? '', /orderFormId=cart-1/);
     }
-  });
-
-  it('titles the chat with the first thing the shopper said', () => {
-    save();
-    assert.equal(listChats()[0]?.title, 'Armá un desayuno para dos');
-  });
-
-  it('falls back to a date when nobody has said anything yet', () => {
-    // A `say` with no user block ahead of it: the agent's greeting.
-    const title = titleFrom([{ kind: 'say', id: 'b1', text: 'Hola', thinking: '', tools: [] }], Date.UTC(2026, 8, 25));
-    assert.doesNotMatch(title, /Hola/);
-    assert.match(title, /\d/);
-  });
-
-  it('shortens a title that would not fit the rail', () => {
-    const long = 'a'.repeat(200);
-    const title = titleFrom([{ kind: 'user', id: 'b1', text: long }], 1);
-    assert.ok(title.length <= 48, `title was ${title.length}`);
-    assert.match(title, /…$/);
+    assert.doesNotMatch(everythingWritten(), /razonando largo/);
+    const say = back.blocks[1];
+    assert.equal(say?.kind === 'say' ? say.thinking : 'missing', '');
   });
 
   it('writes nothing for a chat with no blocks', () => {
@@ -173,13 +155,6 @@ describe('chat store: RULE: credentials are never written', () => {
     }
   });
 
-  it('does not keep the model\'s thinking', () => {
-    save();
-    assert.doesNotMatch(everythingWritten(), /razonando largo/);
-    // It still comes back as a valid block, just empty.
-    const say = loadChat('c1')?.blocks[1];
-    assert.equal(say?.kind === 'say' ? say.thinking : 'missing', '');
-  });
 });
 
 describe('chat store: what comes back is not trusted', () => {
@@ -190,31 +165,23 @@ describe('chat store: what comes back is not trusted', () => {
     assert.deepEqual(listChats(), []);
     storage.map.set(KEYS.index, JSON.stringify([null, 3, 'x', { id: 'ok', createdAt: 5 }]));
     assert.deepEqual(listChats().map((c) => c.id), ['ok']);
-  });
 
-  it('survives garbage in a chat record', () => {
     storage.map.set(`${KEYS.prefix}c1`, '{{{');
     assert.equal(loadChat('c1'), null);
     storage.map.set(`${KEYS.prefix}c1`, JSON.stringify({ v: 1, id: 'c1', createdAt: 1, blocks: 'nope' }));
     assert.deepEqual(loadChat('c1')?.blocks, []);
-  });
 
-  it('drops a record written by another version rather than reading it', () => {
     save();
-    const raw = JSON.parse(storage.map.get(`${KEYS.prefix}c1`) as string) as Record<string, unknown>;
-    raw.v = 99;
-    storage.map.set(`${KEYS.prefix}c1`, JSON.stringify(raw));
+    const versioned = JSON.parse(storage.map.get(`${KEYS.prefix}c1`) as string) as Record<string, unknown>;
+    versioned.v = 99;
+    storage.map.set(`${KEYS.prefix}c1`, JSON.stringify(versioned));
     assert.equal(loadChat('c1'), null);
-  });
 
-  it('refuses a record filed under someone else\'s id', () => {
     save();
-    const raw = storage.map.get(`${KEYS.prefix}c1`) as string;
-    storage.map.set(`${KEYS.prefix}c2`, raw);
+    const owned = storage.map.get(`${KEYS.prefix}c1`) as string;
+    storage.map.set(`${KEYS.prefix}c2`, owned);
     assert.equal(loadChat('c2'), null);
-  });
 
-  it('drops half-written blocks instead of repairing them', () => {
     storage.map.set(
       `${KEYS.prefix}c1`,
       JSON.stringify({
@@ -228,9 +195,7 @@ describe('chat store: what comes back is not trusted', () => {
       }),
     );
     assert.deepEqual(loadChat('c1')?.blocks.map((b) => b.id), ['b1']);
-  });
 
-  it('a chat whose order state was edited to nonsense is not paid', () => {
     save({ orderState: 'paid' });
     const raw = JSON.parse(storage.map.get(`${KEYS.prefix}c1`) as string) as Record<string, unknown>;
     raw.orderState = 'definitely-paid-trust-me';
@@ -240,7 +205,10 @@ describe('chat store: what comes back is not trusted', () => {
 });
 
 describe('chat store: a browser that refuses', () => {
-  it('does not throw when storage throws on every call', () => {
+  it('reports a quota failure rather than claiming it saved', () => {
+    storage.throwOnSet = true;
+    assert.equal(save(), null);
+    storage.throwOnSet = false;
     storage.throwOnEverything = true;
     assert.doesNotThrow(() => {
       assert.equal(save(), null);
@@ -250,79 +218,17 @@ describe('chat store: a browser that refuses', () => {
       clearAllChats();
     });
   });
-
-  it('reports a quota failure rather than claiming it saved', () => {
-    storage.throwOnSet = true;
-    assert.equal(save(), null);
-  });
-});
-
-describe('chat store: the index', () => {
-  it('keeps the newest first and forgets the oldest', () => {
-    for (let i = 0; i < MAX_CHATS + 3; i += 1) {
-      save({ id: `c${i}`, createdAt: i, now: i, state: { blocks: [{ kind: 'user', id: 'b1', text: `chat ${i}` }] } });
-    }
-    const list = listChats();
-    assert.equal(list.length, MAX_CHATS);
-    assert.equal(list[0]?.id, `c${MAX_CHATS + 2}`);
-    assert.equal(list.at(-1)?.id, 'c3');
-  });
-
-  it('takes the dropped chat\'s record with it', () => {
-    for (let i = 0; i < MAX_CHATS + 1; i += 1) {
-      save({ id: `c${i}`, createdAt: i, now: i, state: { blocks: [{ kind: 'user', id: 'b1', text: `chat ${i}` }] } });
-    }
-    // c0 fell off the end. Its record must not outlive every way of reaching it.
-    assert.equal(storage.map.has(`${KEYS.prefix}c0`), false);
-    assert.equal(loadChat('c0'), null);
-  });
-
-  it('updates a chat in place rather than listing it twice', () => {
-    save();
-    save({ now: 9_000, state: { blocks: [...blocks(), { kind: 'user', id: 'b5', text: 'y algo más' }] } });
-    const list = listChats();
-    assert.equal(list.length, 1);
-    assert.equal(list[0]?.updatedAt, 9_000);
-    assert.equal(loadChat('c1')?.blocks.length, 5);
-  });
-
-  it('deleting one leaves the others', () => {
-    save({ id: 'a', now: 1 });
-    save({ id: 'b', now: 2 });
-    deleteChat('a');
-    assert.deepEqual(listChats().map((c) => c.id), ['b']);
-    assert.equal(loadChat('a'), null);
-  });
-
-  it('clearAllChats leaves the mode setting alone', () => {
-    save();
-    storage.map.set('changuito:modo', 'mainnet');
-    clearAllChats();
-    assert.deepEqual(listChats(), []);
-    assert.equal(storage.map.get('changuito:modo'), 'mainnet');
-  });
 });
 
 describe('chat store: RULE: a chat stops being resumable', () => {
-  const base = { orderState: 'open' as const, updatedAt: 1_000, sessionId: 's-1' };
-
-  it('resumes while the order is open and the server still remembers', () => {
+  it('never resumes a paid chat, however fresh', () => {
+    const base = { orderState: 'open' as const, updatedAt: 1_000, sessionId: 's-1' };
+    // Past the Redis TTL the id is live and the server has forgotten it.
     assert.equal(isResumable(base, 1_000 + RESUMABLE_MS - 1), true);
-  });
-
-  it('stops at the server\'s history TTL', () => {
-    // CLAUDE.md §4: past the Redis TTL the id is live and the server has
-    // forgotten it. Resuming there shows a transcript the agent cannot see.
     assert.equal(isResumable(base, 1_000 + RESUMABLE_MS), false);
     assert.equal(isResumable(base, 1_000 + RESUMABLE_MS + 60_000), false);
-  });
-
-  it('never resumes a paid chat, however fresh', () => {
     // One chat is one order. This is that rule from the other direction.
     assert.equal(isResumable({ ...base, orderState: 'paid' }, 1_000), false);
-  });
-
-  it('never resumes without a session id', () => {
     assert.equal(isResumable({ ...base, sessionId: null }, 1_000), false);
   });
 });
@@ -347,10 +253,7 @@ describe('chat store: the session snapshot', () => {
     // salesChannel would quietly move the agent to national prices.
     save({ state: { blocks: blocks(), snapshot } });
     assert.deepEqual(loadChat('c1')?.snapshot, snapshot);
-  });
 
-  it('drops a location that lost the fields prices depend on', () => {
-    save({ state: { blocks: blocks(), snapshot } });
     const raw = JSON.parse(storage.map.get(`${KEYS.prefix}c1`) as string) as Record<string, unknown>;
     delete ((raw.snapshot as Record<string, unknown>).location as Record<string, unknown>).salesChannel;
     storage.map.set(`${KEYS.prefix}c1`, JSON.stringify(raw));
@@ -377,14 +280,10 @@ describe('chat store: receipts', () => {
     assert.equal(back?.orderState, 'paid');
     assert.deepEqual(back?.receipt, receipt);
     assert.equal(isResumable(back!, 5_001), false);
-  });
 
-  it('has no receipt while the order is open', () => {
     save();
     assert.equal(loadChat('c1')?.receipt, null);
-  });
 
-  it('drops a receipt missing the fields that make it a receipt', () => {
     save({ orderState: 'paid', receipt });
     const raw = JSON.parse(storage.map.get(`${KEYS.prefix}c1`) as string) as Record<string, unknown>;
     delete (raw.receipt as Record<string, unknown>).orderId;

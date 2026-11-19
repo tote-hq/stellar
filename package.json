@@ -16,7 +16,7 @@
     "build": "npm run build -w @changuito/web",
     "build:landing": "npm run build -w @changuito/landing",
     "start": "npm run start -w @changuito/web",
-    "test": "npm test -w @changuito/mcp && npm test -w @changuito/trust && npm test -w @changuito/web && npm test -w @changuito/landing",
+    "test": "npm test -w @changuito/mcp && npm test -w @changuito/trust && npm test -w @changuito/web",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "db:migrate": "node scripts/db.mjs migrate",

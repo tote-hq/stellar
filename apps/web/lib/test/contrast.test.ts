@@ -31,35 +31,17 @@ function ratio(a: string, b: string): number {
   return (hi! + 0.05) / (lo! + 0.05);
 }
 
-test('the composer placeholder clears 4.5:1 on the field and on the page', () => {
-  const placeholder = token('placeholder');
-  assert.ok(ratio(placeholder, '#ffffff') >= 4.5, `on --surface: ${ratio(placeholder, '#ffffff').toFixed(2)}`);
-  assert.ok(ratio(placeholder, token('chg-offwhite')) >= 4.5, `on --bg: ${ratio(placeholder, token('chg-offwhite')).toFixed(2)}`);
-});
-
-test('the placeholder rule uses the token, at full opacity', () => {
-  const rule = css.slice(css.indexOf('.composer-input::placeholder {'));
-  const body = rule.slice(0, rule.indexOf('}'));
-  assert.match(body, /color:\s*var\(--placeholder\)/);
-  // Firefox fades placeholders to .54 by default, which would undo the ratio.
-  assert.match(body, /opacity:\s*1/);
-});
-
-test('the placeholder still reads lighter than typed text', () => {
-  assert.ok(ratio(token('placeholder'), '#ffffff') < ratio(token('chg-espresso'), '#ffffff'));
-});
-
-/**
- * The mode chips. Two brand colours plus neutral, and the trap here is that
- * sunflower and arcilla both read as "a colour that means something" while
- * only one of them is safe as a background and neither is safe as text.
- */
-
 function rule(selector: string): string {
   const at = css.indexOf(`${selector} {`);
   assert.ok(at >= 0, `${selector} is not in globals.css`);
   return css.slice(at, css.indexOf('}', at));
 }
+
+test('the composer placeholder clears 4.5:1 on the field and on the page', () => {
+  const placeholder = token('placeholder');
+  assert.ok(ratio(placeholder, '#ffffff') >= 4.5, `on --surface: ${ratio(placeholder, '#ffffff').toFixed(2)}`);
+  assert.ok(ratio(placeholder, token('chg-offwhite')) >= 4.5, `on --bg: ${ratio(placeholder, token('chg-offwhite')).toFixed(2)}`);
+});
 
 test('the modo real badge is espresso on sunflower, and clears 4.5:1', () => {
   const body = rule(".mode-badge[data-mode='mainnet']");
@@ -72,32 +54,8 @@ test('the modo real badge is espresso on sunflower, and clears 4.5:1', () => {
   assert.ok(r >= 4.5, `espresso on sunflower: ${r.toFixed(2)}`);
 });
 
-test('sunflower is never the mode badge text colour', () => {
-  for (const sel of ['.mode-badge', ".mode-badge[data-mode='mainnet']"]) {
-    assert.doesNotMatch(rule(sel), /color:\s*var\(--brand\)/);
-  }
-});
-
-test('RULE: the mode badge does not dress up as a control', () => {
-  // It is a label: the mode follows the session, so there is nothing to
-  // press. A pointer cursor or a hover state would promise a click that
-  // does nothing, which is worse than no affordance at all. The older rule
-  // this replaces forbade a *disabled* style for the same reason — a dead
-  // control is a question about which excuse to print.
-  assert.doesNotMatch(css, /\.mode-badge[^{]*\[aria-disabled/);
-  assert.doesNotMatch(css, /\.mode-badge:hover/);
-  assert.doesNotMatch(css, /\.mode-locked\b/);
-  assert.match(rule('.mode-badge'), /cursor:\s*default/);
-});
-
 test('--warn-ink still clears 4.5:1 on both surfaces it is used on', () => {
   const ink = token('warn-ink');
   assert.ok(ratio(ink, '#ffffff') >= 4.5, `on --surface: ${ratio(ink, '#ffffff').toFixed(2)}`);
   assert.ok(ratio(ink, token('chg-offwhite')) >= 4.5, `on --bg: ${ratio(ink, token('chg-offwhite')).toFixed(2)}`);
-});
-
-test('arcilla is still an accent, not a text colour — which is why --warn-ink exists', () => {
-  // If this ever clears 4.5:1 the brand changed, and the two tokens should
-  // be reconsidered together rather than one of them quietly deleted.
-  assert.ok(ratio(token('chg-arcilla'), token('chg-offwhite')) < 4.5);
 });

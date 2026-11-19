@@ -74,6 +74,31 @@ describe('modo real on the deposit rail — the four modes', () => {
       net: 'mainnet',
     });
     assert.deepEqual(auth, { ok: true, mode: 'allowlist' });
+
+    const other = authorizeRealMode({
+      address: stranger.publicKey(),
+      proof: proofFor(stranger),
+      now,
+      env: ALLOWLIST,
+      net: 'mainnet',
+    });
+    assert.equal(other.ok, false);
+    assert.equal(other.ok === false && other.error, 'network_not_allowed');
+
+    for (const raw of [
+      `${stranger.publicKey()},${tester.publicKey()}`,
+      `${stranger.publicKey()} ${tester.publicKey()}`,
+      `${stranger.publicKey()}\n${tester.publicKey()}\n`,
+    ]) {
+      const listed = authorizeRealMode({
+        address: tester.publicKey(),
+        proof: proofFor(tester),
+        now,
+        env: env({ REAL_MODE_ALLOWLIST_ADDRESSES: raw }),
+        net: 'mainnet',
+      });
+      assert.equal(listed.ok, true, raw);
+    }
   });
 
   it('lets anybody who signs through when the flag is set (public)', () => {
@@ -110,6 +135,12 @@ describe('the two flags, which is the thing being shipped', () => {
       const auth = authorizeRealMode({ address: kp.publicKey(), proof: proofFor(kp), now, env: stale, net: 'mainnet' });
       assert.deepEqual(auth, { ok: true, mode: 'public' });
     }
+    for (const off of ['', 'false', '0', 'off']) {
+      const e = env({ REAL_MODE_OPEN_TO_ALL: off, REAL_MODE_ALLOWLIST_ADDRESSES: tester.publicKey() });
+      assert.equal(realModeFor('mainnet', e), 'allowlist');
+      const refused = authorizeRealMode({ address: stranger.publicKey(), proof: proofFor(stranger), now, env: e, net: 'mainnet' });
+      assert.equal(refused.ok, false);
+    }
   });
 
   it('RULE: REAL_MODE_OPEN_TO_ALL does not waive the signature', () => {
@@ -121,145 +152,64 @@ describe('the two flags, which is the thing being shipped', () => {
     assert.equal(auth.ok === false && auth.status, 401);
     assert.equal(auth.ok === false && auth.error, 'real_mode_session_required');
   });
-
-  it('falls back to the allowlist when the flag is not set', () => {
-    const listed = authorizeRealMode({
-      address: tester.publicKey(),
-      proof: proofFor(tester),
-      now,
-      env: ALLOWLIST,
-      net: 'mainnet',
-    });
-    assert.equal(listed.ok, true);
-
-    const other = authorizeRealMode({
-      address: stranger.publicKey(),
-      proof: proofFor(stranger),
-      now,
-      env: ALLOWLIST,
-      net: 'mainnet',
-    });
-    assert.equal(other.ok, false);
-    assert.equal(other.ok === false && other.error, 'network_not_allowed');
-  });
-
-  it('is not opened by a flag set to a no-word', () => {
-    // An operator who wrote REAL_MODE_OPEN_TO_ALL=false meant false, and the
-    // list they also set is still the thing that decides.
-    for (const off of ['', 'false', '0', 'off']) {
-      const e = env({ REAL_MODE_OPEN_TO_ALL: off, REAL_MODE_ALLOWLIST_ADDRESSES: tester.publicKey() });
-      assert.equal(realModeFor('mainnet', e), 'allowlist');
-      const auth = authorizeRealMode({ address: stranger.publicKey(), proof: proofFor(stranger), now, env: e, net: 'mainnet' });
-      assert.equal(auth.ok, false);
-    }
-  });
-
-  it('reads a list written with commas, spaces or newlines', () => {
-    // How a Vercel textarea actually arrives.
-    for (const raw of [
-      `${stranger.publicKey()},${tester.publicKey()}`,
-      `${stranger.publicKey()} ${tester.publicKey()}`,
-      `${stranger.publicKey()}\n${tester.publicKey()}\n`,
-    ]) {
-      const auth = authorizeRealMode({
-        address: tester.publicKey(),
-        proof: proofFor(tester),
-        now,
-        env: env({ REAL_MODE_ALLOWLIST_ADDRESSES: raw }),
-        net: 'mainnet',
-      });
-      assert.equal(auth.ok, true, raw);
-    }
-  });
 });
 
 describe('what a refusal gives away', () => {
   it('says the same thing to a stranger whether or not a list exists', () => {
     // 'disabled' and 'not on the list' are one sentence on purpose: a refusal
-    // must not tell somebody whether there is a list to get onto.
+    // must not tell somebody whether there is a list to get onto. `untouchable`
+    // throws if the proof is read, so a passing call is the ordering check.
     const off = authorizeRealMode({ address: stranger.publicKey(), proof: untouchable, now, env: DISABLED, net: 'mainnet' });
     const listed = authorizeRealMode({ address: stranger.publicKey(), proof: untouchable, now, env: ALLOWLIST, net: 'mainnet' });
     assert.deepEqual(off, listed);
-  });
-
-  it('refuses a stranger without reading their proof', () => {
-    // `untouchable` throws if touched. Both refusals above already passed it,
-    // so reaching this line at all is the assertion; this one names it.
     assert.doesNotThrow(() =>
       authorizeRealMode({ address: stranger.publicKey(), proof: untouchable, now, env: ALLOWLIST, net: 'mainnet' }),
     );
   });
-
-  it('answers "may this wallet" without consulting what is deployed', () => {
-    // Nothing in these envs sets DEPOSIT_ADDRESS_MAINNET, so mainnet is not
-    // configured — and a listed wallet still gets a yes. The route's own 503
-    // is what names the missing variable, to the one person who can fix it.
-    const auth = authorizeRealMode({
-      address: tester.publicKey(),
-      proof: proofFor(tester),
-      now,
-      env: ALLOWLIST,
-      net: 'mainnet',
-    });
-    assert.deepEqual(auth, { ok: true, mode: 'allowlist' });
-  });
 });
 
 describe('the proof, in every mode that asks for one', () => {
-  const gated = [
-    { mode: 'allowlist' as const, env: ALLOWLIST, who: tester },
-    { mode: 'public' as const, env: PUBLIC, who: stranger },
-  ];
-
-  for (const { mode, env: e, who } of gated) {
-    describe(mode, () => {
+  it('refuses a stale, forged, or foreign proof and accepts a fresh one', () => {
+    const gated = [
+      { mode: 'allowlist' as const, env: ALLOWLIST, who: tester },
+      { mode: 'public' as const, env: PUBLIC, who: stranger },
+    ];
+    for (const { mode, env: e, who } of gated) {
       const address = who.publicKey();
+      const noProof = authorizeRealMode({ address, proof: null, now, env: e, net: 'mainnet' });
+      assert.equal(noProof.ok === false && noProof.error, 'real_mode_session_required');
+      assert.equal(noProof.ok === false && noProof.status, 401);
 
-      it('refuses a request with no proof', () => {
-        const auth = authorizeRealMode({ address, proof: null, now, env: e, net: 'mainnet' });
-        assert.equal(auth.ok === false && auth.error, 'real_mode_session_required');
-        assert.equal(auth.ok === false && auth.status, 401);
-      });
+      const old = proofFor(who, address, now - WALLET_PROOF_TTL_MS - 1);
+      const stale = authorizeRealMode({ address, proof: old, now, env: e, net: 'mainnet' });
+      assert.equal(stale.ok === false && stale.error, 'real_mode_proof_expired');
 
-      it('refuses a proof that has gone stale', () => {
-        const old = proofFor(who, address, now - WALLET_PROOF_TTL_MS - 1);
-        const auth = authorizeRealMode({ address, proof: old, now, env: e, net: 'mainnet' });
-        assert.equal(auth.ok === false && auth.error, 'real_mode_proof_expired');
-      });
+      // The message names this address; the signature is another key's.
+      const forged = { message: walletProofMessage('deposit', address, now), signature: sep53(Keypair.random(), 'x') };
+      const forgedAuth = authorizeRealMode({ address, proof: forged, now, env: e, net: 'mainnet' });
+      assert.equal(forgedAuth.ok === false && forgedAuth.error, 'real_mode_proof_invalid');
 
-      it('refuses a proof signed by somebody else', () => {
-        // The message names this address; the signature is another key's. This
-        // is the case that makes the allowlist mean anything at all.
-        const forged = { message: walletProofMessage('deposit', address, now), signature: sep53(Keypair.random(), 'x') };
-        const auth = authorizeRealMode({ address, proof: forged, now, env: e, net: 'mainnet' });
-        assert.equal(auth.ok === false && auth.error, 'real_mode_proof_invalid');
-      });
+      const elsewhere = Keypair.random();
+      const foreign = authorizeRealMode({ address, proof: proofFor(elsewhere), now, env: e, net: 'mainnet' });
+      assert.equal(foreign.ok === false && foreign.error, 'real_mode_proof_invalid');
 
-      it('refuses a proof for a different address', () => {
-        const elsewhere = Keypair.random();
-        const auth = authorizeRealMode({ address, proof: proofFor(elsewhere), now, env: e, net: 'mainnet' });
-        assert.equal(auth.ok === false && auth.error, 'real_mode_proof_invalid');
+      // A login proof is not permission to spend.
+      const login = walletProofMessage('login', address, now);
+      const otherIntent = authorizeRealMode({
+        address,
+        proof: { message: login, signature: sep53(who, login) },
+        now,
+        env: e,
+        net: 'mainnet',
       });
+      assert.equal(otherIntent.ok === false && otherIntent.error, 'real_mode_proof_invalid');
 
-      it('refuses a proof the shopper signed for something else', () => {
-        // A login proof is not permission to spend. Each intent is its own
-        // sentence in the message the wallet showed the person signing.
-        const login = walletProofMessage('login', address, now);
-        const auth = authorizeRealMode({ address, proof: { message: login, signature: sep53(who, login) }, now, env: e, net: 'mainnet' });
-        assert.equal(auth.ok === false && auth.error, 'real_mode_proof_invalid');
-      });
-
-      it('accepts a fresh proof from the wallet itself', () => {
-        const auth = authorizeRealMode({ address, proof: proofFor(who), now, env: e, net: 'mainnet' });
-        assert.deepEqual(auth, { ok: true, mode });
-      });
-
-      it('accepts an address the browser sent with stray whitespace', () => {
-        const auth = authorizeRealMode({ address: `  ${address}  `, proof: proofFor(who), now, env: e, net: 'mainnet' });
-        assert.deepEqual(auth, { ok: true, mode });
-      });
-    });
-  }
+      const fresh = authorizeRealMode({ address, proof: proofFor(who), now, env: e, net: 'mainnet' });
+      assert.deepEqual(fresh, { ok: true, mode });
+      const spaced = authorizeRealMode({ address: `  ${address}  `, proof: proofFor(who), now, env: e, net: 'mainnet' });
+      assert.deepEqual(spaced, { ok: true, mode });
+    }
+  });
 });
 
 describe('the default network is untouched by any of this', () => {
@@ -268,11 +218,8 @@ describe('the default network is untouched by any of this', () => {
       const auth = authorizeRealMode({ address: '', proof: untouchable, now, env: e, net: DEFAULT_NETWORK });
       assert.deepEqual(auth, { ok: true, mode: 'open' }, JSON.stringify(e));
     }
-  });
-
-  it('defaults to that network when the caller names none', () => {
-    const auth = authorizeRealMode({ address: '', proof: untouchable, now, env: DISABLED });
-    assert.deepEqual(auth, { ok: true, mode: 'open' });
+    const unnamed = authorizeRealMode({ address: '', proof: untouchable, now, env: DISABLED });
+    assert.deepEqual(unnamed, { ok: true, mode: 'open' });
   });
 });
 
@@ -283,12 +230,8 @@ describe('realModeFor / realModeNeedsProof — what the card route asks', () => 
     assert.equal(realModeFor('mainnet', PUBLIC), 'public');
     assert.equal(realModeFor('mainnet', DISABLED), 'disabled');
     assert.equal(realModeFor(DEFAULT_NETWORK, DISABLED), 'open');
-  });
-
-  it('RULE: the modes that bind a memo to a wallet are the ones that asked it to sign', () => {
     // If these two ever disagree, `POST /api/card` either demands an owner
-    // record that `POST /api/deposit` never wrote — refusing a shopper who
-    // has already sent real money — or skips a check it should have made.
+    // record that `POST /api/deposit` never wrote, or skips a check it should have made.
     assert.equal(realModeNeedsProof('allowlist'), true);
     assert.equal(realModeNeedsProof('public'), true);
     assert.equal(realModeNeedsProof('open'), false);

@@ -17,6 +17,9 @@ describe('checkout confirmation after a lost response', () => {
     assert.equal(result.openSig, status.openSig);
     assert.equal(result.status?.feeStatus, 'settled');
     assert.deepEqual(calls, ['/api/checkout/open', `/api/checkout/status?orderId=${submission.orderId}`]);
+
+    assert.equal(await recoverOpen(async () => Response.json({ ...status, orderId: 'cd'.repeat(32) }), submission.orderId), null);
+    assert.equal(await recoverOpen(async () => Response.json(status, { status: 401 }), submission.orderId), null);
   });
 
   it('does not add recovery requests when confirmation arrives normally', async () => {
@@ -31,14 +34,12 @@ describe('checkout confirmation after a lost response', () => {
     assert.equal(calls, 1);
   });
 
-  it('keeps an unknown confirmation pending instead of claiming a failed payment', async () => {
+  it('keeps an uncertain confirmation pending and reports a real rejection only after that', async () => {
     await assert.rejects(submitOpen(async (_, init) => {
       if (init.method === 'PUT') throw new TypeError('Failed to fetch');
       return Response.json({ ...status, openSig: null });
     }, submission, 'failed'), OpenConfirmationPending);
-  });
 
-  it('reuses the exact order and signed bytes on retry', async () => {
     const sent: unknown[] = [];
     const request = async (_: string, init: RequestInit) => {
       if (init.method === 'PUT') {
@@ -50,14 +51,7 @@ describe('checkout confirmation after a lost response', () => {
     await assert.rejects(submitOpen(request, submission, 'failed'), OpenConfirmationPending);
     await submitOpen(request, submission, 'failed');
     assert.deepEqual(sent, [submission, submission]);
-  });
 
-  it('never accepts a different order or an unsuccessful status response', async () => {
-    assert.equal(await recoverOpen(async () => Response.json({ ...status, orderId: 'cd'.repeat(32) }), submission.orderId), null);
-    assert.equal(await recoverOpen(async () => Response.json(status, { status: 401 }), submission.orderId), null);
-  });
-
-  it('reports a definitive rejected message after ruling out a funded order', async () => {
     await assert.rejects(submitOpen(async (_, init) => init.method === 'PUT'
       ? Response.json({ error: 'invalid signature' }, { status: 400 })
       : Response.json({ ...status, openSig: null }), submission, 'failed'), err =>

@@ -57,7 +57,7 @@ npm run build
 Verify before configuring anything:
 
 ```bash
-npm test     # 474 unit tests, no network, no browser
+npm test     # 304 unit tests, no network, no browser
 ```
 
 If those pass, the money math, the redactor, the keystore, the classifier and the state

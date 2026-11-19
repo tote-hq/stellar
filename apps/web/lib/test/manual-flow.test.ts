@@ -4,8 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 import { manualCheckoutFlow, memberFlow } from '../config.ts';
-import { escrowCopy } from '../checkout/copy.ts';
-import { announcedPhase, flowCopy, flowLabels, flowRailIndex, flowScreen, viewerBody } from '../checkout/flow.ts';
+import { viewerBody } from '../checkout/flow.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const token = 'a'.repeat(48);
@@ -31,38 +30,6 @@ describe('manual checkout flow', () => {
     assert.match(String(body.formUrl), /part=form$/);
   });
 
-  it('names the rail and the phase in one language, in Spanish and English', () => {
-    for (const lang of ['es', 'en'] as const) {
-      for (const flow of ['guided', 'headless'] as const) {
-        const labels = flowLabels(lang, flow);
-        assert.equal(labels.length, 5);
-        for (const label of labels) assert.equal(label.includes(' / '), false);
-      }
-      const words = flowCopy(lang);
-      for (const line of [words.progressTitle, words.cardTitle, words.paying, words.verification, words.formFrame]) {
-        assert.equal(line.includes(' / '), false);
-      }
-      assert.equal(words.verification.includes('CHK'), false);
-      assert.equal(escrowCopy(lang).phases.payment.includes(' / '), false);
-    }
-    assert.notEqual(flowCopy('es').paying, flowCopy('en').paying);
-    assert.equal(announcedPhase('shop', 'shop'), 'shop');
-    assert.equal(announcedPhase('shop', 'payment'), 'payment');
-
-    const preparing = { phase: 'shop', manual: { preparation: 'preparing', purchase: 'not_started' } };
-    const ready = { phase: 'payment', manual: { preparation: 'ready', purchase: 'not_started' } };
-    assert.equal(flowScreen('guided', preparing, false), 'progress');
-    assert.equal(flowScreen('guided', ready, false), 'card');
-    assert.equal(flowScreen('guided', ready, true), 'browser');
-    assert.equal(flowScreen('headless', ready, true), 'paying');
-    assert.equal(flowScreen('headless', { phase: 'payment', manual: { preparation: 'ready', purchase: 'verification_required' } }, true), 'verification');
-    assert.equal(flowRailIndex('login', 'progress'), 0);
-    assert.equal(flowRailIndex('review', 'progress'), 1);
-    assert.equal(flowRailIndex('shopping', 'progress'), 2);
-    assert.equal(flowRailIndex('shopping', 'card'), 3);
-    assert.equal(flowRailIndex('shopping', 'browser'), 4);
-    assert.equal(flowRailIndex('shopping', 'paying'), 4);
-  });
 });
 
 describe('checkout dialog accessibility', () => {

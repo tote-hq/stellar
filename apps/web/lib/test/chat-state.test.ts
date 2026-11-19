@@ -71,9 +71,6 @@ describe('applyEvent', () => {
     ]);
     const first = s.blocks[0];
     assert.ok(first.kind === 'say' && first.tools[0].ok === true && first.tools[0].ms === 812);
-  });
-
-  it('a tool_end for an unknown id changes nothing rather than throwing', () => {
     const before = run([{ t: 'text', delta: 'hola' }]);
     const after = applyEvent(before, { t: 'tool_end', id: 'ghost', ok: false, ms: 1 });
     assert.deepEqual(after.blocks, before.blocks);
@@ -90,32 +87,30 @@ describe('applyEvent', () => {
 
   it('draws one card when the same cart is rendered twice in a turn', () => {
     // What the user actually saw: a card with no link, then the same basket
-    // again with one. It reads as two orders.
+    // again with one. It reads as two orders. React keys off the block id, so
+    // a new id would animate a second card that looks like that duplicate.
     const s = run([
       { t: 'cart', cart: cart('c1') },
       { t: 'cart', cart: cart('c1'), handoffUrl: 'https://dia/checkout' },
     ]);
     assert.deepEqual(s.blocks.map((b) => b.kind), ['cart']);
     assert.equal(s.blocks[0].kind === 'cart' && s.blocks[0].handoffUrl, 'https://dia/checkout');
-  });
-
-  it('reuses the block id so the card updates in place', () => {
-    // React keys off it. A new id unmounts the card and animates a new one in,
-    // which looks exactly like the duplicate this replaced.
-    const s = run([
-      { t: 'cart', cart: cart('c1') },
-      { t: 'cart', cart: cart('c1'), handoffUrl: 'https://dia/checkout' },
-    ]);
     assert.equal(s.blocks[0].id, 'b1');
-  });
 
-  it('never takes the link back off a card that already had one', () => {
-    const s = run([
+    resetIds();
+    const kept = run([
       { t: 'cart', cart: cart('c1'), handoffUrl: 'https://dia/checkout' },
       { t: 'cart', cart: cart('c1') },
     ]);
-    assert.equal(s.blocks[0].kind === 'cart' && s.blocks[0].handoffUrl, 'https://dia/checkout');
-    assert.equal(s.cart?.handoffUrl, 'https://dia/checkout');
+    assert.equal(kept.blocks[0].kind === 'cart' && kept.blocks[0].handoffUrl, 'https://dia/checkout');
+    assert.equal(kept.cart?.handoffUrl, 'https://dia/checkout');
+
+    resetIds();
+    const other = run([
+      { t: 'cart', cart: cart('old') },
+      { t: 'cart', cart: cart('new') },
+    ]);
+    assert.deepEqual(other.blocks.map((b) => b.kind), ['cart', 'cart']);
   });
 
   it('keeps the cart from an earlier turn as a record of what it was then', () => {
@@ -127,14 +122,6 @@ describe('applyEvent', () => {
     assert.deepEqual(s.blocks.map((b) => b.kind), ['user', 'cart', 'user', 'cart']);
     assert.equal(s.blocks[1].kind === 'cart' && s.blocks[1].handoffUrl, undefined);
     assert.equal(s.blocks[3].kind === 'cart' && s.blocks[3].handoffUrl, 'https://dia/checkout');
-  });
-
-  it('still shows both when the cart is genuinely a different one', () => {
-    const s = run([
-      { t: 'cart', cart: cart('old') },
-      { t: 'cart', cart: cart('new') },
-    ]);
-    assert.deepEqual(s.blocks.map((b) => b.kind), ['cart', 'cart']);
   });
 
   it('drops the get_cart_link trail row once this turn draws the cart', () => {
@@ -156,50 +143,25 @@ describe('applyEvent', () => {
       ['search_products'],
     );
     assert.equal(s.blocks.some((b) => b.kind === 'cart'), true);
-  });
 
-  it('removes a still-open get_cart_link row when the cart arrives before tool_end', () => {
-    const s = run([
+    const open = run([
       { t: 'tool_start', id: 'link', name: 'get_cart_link' },
       { t: 'cart', cart: cart('c1'), handoffUrl: 'https://dia/checkout' },
     ]);
-    assert.deepEqual(
-      s.blocks.map((b) => b.kind),
-      ['cart'],
-    );
-    // The late close has nothing to attach to, and must not throw.
-    const after = applyEvent(s, { t: 'tool_end', id: 'link', ok: true, ms: 12 });
-    assert.deepEqual(
-      after.blocks.map((b) => b.kind),
-      ['cart'],
-    );
-  });
+    assert.deepEqual(open.blocks.map((b) => b.kind), ['cart']);
+    const after = applyEvent(open, { t: 'tool_end', id: 'link', ok: true, ms: 12 });
+    assert.deepEqual(after.blocks.map((b) => b.kind), ['cart']);
 
-  it('keeps a failed get_cart_link row when a cart is also drawn', () => {
-    const s = run([
+    const failed = run([
       { t: 'tool_start', id: 'link', name: 'get_cart_link' },
       { t: 'tool_end', id: 'link', ok: false, ms: 40 },
       { t: 'cart', cart: cart('c1'), handoffUrl: 'https://dia/checkout' },
     ]);
-    const say = s.blocks.find((b) => b.kind === 'say');
-    assert.ok(say?.kind === 'say');
-    assert.equal(say.tools.length, 1);
-    assert.equal(say.tools[0]?.name, 'get_cart_link');
-    assert.equal(say.tools[0]?.ok, false);
-  });
-
-  it('does not drop a get_cart_link row from an earlier turn', () => {
-    const first = run(
-      [
-        { t: 'tool_start', id: 'link', name: 'get_cart_link' },
-        { t: 'tool_end', id: 'link', ok: true, ms: 20 },
-      ],
-      sendUser(initialState, 'armá un desayuno'),
-    );
-    const s = run([{ t: 'cart', cart: cart('c1'), handoffUrl: 'https://dia/checkout' }], sendUser(first, 'el link'));
-    const old = s.blocks[1];
-    assert.ok(old?.kind === 'say' && old.tools[0]?.name === 'get_cart_link' && old.tools[0]?.ok === true);
-    assert.equal(s.blocks.at(-1)?.kind, 'cart');
+    const failedSay = failed.blocks.find((b) => b.kind === 'say');
+    assert.ok(failedSay?.kind === 'say');
+    assert.equal(failedSay.tools.length, 1);
+    assert.equal(failedSay.tools[0]?.name, 'get_cart_link');
+    assert.equal(failedSay.tools[0]?.ok, false);
   });
 
   it('done frees the composer and keeps the snapshot for the next turn', () => {
@@ -222,6 +184,10 @@ describe('endTurn', () => {
     const s = endTurn(sendUser(initialState, 'hola'), 'Se cortó la conexión.');
     assert.equal(s.streaming, false);
     assert.equal(s.blocks.at(-1)?.kind, 'error');
+    const done = applyEvent(sendUser(initialState, 'hola'), {
+      t: 'done', stopReason: 'end_turn', snapshot: { location: undefined, carts: {} } as never,
+    });
+    assert.deepEqual(endTurn(done, 'x'), done);
   });
 
   it('drops the login-required line and leaves other errors in place', () => {
@@ -243,13 +209,6 @@ describe('endTurn', () => {
     assert.equal(errors.length, 1);
     if (errors[0]?.kind === 'error') assert.equal(errors[0].message, 'sin stock');
   });
-
-  it('does nothing when the turn already ended, so `done` is not doubled', () => {
-    const done = applyEvent(sendUser(initialState, 'hola'), {
-      t: 'done', stopReason: 'end_turn', snapshot: { location: undefined, carts: {} } as never,
-    });
-    assert.deepEqual(endTurn(done, 'x'), done);
-  });
 });
 
 // The message from the bug report: the supermarket and the postal code the
@@ -259,15 +218,6 @@ const login = { reason: 'login' as const, message: 'Para seguir, iniciá sesión
 const dropped = { reason: 'network' as const, message: 'Se cortó la conexión.' };
 
 describe('failTurn', () => {
-  it('marks the message itself when nothing came back, instead of stacking a notice under it', () => {
-    const s = failTurn(sendUser(initialState, JUMBO), login);
-    assert.equal(s.streaming, false);
-    assert.equal(s.blocks.length, 1);
-    const b = s.blocks[0];
-    assert.equal(b.kind === 'user' && b.text, JUMBO);
-    assert.deepEqual(b.kind === 'user' ? b.failed : undefined, login);
-  });
-
   it('appends the notice instead once the agent has said something', () => {
     // Half an answer is on screen: the server has the message, so "no se
     // envió" would be a lie.
@@ -276,98 +226,31 @@ describe('failTurn', () => {
     assert.deepEqual(s.blocks.map((b) => b.kind), ['user', 'say', 'error']);
     assert.equal(s.blocks[0].kind === 'user' && s.blocks[0].failed, undefined);
   });
-
-  it('does nothing once the turn ended — the user pressing Parar is not a failure', () => {
-    const stopped = endTurn(sendUser(initialState, JUMBO));
-    assert.deepEqual(failTurn(stopped, dropped), stopped);
-  });
-
-  it('does nothing after a fatal error already closed the turn', () => {
-    const fatal = applyEvent(sendUser(initialState, JUMBO), {
-      t: 'error', message: 'No puedo responder eso.', recoverable: false,
-    });
-    assert.deepEqual(failTurn(fatal, dropped), fatal);
-  });
-
-  it('marks only the newest message, leaving delivered turns alone', () => {
-    const first = applyEvent(sendUser(initialState, 'hola'), {
-      t: 'done', stopReason: 'end_turn', snapshot: { location: undefined, carts: {} } as never,
-    });
-    const s = failTurn(sendUser(first, JUMBO), login);
-    assert.equal(s.blocks[0].kind === 'user' && s.blocks[0].failed, undefined);
-    const last = s.blocks.at(-1);
-    assert.equal(last?.kind === 'user' && last.failed?.reason, 'login');
-  });
-
-  it('carries the reason through, so the UI can tell a gate from a dropped connection', () => {
-    const gate = failTurn(sendUser(initialState, JUMBO), login);
-    const net = failTurn(sendUser(initialState, JUMBO), dropped);
-    assert.equal(gate.blocks[0].kind === 'user' && gate.blocks[0].failed?.reason, 'login');
-    assert.equal(net.blocks[0].kind === 'user' && net.blocks[0].failed?.reason, 'network');
-  });
 });
 
 describe('retryUser', () => {
-  const failed = () => failTurn(sendUser(initialState, JUMBO), login);
-
-  it('clears the mark and reopens the turn', () => {
-    const s = retryUser(failed(), 'b1');
+  it('reuses the bubble instead of saying it twice', () => {
+    const before = failTurn(sendUser(initialState, JUMBO), login);
+    const s = retryUser(before, 'b1');
     assert.equal(s.streaming, true);
     assert.equal(s.blocks[0].kind === 'user' && s.blocks[0].failed, undefined);
-  });
-
-  it('reuses the bubble instead of saying it twice', () => {
-    const before = failed();
-    const s = retryUser(before, 'b1');
     assert.equal(s.blocks.length, before.blocks.length);
     assert.equal(s.blocks[0].id, 'b1');
-  });
-
-  it('keeps the text, which is the whole point', () => {
-    const b = retryUser(failed(), 'b1').blocks[0];
-    assert.equal(b.kind === 'user' && b.text, JUMBO);
-  });
-
-  it('removes the key rather than setting it undefined', () => {
-    const b = retryUser(failed(), 'b1').blocks[0];
-    assert.ok(!('failed' in b));
-  });
-
-  it('ignores an id that is not a failed message', () => {
-    const s = failed();
-    assert.deepEqual(retryUser(s, 'b99'), s);
-    const delivered = sendUser(initialState, 'hola');
-    assert.deepEqual(retryUser(endTurn(delivered), 'b1'), endTurn(delivered));
-  });
-
-  it('ignores a retry while a turn is already running', () => {
-    const streaming = sendUser(failed(), 'otra cosa');
-    assert.deepEqual(retryUser(streaming, 'b1'), streaming);
-  });
-
-  it('marks the same single bubble when the retry fails too', () => {
-    const s = failTurn(retryUser(failed(), 'b1'), login);
-    assert.equal(s.blocks.length, 1);
-    assert.equal(s.blocks[0].kind === 'user' && s.blocks[0].failed?.reason, 'login');
+    assert.equal(s.blocks[0].kind === 'user' && s.blocks[0].text, JUMBO);
+    assert.ok(!('failed' in s.blocks[0]));
   });
 });
 
 describe('canRetry', () => {
   it('offers the button on the newest failed message', () => {
     assert.equal(canRetry(failTurn(sendUser(initialState, JUMBO), login), 'b1'), true);
-  });
-
-  it('takes it back once the user has moved on', () => {
+    resetIds();
     // Re-sending now would reach the server after a message that came later.
     const moved = sendUser(failTurn(sendUser(initialState, JUMBO), login), 'continuar');
     assert.equal(canRetry(endTurn(moved), 'b1'), false);
-  });
-
-  it('is false while a turn is streaming', () => {
+    resetIds();
     assert.equal(canRetry(retryUser(failTurn(sendUser(initialState, JUMBO), login), 'b1'), 'b1'), false);
-  });
-
-  it('is false for a message that was delivered', () => {
+    resetIds();
     assert.equal(canRetry(endTurn(sendUser(initialState, 'hola')), 'b1'), false);
   });
 });
@@ -379,14 +262,11 @@ describe('turn progress', () => {
     const s = run([received, { t: 'status', stage: 'thinking', hop: 0 }], sendUser(initialState, JUMBO));
     assert.deepEqual(s.blocks.map((b) => b.kind), ['user']);
     assert.deepEqual(s.progress, { stage: 'thinking', hop: 0, writing: false });
-  });
-
-  it('keeps the hop across a fallback that does not name one', () => {
-    const s = run(
+    const fb = run(
       [{ t: 'status', stage: 'thinking', hop: 2 }, { t: 'status', stage: 'fallback' }],
       sendUser(initialState, JUMBO),
     );
-    assert.deepEqual(s.progress, { stage: 'fallback', hop: 2, writing: false });
+    assert.deepEqual(fb.progress, { stage: 'fallback', hop: 2, writing: false });
   });
 
   it('notes when reply text starts, and forgets it at the next status', () => {
@@ -405,16 +285,11 @@ describe('turn progress', () => {
     assert.ok(!('progress' in endTurn(live)));
     assert.ok(!('progress' in applyEvent(live, { t: 'error', message: 'x', recoverable: false })));
     assert.ok(!('progress' in failTurn(live, dropped)));
-  });
-
-  it('ignores a status that arrives after the user pressed Parar', () => {
     const stopped = endTurn(sendUser(initialState, JUMBO));
     assert.deepEqual(applyEvent(stopped, received), stopped);
-  });
-
-  it('starts every turn from nothing', () => {
-    const live = run([received], sendUser(initialState, JUMBO));
-    const failed = failTurn(live, dropped);
+    resetIds();
+    const again = run([received], sendUser(initialState, JUMBO));
+    const failed = failTurn(again, dropped);
     assert.ok(!('progress' in retryUser(failed, 'b1')));
   });
 });
@@ -429,15 +304,17 @@ describe('failTurn after the server acknowledged the message', () => {
     assert.equal(b.kind === 'user' && b.failed?.reason, 'dropped');
     assert.equal(b.kind === 'user' && b.failed?.message, dropped.message);
     assert.equal(canRetry(s, 'b1'), true);
-  });
 
-  it('keeps "no se envió" when nothing was acknowledged', () => {
-    const s = failTurn(sendUser(initialState, JUMBO), dropped);
-    assert.equal(s.blocks[0].kind === 'user' && s.blocks[0].failed?.reason, 'network');
-  });
+    resetIds();
+    const net = failTurn(sendUser(initialState, JUMBO), dropped);
+    assert.equal(net.streaming, false);
+    assert.equal(net.blocks.length, 1);
+    assert.equal(net.blocks[0].kind === 'user' && net.blocks[0].failed?.reason, 'network');
 
-  it('leaves a login refusal as a login refusal', () => {
-    const s = failTurn(sendUser(initialState, JUMBO), login);
-    assert.equal(s.blocks[0].kind === 'user' && s.blocks[0].failed?.reason, 'login');
+    resetIds();
+    const gate = failTurn(sendUser(initialState, JUMBO), login);
+    const g = gate.blocks[0];
+    assert.equal(g.kind === 'user' && g.text, JUMBO);
+    assert.deepEqual(g.kind === 'user' ? g.failed : undefined, login);
   });
 });

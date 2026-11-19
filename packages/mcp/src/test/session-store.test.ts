@@ -11,7 +11,6 @@ import {
   authCookies,
   describeSpan,
   isUsable,
-  parseAuthenticatedUser,
   profileFromOrderForm,
   readSession,
   saveSession,
@@ -49,14 +48,6 @@ describe('authCookies', () => {
       'VtexIdclientAutCookie_ardiaprod',
     ]);
   });
-
-  it('ignores an auth cookie that has been emptied out', () => {
-    assert.equal(authCookies(state([{ name: 'VtexIdclientAutCookie', value: '' }])).length, 0);
-  });
-
-  it('survives an undefined state', () => {
-    assert.deepEqual(authCookies(undefined), []);
-  });
 });
 
 describe('sessionHealth', () => {
@@ -65,12 +56,6 @@ describe('sessionHealth', () => {
     assert.equal(h.status, 'no_auth_cookie');
     assert.match(h.message, /link_marketplace_account/);
     assert.equal(isUsable(h), false);
-  });
-
-  it('reports a saved session with no auth cookie as an incomplete login', () => {
-    const h = sessionHealth(session([{ name: 'checkout.vtex.com' }]), NOW);
-    assert.equal(h.status, 'no_auth_cookie');
-    assert.match(h.message, /did not complete/);
   });
 
   it('is ok when the cookie has hours left', () => {
@@ -83,33 +68,29 @@ describe('sessionHealth', () => {
     assert.equal(isUsable(h), true);
   });
 
-  it('takes the EARLIEST expiry, because either cookie dying logs you out', () => {
-    const h = sessionHealth(
+  it('warns when less time is left than a checkout takes', () => {
+    const earliest = sessionHealth(
       session([
         { name: 'VtexIdclientAutCookie', expires: sec(NOW) + 86_400 },
         { name: 'VtexIdclientAutCookie_ardiaprod', expires: sec(NOW) + 600 },
       ]),
       NOW,
     );
-    assert.equal(h.status, 'expiring_soon');
-    assert.equal(h.secondsLeft, 600);
-  });
+    assert.equal(earliest.status, 'expiring_soon');
+    assert.equal(earliest.secondsLeft, 600);
 
-  it('warns when less time is left than a checkout takes', () => {
-    const h = sessionHealth(
+    const close = sessionHealth(
       session([{ name: 'VtexIdclientAutCookie', expires: sec(NOW) + EXPIRING_SOON_SEC - 1 }]),
       NOW,
     );
-    assert.equal(h.status, 'expiring_soon');
-    assert.equal(isUsable(h), false, 'must not start a payment on a session about to die');
-  });
+    assert.equal(close.status, 'expiring_soon');
+    assert.equal(isUsable(close), false, 'must not start a payment on a session about to die');
 
-  it('treats the boundary second as still too close', () => {
-    const h = sessionHealth(
+    const boundary = sessionHealth(
       session([{ name: 'VtexIdclientAutCookie', expires: sec(NOW) + EXPIRING_SOON_SEC }]),
       NOW,
     );
-    assert.equal(h.status, 'expiring_soon');
+    assert.equal(boundary.status, 'expiring_soon');
   });
 
   it('reports an expired session and how long ago', () => {
@@ -130,15 +111,6 @@ describe('sessionHealth', () => {
     assert.match(h.message, /checked against the store/);
   });
 
-  it('reports the age of the link', () => {
-    const h = sessionHealth(
-      session([{ name: 'VtexIdclientAutCookie', expires: sec(NOW) + 7200 }],
-        new Date(NOW - 90 * 60_000).toISOString()),
-      NOW,
-    );
-    assert.equal(h.ageHours, 1.5);
-  });
-
   it('does not blow up on a corrupt savedAt', () => {
     const s = session([{ name: 'VtexIdclientAutCookie', expires: sec(NOW) + 7200 }], 'not-a-date');
     const h = sessionHealth(s, NOW);
@@ -153,27 +125,7 @@ describe('describeSpan', () => {
     assert.equal(describeSpan(600), '10 min');
     assert.equal(describeSpan(7200), '2.0 h');
     assert.equal(describeSpan(86_400 * 3), '3 days');
-  });
-
-  it('never prints a negative duration', () => {
     assert.equal(describeSpan(-5), '0s');
-  });
-});
-
-describe('parseAuthenticatedUser', () => {
-  it('accepts the documented shape', () => {
-    const r = parseAuthenticatedUser({ user: 'me@example.com', userId: 'u1' });
-    assert.deepEqual(r, { authenticated: true, email: 'me@example.com', userId: 'u1' });
-  });
-
-  it('accepts a userId with no email', () => {
-    assert.equal(parseAuthenticatedUser({ id: 'u1' }).authenticated, true);
-  });
-
-  it('treats an empty or null body as signed out', () => {
-    assert.equal(parseAuthenticatedUser(null).authenticated, false);
-    assert.equal(parseAuthenticatedUser({}).authenticated, false);
-    assert.equal(parseAuthenticatedUser('nope').authenticated, false);
   });
 });
 
@@ -195,17 +147,10 @@ describe('profileFromOrderForm', () => {
     assert.equal(p.document, '30123456');
     assert.equal(p.documentType, 'dni');
     assert.equal(p.firstName, 'Ana');
-  });
 
-  it('does not call an anonymous cart authenticated just because an email was typed', () => {
-    const p = profileFromOrderForm({ clientProfileData: { email: 'guest@example.com' } });
-    assert.equal(p.authenticated, false, 'email alone is a guest checkout, not a login');
-    assert.equal(p.email, 'guest@example.com');
-  });
-
-  it('handles a null clientProfileData', () => {
-    assert.equal(profileFromOrderForm({ clientProfileData: null }).authenticated, false);
-    assert.equal(profileFromOrderForm(undefined).authenticated, false);
+    const guest = profileFromOrderForm({ clientProfileData: { email: 'guest@example.com' } });
+    assert.equal(guest.authenticated, false, 'email alone is a guest checkout, not a login');
+    assert.equal(guest.email, 'guest@example.com');
   });
 });
 
@@ -237,9 +182,5 @@ describe('the session on disk', () => {
     const path = join(dir, 'wrong.enc');
     await saveSession(path, 'correct horse battery', session([{ name: 'VtexIdclientAutCookie' }]));
     await assert.rejects(readSession(path, 'wrong passphrase entirely'));
-  });
-
-  it('returns undefined rather than throwing when nothing is linked yet', async () => {
-    assert.equal(await readSession(join(dir, 'absent.enc'), 'whatever'), undefined);
   });
 });

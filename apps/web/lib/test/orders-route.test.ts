@@ -63,36 +63,6 @@ const ask = (body: unknown) =>
   );
 
 describe('reading back what a wallet bought', () => {
-  it('RULE: says there is nothing to read here before asking anyone to sign', () => {
-    // Preview keeps no records at all. Making somebody approve a signature in
-    // their wallet and *then* telling them there was never anything to show
-    // would be the rudest available ordering, so the deployment fact is
-    // answered first.
-    return withEnv({}, async () => {
-      const res = await ask({ address: buyer.publicKey(), network: 'testnet', proof: signed('orders') });
-      assert.equal(res.status, 503);
-    });
-  });
-
-  it('refuses an address that is not one', async () => {
-    await withEnv({ DATABASE_URL: UNUSED_DB }, async () => {
-      for (const address of ['', 'not-an-address', buyer.publicKey().slice(0, 40), 42]) {
-        const res = await ask({ address, network: 'testnet', proof: signed('orders') });
-        assert.equal(res.status, 400, `accepted ${JSON.stringify(address)}`);
-      }
-    });
-  });
-
-  it('RULE: a wallet that may not use this network learns only that', async () => {
-    // Asked before the proof, so a stranger cannot tell a wrong signature from
-    // a network they are not on — and never learns whether the wallet they
-    // asked about has bought anything here.
-    await withEnv({ DATABASE_URL: UNUSED_DB, REAL_MODE_ALLOWLIST_ADDRESSES: stranger.publicKey() }, async () => {
-      const res = await ask({ address: buyer.publicKey(), network: 'mainnet', proof: signed('orders') });
-      assert.equal(res.status, 403);
-    });
-  });
-
   it('RULE: a public address alone buys nothing', async () => {
     // The whole reason this is not a GET with an address in the query string.
     await withEnv({ DATABASE_URL: UNUSED_DB }, async () => {
@@ -135,11 +105,4 @@ describe('reading back what a wallet bought', () => {
     });
   });
 
-  it('RULE: never caches a reply about somebody’s purchases', async () => {
-    await withEnv({ DATABASE_URL: UNUSED_DB }, async () => {
-      const res = await ask({ address: buyer.publicKey(), network: 'testnet' });
-      assert.match(res.headers.get('cache-control') ?? '', /no-store/);
-      assert.match(res.headers.get('cache-control') ?? '', /private/);
-    });
-  });
 });

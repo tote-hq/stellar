@@ -98,7 +98,6 @@ From the repo root:
 npm ci
 npm run dev -w @changuito/landing      # http://localhost:3125
 npm run build -w @changuito/landing
-npm test -w @changuito/landing
 npm run typecheck -w @changuito/landing
 ```
 

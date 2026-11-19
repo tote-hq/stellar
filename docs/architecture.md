@@ -376,7 +376,7 @@ changuito/
 │   ├── escrow/              open, settle, refund, events — 19 tests, login-network checkout
 │   └── mock_usdc/           SEP-41 token, admin-gated mint — 15 tests
 ├── packages/
-│   ├── mcp/                 the vendored MCP server — 520 tests
+│   ├── mcp/                 the vendored MCP server — 304 tests
 │   ├── trust/               footer copy shared by both apps, so they cannot drift
 │   ├── escrow-bindings/     generated from the deployed wasm
 │   └── usdc-bindings/       generated from the deployed wasm

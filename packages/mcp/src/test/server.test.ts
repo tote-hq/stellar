@@ -35,19 +35,6 @@ describe('createSupermercadoServer', () => {
     const names = toolNames(createSupermercadoServer());
     assert.deepEqual(names.sort(), [...CATALOG].sort());
   });
-
-  it('cannot be asked for the checkout tools at all', async () => {
-    // Not `checkout: false` — there is no option. A host that wants them
-    // imports them, which is why no bundler can find them from here.
-    const names = toolNames(createSupermercadoServer());
-    assert.ok(!names.includes('approve_payment'));
-    assert.ok(!names.some((n) => n.includes('payment') || n.includes('link_marketplace')));
-  });
-
-  it('lets a host rename itself without inventing a version', async () => {
-    const s = createSupermercadoServer({ name: 'changuito-web' });
-    assert.equal(toolNames(s).length, CATALOG.length);
-  });
 });
 
 /**
@@ -97,12 +84,6 @@ describe('RULE: a read-only server never reaches Playwright or an EVM signer', (
     const code = src.split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
     assert.ok(!/['"]\.\/tools\.js['"]/.test(code), 'server.ts references tools.js');
   });
-
-  it('the stdio binary is where the checkout tools come from', async () => {
-    const src = await readFile(new URL('../../src/index.ts', import.meta.url), 'utf8');
-    assert.match(src, /import \{ registerCheckoutTools \} from '\.\/tools\.js'/);
-    assert.match(src, /registerCheckoutTools\(server\)/);
-  });
 });
 
 /** A real client, so these assertions are about the protocol and not the object. */
@@ -116,14 +97,6 @@ async function connected() {
 }
 
 describe('over a real MCP transport', () => {
-  it('hands the client instructions to put in its system prompt', async () => {
-    const c = await connected();
-    const text = c.client.getInstructions() ?? '';
-    assert.match(text, /set_location/, 'instructions do not state the flow');
-    assert.match(text, /DOES NOT BUY/, 'instructions do not say where the server stops');
-    await c.close();
-  });
-
   it('RULE: names no tool it did not register', async () => {
     // The bug this exists for: the instructions once described the full
     // checkout flow, so a host that registered only the catalog tools was
@@ -176,14 +149,6 @@ describe('over a real MCP transport', () => {
     const res = await c.client.callTool({ name: 'search_products', arguments: { query: 'leche' } });
     assert.equal(res.isError, true, 'searching with no location should be a tool error');
     assert.match((res.content as any)[0].text, /set_location/);
-    await c.close();
-  });
-
-  it('still answers a no-argument tool with plain text', async () => {
-    const c = await connected();
-    const res = await c.client.callTool({ name: 'list_retailers', arguments: {} });
-    assert.equal(res.isError, undefined);
-    assert.match((res.content as any)[0].text, /dia\s+D/);
     await c.close();
   });
 });

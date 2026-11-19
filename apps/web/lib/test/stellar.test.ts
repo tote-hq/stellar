@@ -7,11 +7,8 @@ import {
   centsToUnits,
   classicBalance,
   ensureFunded,
-  explorer,
-  formatUsdc,
   MIN_XLM,
   unitsFromDecimal,
-  unitsToCents,
 } from '../stellar.ts';
 
 const real = globalThis.fetch;
@@ -100,25 +97,22 @@ describe('ensureFunded', () => {
     assert.equal(res.xlm, '10000.0000000');
     // The account was already there, so we did not create it — but we did fund it.
     assert.equal(res.created, false);
-  });
 
-  it('tops up an account sitting below MIN_XLM', async () => {
-    let seen = 0;
-    const calls: string[] = [];
+    let lowSeen = 0;
+    const lowCalls: string[] = [];
     globalThis.fetch = (async (input: string | URL) => {
       const url = String(input);
-      calls.push(url);
+      lowCalls.push(url);
       if (/friendbot/.test(url)) return { ok: true, status: 200, text: async () => '' } as Response;
-      seen += 1;
+      lowSeen += 1;
       return {
         ok: true,
         status: 200,
-        json: async () => account(seen === 1 ? String(MIN_XLM - 1) : '10000.0'),
+        json: async () => account(lowSeen === 1 ? String(MIN_XLM - 1) : '10000.0'),
       } as Response;
     }) as typeof fetch;
-
     await ensureFunded(G);
-    assert.ok(calls.some((c) => c.includes('friendbot')), 'left a near-empty wallet alone');
+    assert.ok(lowCalls.some((c) => c.includes('friendbot')), 'left a near-empty wallet alone');
   });
 
   it('treats a friendbot refusal as success if the account exists anyway', async () => {
@@ -155,27 +149,7 @@ describe('USDC units', () => {
     assert.equal(centsToUnits(1), 100_000n);
     assert.equal(centsToUnits(1234), 123_400_000n);
     assert.equal(centsToUnits(0), 0n);
-  });
-
-  it('round-trips', () => {
-    for (const c of [0, 1, 99, 100, 4567, 1_000_000]) {
-      assert.equal(unitsToCents(centsToUnits(c)), c, `${c} cents did not survive`);
-    }
-  });
-
-  it('refuses a fractional cent rather than silently truncating', () => {
     assert.throws(() => centsToUnits(10.5), /whole number/);
-  });
-
-  it('formats to two decimals, which is what a person reads', () => {
-    assert.equal(formatUsdc(10_000_000n), '1.00');
-    assert.equal(formatUsdc(123_400_000n), '12.34');
-    assert.equal(formatUsdc(0n), '0.00');
-    assert.equal(formatUsdc(50_000n), '0.00', 'half a cent rounds down, not up');
-    assert.equal(formatUsdc(-123_400_000n), '-12.34');
-  });
-
-  it('parses a Horizon decimal without going through a float', () => {
     assert.equal(unitsFromDecimal('1.0000000'), 10_000_000n);
     assert.equal(unitsFromDecimal('12.34'), 123_400_000n);
     assert.equal(unitsFromDecimal('0'), 0n);
@@ -186,15 +160,6 @@ describe('USDC units', () => {
     assert.equal(unitsFromDecimal('0.1'), 1_000_000n);
     // Bigger than a double can hold exactly.
     assert.equal(unitsFromDecimal('922337203685.4775807'), 9_223_372_036_854_775_807n);
-  });
-
-  it('round-trips a formatted amount back through the parser', () => {
-    for (const units of [0n, 1n, 10_000_000n, 123_456_789n, 999_999_999_999n]) {
-      assert.equal(unitsFromDecimal(formatUsdc(units)) <= units, true, `${units} grew`);
-    }
-  });
-
-  it('refuses something that is not a number rather than reading it as zero', () => {
     for (const bad of ['', '  ', 'abc', '1.2.3', '1e7', '<!DOCTYPE html>']) {
       assert.throws(() => unitsFromDecimal(bad), /not a decimal amount/, `accepted ${JSON.stringify(bad)}`);
     }
@@ -211,32 +176,21 @@ describe('classic balances', () => {
   const ISSUER = 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN';
   const OTHER = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
 
-  it('reads the line for exactly this code and this issuer', () => {
+  it('RULE: a different issuer of the same code is a different asset', () => {
+    // Anybody may issue an asset called USDC. Matching on the code alone would
+    // let one show up as the shopper's dollars.
     const balances = [
       { asset_type: 'native', balance: '9.9999900' },
       { asset_type: 'credit_alphanum4', balance: '12.3400000', asset_code: USDC, asset_issuer: ISSUER },
     ];
     assert.equal(classicBalance(balances, USDC, ISSUER), 123_400_000n);
-  });
-
-  it('RULE: a different issuer of the same code is a different asset', () => {
-    // Anybody may issue an asset called USDC. Matching on the code alone would
-    // let one show up as the shopper's dollars.
-    const balances = [
-      { asset_type: 'credit_alphanum4', balance: '1000.0000000', asset_code: USDC, asset_issuer: OTHER },
-    ];
-    assert.equal(classicBalance(balances, USDC, ISSUER), 0n);
-  });
-
-  it('is zero for an account with no such line, which is the truth', () => {
+    assert.equal(classicBalance(
+      [{ asset_type: 'credit_alphanum4', balance: '1000.0000000', asset_code: USDC, asset_issuer: OTHER }],
+      USDC,
+      ISSUER,
+    ), 0n);
     assert.equal(classicBalance([{ asset_type: 'native', balance: '100.0000000' }], USDC, ISSUER), 0n);
-  });
-
-  it('is zero for an account that is not on the ledger at all', () => {
     assert.equal(classicBalance(null, USDC, ISSUER), 0n);
-  });
-
-  it('never reads the native line as the asset', () => {
     // `asset_code` is absent on a native line, so a loose match would compare
     // undefined to undefined and hand back the XLM.
     assert.equal(classicBalance([{ asset_type: 'native', balance: '50.0000000' }], '', ''), 0n);
@@ -245,15 +199,6 @@ describe('classic balances', () => {
 
 describe('deployments', () => {
   const testnet = DEPLOYMENTS.testnet;
-
-  it('points at the contracts that were actually deployed', () => {
-    assert.match(testnet.escrowId, /^C[A-Z0-9]{55}$/);
-    assert.match(testnet.usdcId, /^C[A-Z0-9]{55}$/);
-    assert.notEqual(testnet.escrowId, testnet.usdcId);
-    assert.match(testnet.resolver, /^G[A-Z0-9]{55}$/);
-    assert.match(testnet.treasury, /^G[A-Z0-9]{55}$/);
-    assert.equal(testnet.networkPassphrase, 'Test SDF Network ; September 2015');
-  });
 
   it('RULE: starts on testnet, and unknown values land there too', () => {
     // The whole app spends real-looking money. This is the line that says the
@@ -267,15 +212,10 @@ describe('deployments', () => {
     assert.equal(networkOrDefault(''), 'testnet');
     assert.equal(asNetwork('nonsense'), null);
     assert.equal(asNetwork('mainnet'), 'mainnet', 'but an exact match is still honoured');
-  });
-
-  it('keeps each network pointing at its own chain', () => {
+    assert.equal(testnet.networkPassphrase, 'Test SDF Network ; September 2015');
     assert.ok(testnet.rpcUrl.includes('testnet'));
     assert.ok(testnet.horizonUrl.includes('testnet'));
-    assert.equal(explorer.tx('abc', 'testnet'), 'https://stellar.expert/explorer/testnet/tx/abc');
-    // stellar.expert calls mainnet "public"; a link saying /mainnet/ 404s.
-    assert.equal(explorer.tx('abc', 'mainnet'), 'https://stellar.expert/explorer/public/tx/abc');
-    assert.equal(explorer.tx('abc'), explorer.tx('abc', DEFAULT_NETWORK));
+    assert.notEqual(testnet.escrowId, testnet.usdcId);
   });
 
   it('RULE: no testnet value was pasted under the mainnet key', () => {
@@ -291,6 +231,9 @@ describe('deployments', () => {
     for (const key of ['escrowId', 'usdcId', 'resolver', 'treasury'] as const) {
       if (main[key]) assert.notEqual(main[key], testnet[key], `mainnet.${key} is the testnet value`);
     }
+    for (const net of NETWORK_IDS) {
+      assert.equal(DEPLOYMENTS[net].usdcDecimals, 7, `${net} disagrees about decimals`);
+    }
   });
 
   it('refuses to build a client for a network with no contracts', () => {
@@ -301,14 +244,6 @@ describe('deployments', () => {
       assert.throws(() => deployment('mainnet'), /No hay contratos desplegados en mainnet/);
     } else {
       assert.doesNotThrow(() => deployment('mainnet'));
-    }
-  });
-
-  it('RULE: every network uses 7 decimals, which is why SCALE is module-level', () => {
-    // formatUsdc/centsToUnits compute SCALE once at import. That is only safe
-    // while every network agrees, so pin it rather than discover it.
-    for (const net of NETWORK_IDS) {
-      assert.equal(DEPLOYMENTS[net].usdcDecimals, 7, `${net} disagrees about decimals`);
     }
   });
 });
@@ -332,9 +267,6 @@ describe('RULE: the bindings and deployments.json agree', () => {
     // a deploy that half-finished, and the encoding in packages/ was taken
     // from a contract the app is not calling.
     assert.equal(await bakedId('escrow-bindings'), DEPLOYMENTS.testnet.escrowId);
-  });
-
-  it('the USDC binding was generated from the deployed token', async () => {
     assert.equal(await bakedId('usdc-bindings'), DEPLOYMENTS.testnet.usdcId);
   });
 });

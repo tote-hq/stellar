@@ -37,9 +37,6 @@ describe('recallPair', () => {
     assert.match(pair?.assistant ?? '', /set_location/);
     assert.match(pair?.assistant ?? '', /add_to_cart/);
     assert.match(pair?.assistant ?? '', /Arroz \(sku 272382\)/);
-  });
-
-  it('is empty when the browser sent nothing', () => {
     assert.equal(recallPair({ prior: [], shown: [] }), null);
   });
 });

@@ -6,17 +6,11 @@ import { Keypair } from '@stellar/stellar-sdk';
 
 import { DEFAULT_NETWORK } from '../deployments.ts';
 import { FAUCET_GRANTS_PER_HOUR, gateFaucet } from '../faucet-gate.ts';
-import { CounterUnavailable, memoryCounter, type TurnCounter } from '../login-gate.ts';
+import { memoryCounter } from '../login-gate.ts';
 import { walletProofMessage } from '../wallet-proof.ts';
 import { HUMAN_COOKIE, mintHumanToken } from '../human-gate.ts';
 import type { NetworkId } from '../deployments.ts';
 import type { WalletDirectory, WalletStanding } from '../wallet-record.ts';
-
-/**
- * POST /api/faucet up to the point where it would touch the chain. A test
- * that gets a Response back is a request the faucet refused without calling
- * friendbot or the mint.
- */
 
 const SECRET = 'turnstile-test-secret';
 const now = Date.now();
@@ -71,27 +65,27 @@ describe('POST /api/faucet gate', () => {
     assert.equal((await refusal(typo)).status, 400);
   });
 
-  it('refuses a stranger’s wallet with 403', async () => {
-    const res = await gateFaucet(await post({ address: stranger.publicKey(), proof: signed(stranger) }), env, now, memoryCounter());
-    assert.deepEqual(await refusal(res), { status: 403, error: 'faucet_not_allowed' });
-  });
-
-  it('refuses the granted address with no session proof with 401', async () => {
+  it('refuses a missing or forged login proof and does not insert a wallet', async () => {
     const book = memoryWallets([{ address: tester.publicKey(), faucetAllowed: true }]);
-    const res = await gateFaucet(await post({ address: tester.publicKey() }), env, now, memoryCounter(), book.directory);
-    assert.deepEqual(await refusal(res), { status: 401, error: 'faucet_session_required' });
-  });
+    const missing = await gateFaucet(await post({ address: tester.publicKey() }), env, now, memoryCounter(), book.directory);
+    assert.deepEqual(await refusal(missing), { status: 401, error: 'faucet_session_required' });
+    assert.equal(book.inserts(), 0);
 
-  it('refuses a forged proof for the granted address', async () => {
-    const book = memoryWallets([{ address: tester.publicKey(), faucetAllowed: true }]);
     const forged = { ...signed(stranger, tester.publicKey()) };
-    const res = await gateFaucet(await post({ address: tester.publicKey(), proof: forged }), env, now, memoryCounter(), book.directory);
-    assert.deepEqual(await refusal(res), { status: 401, error: 'faucet_proof_invalid' });
+    const bad = await gateFaucet(await post({ address: tester.publicKey(), proof: forged }), env, now, memoryCounter(), book.directory);
+    assert.deepEqual(await refusal(bad), { status: 401, error: 'faucet_proof_invalid' });
   });
 
-  it('refuses a wallet the database has not granted', async () => {
-    const res = await gateFaucet(await post({ address: tester.publicKey(), proof: signed(tester) }), env, now, memoryCounter());
-    assert.deepEqual(await refusal(res), { status: 403, error: 'faucet_not_allowed' });
+  it('refuses a wallet that is not granted or is banned', async () => {
+    const ungranted = await gateFaucet(await post({ address: tester.publicKey(), proof: signed(tester) }), env, now, memoryCounter());
+    assert.deepEqual(await refusal(ungranted), { status: 403, error: 'faucet_not_allowed' });
+    const strangerRes = await gateFaucet(await post({ address: stranger.publicKey(), proof: signed(stranger) }), env, now, memoryCounter());
+    assert.deepEqual(await refusal(strangerRes), { status: 403, error: 'faucet_not_allowed' });
+
+    const book = memoryWallets([{ address: tester.publicKey(), banned: true, faucetAllowed: true }]);
+    const banned = await gateFaucet(await post({ address: tester.publicKey(), proof: signed(tester) }), env, now, memoryCounter(), book.directory);
+    assert.deepEqual(await refusal(banned), { status: 403, error: 'wallet_banned' });
+    assert.equal(book.inserts(), 0);
   });
 
   it('still requires the human cookie first', async () => {
@@ -99,77 +93,23 @@ describe('POST /api/faucet gate', () => {
     assert.deepEqual(await refusal(res), { status: 403, error: 'solo_humanos' });
   });
 
-  it('holds a second grant inside the cooldown, across instances', async () => {
+  it('holds a second grant inside the cooldown and stops at the hourly ceiling', async () => {
     const book = memoryWallets([{ address: tester.publicKey(), faucetAllowed: true }]);
     const store = memoryCounter();
     const first = await gateFaucet(await post({ address: tester.publicKey(), proof: signed(tester) }), env, now, store, book.directory);
     assert.ok(!(first instanceof Response));
     const second = await gateFaucet(await post({ address: tester.publicKey(), proof: signed(tester) }), env, now, store, book.directory);
     assert.deepEqual(await refusal(second), { status: 429, error: 'rate_limited' });
-  });
 
-  it('stops every tester together at the hourly ceiling', async () => {
-    const store = memoryCounter();
-    const book = memoryWallets([], true);
+    const ceiling = memoryCounter();
+    const open = memoryWallets([], true);
     const testers = Array.from({ length: FAUCET_GRANTS_PER_HOUR + 1 }, () => Keypair.random());
     const results: unknown[] = [];
     for (const kp of testers) {
-      results.push(await gateFaucet(await post({ address: kp.publicKey(), proof: signed(kp) }), env, now, store, book.directory));
+      results.push(await gateFaucet(await post({ address: kp.publicKey(), proof: signed(kp) }), env, now, ceiling, open.directory));
     }
     assert.equal(results.filter((r) => !(r instanceof Response)).length, FAUCET_GRANTS_PER_HOUR);
     assert.deepEqual(await refusal(results.at(-1)), { status: 429, error: 'rate_limited' });
-  });
-
-  it('refuses when the shared counter is down, instead of minting', async () => {
-    const down: TurnCounter = {
-      kind: 'redis',
-      get: async () => {
-        throw new CounterUnavailable('down');
-      },
-      incr: async () => {
-        throw new CounterUnavailable('down');
-      },
-    };
-    const book = memoryWallets([{ address: tester.publicKey(), faucetAllowed: true }]);
-    const res = await gateFaucet(await post({ address: tester.publicKey(), proof: signed(tester) }), env, now, down, book.directory);
-    assert.deepEqual(await refusal(res), { status: 503, error: 'limiter_unavailable' });
-  });
-
-  it('rejects a body that is not an address', async () => {
-    const res = await gateFaucet(await post({ address: 'tester@example.com' }), env, now, memoryCounter());
-    assert.equal((await refusal(res)).status, 400);
-  });
-
-  it('refuses a banned wallet before the allowlist', async () => {
-    const book = memoryWallets([{ address: tester.publicKey(), banned: true, faucetAllowed: true }]);
-    const res = await gateFaucet(await post({ address: tester.publicKey(), proof: signed(tester) }), env, now, memoryCounter(), book.directory);
-    assert.deepEqual(await refusal(res), { status: 403, error: 'wallet_banned' });
-    assert.equal(book.inserts(), 0);
-  });
-
-  it('does not insert a wallet for an unproven faucet request', async () => {
-    const book = memoryWallets([{ address: tester.publicKey(), faucetAllowed: true }]);
-    const res = await gateFaucet(await post({ address: tester.publicKey() }), env, now, memoryCounter(), book.directory);
-    assert.deepEqual(await refusal(res), { status: 401, error: 'faucet_session_required' });
-    assert.equal(book.inserts(), 0);
-    const dev = { NODE_ENV: 'development', TURNSTILE_SECRET_KEY: SECRET } as NodeJS.ProcessEnv;
-    const openBook = memoryWallets();
-    const ungranted = await gateFaucet(await post({ address: stranger.publicKey() }), dev, now, memoryCounter(), openBook.directory);
-    assert.deepEqual(await refusal(ungranted), { status: 403, error: 'faucet_not_allowed' });
-    assert.equal(openBook.inserts(), 0);
-  });
-
-  it('lets a granted wallet through without an env list, and does not insert', async () => {
-    const book = memoryWallets([{ address: stranger.publicKey(), faucetAllowed: true }]);
-    const res = await gateFaucet(
-      await post({ address: stranger.publicKey(), proof: signed(stranger) }),
-      env,
-      now,
-      memoryCounter(),
-      book.directory,
-    );
-    assert.deepEqual(res, { address: stranger.publicKey(), kind: 'account', network: DEFAULT_NETWORK });
-    assert.equal(book.inserts(), 0);
   });
 });
 

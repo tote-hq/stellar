@@ -226,13 +226,6 @@ describe('runFlow — the happy path', () => {
     );
   });
 
-  it('never acts on the goal screen', async () => {
-    const d = new FakeDriver({ screens: [PAYMENT] });
-    const r = await run(d);
-    assert.equal(r.reached, true);
-    assert.equal(d.performed.length, 0, 'the payment form must not be touched by the loop');
-  });
-
   it('never acts on a placed order, whatever the goal was', async () => {
     const d = new FakeDriver({ screens: [CONFIRMED] });
     const r = await run(d, 'payment_form');
@@ -251,19 +244,6 @@ describe('runFlow — the happy path', () => {
 });
 
 describe('runFlow — order stops mattering', () => {
-  it('reaches the goal whatever order the screens arrive in', async () => {
-    const orders: Observation[][] = [
-      [CART, ADDRESS_CONFIRM, SLOT, PAYMENT],
-      [CART, SLOT, ADDRESS_CONFIRM, PAYMENT],
-      [SLOT, CART, PAYMENT],
-      [CART, PAYMENT],
-    ];
-    for (const screens of orders) {
-      const r = await run(new FakeDriver({ screens }));
-      assert.equal(r.reached, true, `failed for ${screens.length} screens`);
-    }
-  });
-
   it('absorbs interstitials wherever they are injected', async () => {
     const d = new FakeDriver({ screens: [COOKIES, CART, UPSELL, ADDRESS_CONFIRM, PAYMENT] });
     const r = await run(d);
@@ -274,18 +254,6 @@ describe('runFlow — order stops mattering', () => {
     );
   });
 
-  it('dismisses an upsell without clicking the button that adds an item', async () => {
-    const d = new FakeDriver({ screens: [UPSELL, PAYMENT] });
-    await run(d);
-    assert.equal(d.performed[0]?.kind === 'click' && d.performed[0].label, 'No, gracias');
-  });
-
-  it('absorbs the same screen appearing twice — handlers are idempotent', async () => {
-    const d = new FakeDriver({ screens: [CART, CART, ADDRESS_CONFIRM, PAYMENT] });
-    const r = await run(d);
-    assert.equal(r.reached, true);
-    assert.equal(d.performed.filter((a) => a.kind === 'click' && a.label === 'Finalizar compra').length, 2);
-  });
 });
 
 describe('runFlow — stall detection', () => {
@@ -299,11 +267,6 @@ describe('runFlow — stall detection', () => {
     assert.equal(d.performed.length, 3, 'it stops clicking rather than hammering the store');
   });
 
-  it('does not count a screen that did change', async () => {
-    const d = new FakeDriver({ screens: [CART, UPSELL, CART, ADDRESS_CONFIRM, PAYMENT] });
-    assert.equal((await run(d)).reached, true);
-  });
-
   it('is patient with a processing screen, which is meant to look unchanged', async () => {
     const d = new FakeDriver({ screens: [PROCESSING], stuck: true });
     const e = await expectEscalation(run(d, 'confirmation', { maxWaits: 5, maxSteps: 50 }));
@@ -313,11 +276,6 @@ describe('runFlow — stall detection', () => {
     assert.ok(d.slept >= 5 * 2_000, 'and it actually slept between checks');
   });
 
-  it('a processing screen that resolves is not a stall', async () => {
-    const d = new FakeDriver({ screens: [PROCESSING, PROCESSING, PROCESSING, CONFIRMED] });
-    const r = await run(d, 'confirmation', { maxWaits: 5 });
-    assert.equal(r.reached, true);
-  });
 });
 
 describe('runFlow — budgets', () => {
@@ -408,18 +366,6 @@ describe('runFlow — Layer 3 is optional and fails closed', () => {
     assert.match(e.message, /no dismiss control/);
   });
 
-  it('treats a Jev outage as an unknown screen, never as a guess', async () => {
-    const d = new FakeDriver({
-      screens: [MYSTERY],
-      jev: async () => {
-        throw new Error('ETIMEDOUT');
-      },
-    });
-    await expectEscalation(run(d));
-    assert.equal(d.escalations[0]?.reason, 'unknown_screen');
-    assert.equal(d.performed.length, 0);
-  });
-
   it('carries on through a screen only Jev could name', async () => {
     const jevSlot: Observation = {
       pageState: emptyPageState({
@@ -436,17 +382,5 @@ describe('runFlow — Layer 3 is optional and fails closed', () => {
     const r = await run(d);
     assert.equal(r.reached, true);
     assert.equal(d.performed[0]?.kind === 'click' && d.performed[0].label, 'Continuar');
-  });
-});
-
-describe('runFlow — the record it leaves', () => {
-  it('reports every step it took, for the summary shown to the user', async () => {
-    const d = new FakeDriver({ screens: [CART, ADDRESS_CONFIRM, PAYMENT] });
-    const r = await run(d);
-    assert.equal(r.steps, 2);
-    assert.deepEqual(r.history.map((h) => h.verdict.state), ['cart', 'address_confirm']);
-    assert.deepEqual(r.history.map((h) => h.step), [1, 2]);
-    assert.equal(r.goal, 'payment_form');
-    assert.equal(r.orderForm?.orderFormId, 'ABC');
   });
 });

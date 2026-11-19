@@ -11,28 +11,20 @@ import {
 const now = 1_760_000_000_000;
 
 describe('faucetVerdict', () => {
-  it('funds an empty wallet', () => {
-    const v = faucetVerdict({ balanceUnits: 0n, now });
-    assert.deepEqual(v, { allow: true, amount: GRANT_UNITS });
-  });
-
-  it('stops once the wallet clearly has enough', () => {
-    const v = faucetVerdict({ balanceUnits: ENOUGH_UNITS, now });
-    assert.equal(v.allow, false);
-    assert.match(v.allow === false ? v.reason : '', /suficiente/);
-  });
-
-  it('still funds a wallet that is merely low', () => {
+  it('funds an empty or low wallet and stops once it clearly has enough', () => {
+    const empty = faucetVerdict({ balanceUnits: 0n, now });
+    assert.deepEqual(empty, { allow: true, amount: GRANT_UNITS });
     assert.equal(faucetVerdict({ balanceUnits: ENOUGH_UNITS - 1n, now }).allow, true);
+    const enough = faucetVerdict({ balanceUnits: ENOUGH_UNITS, now });
+    assert.equal(enough.allow, false);
+    assert.match(enough.allow === false ? enough.reason : '', /suficiente/);
+    assert.ok(GRANT_UNITS < ENOUGH_UNITS, 'one grant should not cross the enough line');
   });
 
-  it('holds a second request inside the cooldown, and says for how long', () => {
-    const v = faucetVerdict({ balanceUnits: 0n, lastGrantAt: now - 10_000, now });
-    assert.equal(v.allow, false);
-    assert.equal(v.allow === false ? v.retryInMs : -1, COOLDOWN_MS - 10_000);
-  });
-
-  it('lets the next one through once the cooldown has passed', () => {
+  it('holds a second request inside the cooldown and lets the next through once it has passed', () => {
+    const held = faucetVerdict({ balanceUnits: 0n, lastGrantAt: now - 10_000, now });
+    assert.equal(held.allow, false);
+    assert.equal(held.allow === false ? held.retryInMs : -1, COOLDOWN_MS - 10_000);
     assert.equal(faucetVerdict({ balanceUnits: 0n, lastGrantAt: now - COOLDOWN_MS, now }).allow, true);
   });
 
@@ -42,9 +34,5 @@ describe('faucetVerdict', () => {
     const v = faucetVerdict({ balanceUnits: 0n, lastGrantAt: now + 5_000, now });
     assert.equal(v.allow, false);
     assert.equal(v.allow === false ? v.retryInMs : -1, COOLDOWN_MS);
-  });
-
-  it('grants less than it takes to be worth farming', () => {
-    assert.ok(GRANT_UNITS < ENOUGH_UNITS, 'one grant should not cross the enough line');
   });
 });
