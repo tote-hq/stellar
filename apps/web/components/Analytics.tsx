@@ -26,10 +26,7 @@ export function Analytics({ initialLang }: { initialLang: Lang }) {
     const apply = () => {
       const choice = readConsent(document.cookie);
       setGranted(choice === 'granted');
-      if (choice === 'granted') {
-        initPostHog();
-        grantPostHog();
-      } else if (choice === 'denied') denyPostHog();
+      applyPostHogConsent(choice);
     };
     apply();
     const stopConsent = subscribeConsent(apply);
