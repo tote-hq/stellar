@@ -187,11 +187,13 @@ Read this before the demo, not after it.
 Live since **2026-09-21**. `deployments.json` is the single source of truth for
 contract ids, and `stellar.test.ts` compares it against the ids baked into the
 generated bindings — so a redeploy that half-lands fails the suite rather than
-the demo.
+the demo. The previous deploy `CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX` is retired.
+The ledger entries in [Verified on testnet](#verified-on-testnet) are from that
+deploy.
 
 | | |
 |---|---|
-| **escrow** *(mintable `mock_usdc`)* | [`CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX`](https://stellar.expert/explorer/testnet/contract/CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX) |
+| **escrow** *(mintable `mock_usdc`)* | [`CA4BDF4U65OHCO6AB4KRJWBRZ4BJBZURDFNFKJDEZAKQRCUNJZFLN72S`](https://stellar.expert/explorer/testnet/contract/CA4BDF4U65OHCO6AB4KRJWBRZ4BJBZURDFNFKJDEZAKQRCUNJZFLN72S) |
 | **demo USDC** — SEP-41 faucet + escrow token, `USDC`, 7 decimals | [`CAOPLEE4NVOVEBYRO7NHG5K4FEML5O5C5AATYBK4FCDLYRAJFZWBNN3E`](https://stellar.expert/explorer/testnet/contract/CAOPLEE4NVOVEBYRO7NHG5K4FEML5O5C5AATYBK4FCDLYRAJFZWBNN3E) |
 | **classic deposit issuer** — memo-rail USDC only, not the escrow token | [`GCGV3225QTJFJ32KTPJNOR5SYANP4QWNUGKKGKVK7ILMK4QACZHJTGJB`](https://stellar.expert/explorer/testnet/account/GCGV3225QTJFJ32KTPJNOR5SYANP4QWNUGKKGKVK7ILMK4QACZHJTGJB) |
 | **resolver** — escrow resolver | [`GBXBAOFWG4Y4ZQEDXH73BACYYCE7ODSKXHLXYVRPLJOYFRDCPWHGYGN5`](https://stellar.expert/explorer/testnet/account/GBXBAOFWG4Y4ZQEDXH73BACYYCE7ODSKXHLXYVRPLJOYFRDCPWHGYGN5) |
@@ -208,7 +210,7 @@ not have to take that from a README — ask the contract:
 
 ```bash
 stellar contract invoke --network testnet \
-  --id CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX \
+  --id CA4BDF4U65OHCO6AB4KRJWBRZ4BJBZURDFNFKJDEZAKQRCUNJZFLN72S \
   --source-account GBXBAOFWG4Y4ZQEDXH73BACYYCE7ODSKXHLXYVRPLJOYFRDCPWHGYGN5 \
   --send=no -- config
 ```

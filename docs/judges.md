@@ -21,7 +21,7 @@ automated is stated by us, before you find it.
 | **Built by** | [SimonethG](https://www.linkedin.com/in/simonethg/) and [Fabio](https://www.linkedin.com/in/fabio-laura-yavi/), in Argentina |
 | **Networks** | Stellar **testnet** (preview, and the deployed contracts) and **mainnet** (production, real USDC) |
 | **What is on-chain** | a classic USDC payment with a memo, confirmed by reading Horizon. No contract sits on the money rail, and the deployment holds no signing key on mainnet |
-| **Contracts** | escrow [`CCA3ES6A…JG7EX`](https://stellar.expert/explorer/testnet/contract/CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX) *(testnet, mintable `mock_usdc`, mounted on the login-network checkout)* · mintable USDC [`CAOPLEE4…BNN3E`](https://stellar.expert/explorer/testnet/contract/CAOPLEE4NVOVEBYRO7NHG5K4FEML5O5C5AATYBK4FCDLYRAJFZWBNN3E) |
+| **Contracts** | escrow [`CA4BDF4U…N72S`](https://stellar.expert/explorer/testnet/contract/CA4BDF4U65OHCO6AB4KRJWBRZ4BJBZURDFNFKJDEZAKQRCUNJZFLN72S) *(testnet, mintable `mock_usdc`, mounted on the login-network checkout; the previous deploy `CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX` is retired)* · mintable USDC [`CAOPLEE4…BNN3E`](https://stellar.expert/explorer/testnet/contract/CAOPLEE4NVOVEBYRO7NHG5K4FEML5O5C5AATYBK4FCDLYRAJFZWBNN3E) |
 | **SEPs used** | SEP-53 (signed messages, for identity), SEP-41 (the token interface), SEP-7 (the receive URI) |
 | **Wallet** | Pollar (`@pollar/react` 0.11.3) — email or Google login, so a shopper needs no prior wallet |
 | **Tests** | `npm test` → 603 · `npm run contracts:test` → 34. Neither needs an API key |
@@ -90,7 +90,7 @@ the source.
 
 ```bash
 stellar contract invoke --network testnet \
-  --id CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX \
+  --id CA4BDF4U65OHCO6AB4KRJWBRZ4BJBZURDFNFKJDEZAKQRCUNJZFLN72S \
   --source-account GBXBAOFWG4Y4ZQEDXH73BACYYCE7ODSKXHLXYVRPLJOYFRDCPWHGYGN5 \
   --send=no -- config
 ```
@@ -99,7 +99,7 @@ The deployed wasm's own interface, rather than a copy of the source:
 
 ```bash
 stellar contract info interface --network testnet \
-  --id CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX
+  --id CA4BDF4U65OHCO6AB4KRJWBRZ4BJBZURDFNFKJDEZAKQRCUNJZFLN72S
 ```
 
 Re-derive the receipt hash stored by the settle linked in the README:

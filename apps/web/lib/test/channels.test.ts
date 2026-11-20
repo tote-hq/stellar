@@ -87,16 +87,20 @@ function deps(over: Partial<ChannelsDeps> = {}): ChannelsDeps {
 }
 
 describe('channels open', () => {
-  it('targets the runtime escrow, not the recorded one', () => {
+  it('targets the runtime escrow and rejects a different contract', () => {
     process.env.STELLAR_ESCROW_ID = ESCROW;
     const parsed = xdr.HostFunction.fromXDR(buildOpenFuncForBuyer(input(), BUYER), 'base64');
     if (parsed.type !== 'hostFunctionTypeInvokeContract') throw new Error('not an invoke');
     const contract = Address.fromScAddress(parsed.invokeContract.contractAddress).toString();
     assert.equal(contract, ESCROW);
-    assert.notEqual(contract, DEPLOYMENTS.testnet.escrowId);
+    // The recorded default is the live escrow, so this open is that contract.
+    assert.equal(contract, DEPLOYMENTS.testnet.escrowId);
     assert.equal(String(parsed.invokeContract.functionName), 'open');
     assert.throws(
-      () => buildOpenFuncForBuyer(input({ contractId: DEPLOYMENTS.testnet.escrowId }), BUYER),
+      () => buildOpenFuncForBuyer(
+        input({ contractId: 'CDBGEMWESQJNEGBJ46TMPXNI5KFZN5B23W6ACO6NZFQATWWYY2WW3HDF' }),
+        BUYER,
+      ),
       (err: unknown) => err instanceof ChannelsFailure && err.status === 400,
     );
   });
