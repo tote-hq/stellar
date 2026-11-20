@@ -135,9 +135,13 @@ export function initOptions(): PostHogInitOptions {
     disable_session_recording: true,
     persistence: 'localStorage+cookie',
     disable_surveys: true,
+    // `.ph-mask`, not `*`. A star matches body, and this recorder never
+    // applies maskTextFn, so a child class cannot unmask. Omitting the
+    // selector would fall through to the project setting, which may still
+    // be `*`. Sensitive roots use `ph-no-capture` or `ph-mask`.
     session_recording: {
       maskAllInputs: true,
-      maskTextSelector: '*',
+      maskTextSelector: '.ph-mask',
       blockSelector: '.ph-no-capture',
     },
   };

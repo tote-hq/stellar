@@ -56,8 +56,8 @@ const ES: PrivacyCopy = {
       heading: 'Medición y grabación',
       paragraphs: [
         'El aviso de la primera visita dice «Usamos cookies para mejorar la app.» y ofrece Aceptar, Rechazar y Más info. La elección queda en chg_consent. Antes de Aceptar, y después de Rechazar, no se envía nada.',
-        'Si aceptás, el navegador carga Google Analytics 4, Meta Pixel, Microsoft Clarity y PostHog. PostHog puede grabar la sesión: los campos y el texto van enmascarados, y no entra en la grabación el pago, el modal de pago, la conversación, la billetera ni el iframe de la tienda. PostHog está en Estados Unidos. La cookie de sesión no se reenvía.',
-        'Si entraste con una billetera, PostHog recibe un identificador al azar, no tu dirección. El cliente también descarta el email, el DNI, los montos, los mensajes y otros campos que identificarían un pedido.',
+        'Si aceptás, el navegador carga Google Analytics 4, Meta Pixel, Microsoft Clarity y PostHog. PostHog puede grabar la sesión. Lo que escribís en un campo queda enmascarado. No entra en la grabación el pago, el modal de pago, la billetera ni el iframe de la tienda. Después de Aceptar, la grabación puede mostrar los mensajes del chat y el texto de productos y del carrito en pantalla (nombres, precios y cantidades), incluido un código postal que ya escribiste en un mensaje. PostHog está en Estados Unidos. La cookie de sesión no se reenvía.',
+        'Si entraste con una billetera, PostHog recibe un identificador al azar, no tu dirección. En los eventos, y no en la grabación, el cliente descarta el email, el DNI, los montos, el texto de los mensajes y otros campos que identificarían un pedido.',
       ],
     },
     {
@@ -109,8 +109,8 @@ const EN: PrivacyCopy = {
       heading: 'Measurement and recording',
       paragraphs: [
         'The first-visit notice says “We use cookies to improve the app.” and offers Accept, Decline and Learn more. The choice is stored in chg_consent. Nothing is sent before Accept, or after Decline.',
-        'If you accept, the browser loads Google Analytics 4, Meta Pixel, Microsoft Clarity and PostHog. PostHog can record the session: inputs and text are masked, and the recording leaves out checkout, the payment modal, the conversation, the wallet and the store iframe. PostHog is in the United States. The session cookie is not forwarded.',
-        'If you signed in with a wallet, PostHog receives a random identifier, not your address. The client also drops email, DNI, amounts, messages and other fields that would identify an order.',
+        'If you accept, the browser loads Google Analytics 4, Meta Pixel, Microsoft Clarity and PostHog. PostHog can record the session. What you type into a field stays masked. The recording leaves out checkout, the payment modal, the wallet and the store iframe. After Accept, the recording can show chat messages and the product and cart text on screen (names, prices and quantities), including a postal code already written in a message. PostHog is in the United States. The session cookie is not forwarded.',
+        'If you signed in with a wallet, PostHog receives a random identifier, not your address. On events, and not in the recording, the client drops email, DNI, amounts, message text and other fields that would identify an order.',
       ],
     },
     {
