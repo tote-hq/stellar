@@ -102,7 +102,7 @@ describe('posthog client', { concurrency: 1 }, () => {
     const recording = options?.session_recording;
     assert.ok(recording);
     assert.equal(recording.maskAllInputs, true);
-    assert.equal(recording.maskTextSelector, '*');
+    assert.equal(recording.maskTextSelector, '.ph-mask');
     assert.equal(recording.blockSelector, '.ph-no-capture');
 
     identifyWallet(ADDRESS);

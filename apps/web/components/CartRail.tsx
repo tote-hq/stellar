@@ -70,7 +70,9 @@ function RailReceipt({ receipt }: { receipt: Receipt }) {
   const lang = useLang();
   const copy = uiCopy(lang).rail;
   return (
-    <>
+    // One element, so the paid amount and the order id are both omitted.
+    // display: contents keeps these rows in the panel's flex layout.
+    <div className="ph-no-capture" data-testid="rail-receipt" style={{ display: 'contents' }}>
       <p className="rail-cart-paid" data-testid="receipt-paid">
         <span className="rail-chip rail-chip-paid">{copy.paid}</span>
         <time dateTime={new Date(receipt.paidAt).toISOString()}>{paidOn(receipt.paidAt, lang)}</time>
@@ -93,7 +95,7 @@ function RailReceipt({ receipt }: { receipt: Receipt }) {
         </div>
         <p className="rail-cart-ref">{copy.ref(receipt.paidDisplay, receipt.orderId)}</p>
       </footer>
-    </>
+    </div>
   );
 }
 

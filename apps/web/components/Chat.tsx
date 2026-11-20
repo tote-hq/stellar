@@ -438,7 +438,7 @@ function ChatCore({
     <div className={state.blocks.length === 0 ? 'chat is-empty' : 'chat'}>
       <div
         ref={thread}
-        className="thread ph-no-capture"
+        className="thread"
         data-testid="chat-thread"
         role="log"
         aria-live="polite"
@@ -603,6 +603,7 @@ function ChatCore({
         {photo ? (
           <div className="composer-preview">
             <img
+              className="ph-no-capture"
               src={`data:${photo.mediaType};base64,${photo.data}`}
               alt={copy.previewAlt}
               data-testid="composer-image-preview"
@@ -691,7 +692,7 @@ function ChatCore({
         ) : null}
         <input
           ref={fileRef}
-          className="composer-file"
+          className="composer-file ph-no-capture"
           type="file"
           accept="image/*"
           tabIndex={-1}
@@ -701,7 +702,7 @@ function ChatCore({
         />
         <input
           ref={cameraRef}
-          className="composer-file"
+          className="composer-file ph-no-capture"
           type="file"
           accept="image/*"
           capture="environment"
@@ -714,7 +715,7 @@ function ChatCore({
       )}
 
       {cameraOpen ? (
-        <div className="camera-sheet" role="dialog" aria-modal="true" aria-label={copy.camera} data-testid="camera-sheet">
+        <div className="camera-sheet ph-no-capture" role="dialog" aria-modal="true" aria-label={copy.camera} data-testid="camera-sheet">
           <video ref={videoRef} className="camera-sheet-video" autoPlay playsInline muted aria-label={copy.camera} />
           <div className="camera-sheet-actions">
             <button type="button" className="btn camera-sheet-btn" data-testid="composer-shutter" onClick={() => void snap()}>
@@ -767,7 +768,7 @@ export function ReceiptCard({ receipt }: { receipt: Receipt }) {
     (receipt.orderRef ? storeOrderUrl(receipt.retailer, receipt.orderRef) : null) ??
     storeOrdersUrl(receipt.retailer);
   return (
-    <section className="card receipt" data-testid="receipt" aria-label={copy.receiptAria}>
+    <section className="card receipt ph-no-capture" data-testid="receipt" aria-label={copy.receiptAria}>
       <header className="receipt-head">
         <strong>{copy.receiptTitle}</strong>
         <time dateTime={new Date(receipt.paidAt).toISOString()}>{paidOn(receipt.paidAt, lang)}</time>
@@ -843,7 +844,7 @@ export function UserBubble({
     <div className="msg-user">
       {block.image ? (
         <img
-          className="bubble-photo"
+          className="bubble-photo ph-no-capture"
           data-testid="user-photo"
           alt={copy.photoAlt}
           src={`data:${block.image.mediaType};base64,${block.image.data}`}
