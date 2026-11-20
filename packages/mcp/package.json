@@ -62,6 +62,10 @@
     "./fx": {
       "types": "./dist/pay/fx.d.ts",
       "import": "./dist/pay/fx.js"
+    },
+    "./compare": {
+      "types": "./dist/catalog/compare.d.ts",
+      "import": "./dist/catalog/compare.js"
     }
   },
   "files": [

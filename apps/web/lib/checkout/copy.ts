@@ -12,6 +12,19 @@ export interface EscrowCopy {
   totalLabel: string;
   rateLabel: string;
   lockLabel: string;
+  compareCta: string;
+  comparing: string;
+  compareTitle: string;
+  compareDiaLabel: string;
+  compareOtherLabel: string;
+  compareSavingsLabel: string;
+  compareFeeLabel: string;
+  compareLockLabel: string;
+  compareLockNote: string;
+  compareExcludedTitle: string;
+  compareExcludedSimilar: string;
+  compareExcludedNone: string;
+  compareExcludedUnavailable: string;
   rateNote: (source: string) => string;
   diaTitle: string;
   diaLead: string;
@@ -80,6 +93,19 @@ const ES: EscrowCopy = {
   totalLabel: 'Total en Día',
   rateLabel: 'Cotización',
   lockLabel: 'Se bloquean',
+  compareCta: 'Comparar con Coto',
+  comparing: 'Comparando con Coto…',
+  compareTitle: 'Los mismos productos en Coto',
+  compareDiaLabel: 'Productos iguales en Día',
+  compareOtherLabel: 'Los mismos en Coto',
+  compareSavingsLabel: 'Diferencia',
+  compareFeeLabel: 'Comisión (20%)',
+  compareLockLabel: 'A bloquear (Día + envío + comisión)',
+  compareLockNote: 'Pagás el changuito de Día más el envío más el 20% de la diferencia, aunque Coto esté más barato. Coto no se compra.',
+  compareExcludedTitle: 'No entran en la cuenta',
+  compareExcludedSimilar: 'Parecido, no cuenta',
+  compareExcludedNone: 'Sin equivalente',
+  compareExcludedUnavailable: 'Sin stock en Coto',
   rateNote: (source) => `Cotización ${source} del momento. El envío es el que cobra Día a tu código postal.`,
   diaTitle: 'Tu cuenta de Día',
   diaLead:
@@ -161,6 +187,19 @@ const EN: EscrowCopy = {
   totalLabel: 'Total at Día',
   rateLabel: 'Rate',
   lockLabel: 'To lock',
+  compareCta: 'Compare with Coto',
+  comparing: 'Comparing with Coto…',
+  compareTitle: 'The same products at Coto',
+  compareDiaLabel: 'Matched products at Día',
+  compareOtherLabel: 'The same products at Coto',
+  compareSavingsLabel: 'Difference',
+  compareFeeLabel: 'Fee (20%)',
+  compareLockLabel: 'To lock (Día + delivery + fee)',
+  compareLockNote: 'You pay the Día basket plus delivery plus 20% of the difference, even when Coto is cheaper. Coto is not bought.',
+  compareExcludedTitle: 'Not counted',
+  compareExcludedSimilar: 'Similar, not counted',
+  compareExcludedNone: 'No match',
+  compareExcludedUnavailable: 'Out of stock at Coto',
   rateNote: (source) => `Live ${source} rate. Delivery is what Día charges to your postal code.`,
   diaTitle: 'Your Día account',
   diaLead:

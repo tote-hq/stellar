@@ -7,7 +7,8 @@ import type { Cart, LocationContext } from '@changuito/mcp/types';
 import { lockFailureCode, refundFailureCode } from '../lib/funnel';
 import { track } from '../lib/analytics';
 import type { Receipt } from '../lib/chat-store.ts';
-import { escrowCopy } from '../lib/checkout/copy.ts';
+import { countsTowardFee, type ComparisonRow } from '../lib/checkout/compare-fee.ts';
+import { escrowCopy, type EscrowCopy } from '../lib/checkout/copy.ts';
 import type { QuoteResponse, StatusResponse } from '../lib/checkout/types.ts';
 import { OpenConfirmationPending, recoverOpen, submitOpen, type OpenSubmission } from '../lib/checkout/open-submission.ts';
 import type { PublicProfile } from '../lib/profile.ts';
@@ -85,6 +86,12 @@ interface DiaLogin {
 
 const EMPTY_LOGIN: DiaLogin = { email: '', password: '', dni: '', street: '', number: '', phone: '' };
 
+function excludedReason(row: ComparisonRow, copy: EscrowCopy): string {
+  if (row.confidence === 'brand_size_unit') return copy.compareExcludedSimilar;
+  if (row.confidence === 'ean' && row.coto && !row.coto.available) return copy.compareExcludedUnavailable;
+  return copy.compareExcludedNone;
+}
+
 function loginReady(d: DiaLogin): boolean {
   return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(d.email.trim()) && d.password.length > 0 && /^\d{7,9}$/.test(d.dni.replace(/\D/g, ''));
 }
@@ -113,7 +120,9 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
   const [editing, setEditing] = useState(false);
   const [savingDia, setSavingDia] = useState(false);
   const [nativeBusy, setNativeBusy] = useState(false);
+  const [comparing, setComparing] = useState(false);
   const quoting = useRef(false);
+  const stepRef = useRef<Step>('login');
   const alerted = useRef<string | null>(null);
   const field = (k: keyof DiaLogin) => (e: ChangeEvent<HTMLInputElement>) => setDia((d) => ({ ...d, [k]: e.target.value }));
 
@@ -149,6 +158,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
     })();
   }, [wallet.ready, wallet.address, wallet.accessToken, quote, cart, location, handoffUrl, copy.failed]);
 
+  stepRef.current = step;
   const short = Boolean(quote && balance && BigInt(balance.usdc) < BigInt(quote.amount));
   const manual = quote?.checkoutKind === 'manual_fee_v1';
   const demo = quote?.mode === 'demo' || status?.mode === 'demo';
@@ -182,6 +192,26 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
       setSavingDia(false);
     }
   }, [dia, copy.diaMissing, copy.failed]);
+
+  const compareWithCoto = useCallback(async () => {
+    if (!wallet.address || cart.retailer !== 'dia') return;
+    setComparing(true);
+    setError(null);
+    try {
+      const res = await fetchAs({ address: wallet.address, sign: wallet.accessToken }, '/api/checkout/quote', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ cart, handoffUrl, location, compare: true }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error ?? copy.failed);
+      if (stepRef.current === 'review') setQuote(body as QuoteResponse);
+    } catch (e) {
+      setError(e instanceof Error && e.message ? e.message : copy.failed);
+    } finally {
+      setComparing(false);
+    }
+  }, [cart, copy.failed, handoffUrl, location, wallet.accessToken, wallet.address]);
 
   const faucet = useCallback(async () => {
     setFunding(true);
@@ -484,7 +514,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
                   <dd data-testid="checkout-rate">{pesos(Math.round(quote.arsPerUsd * 100))} / USDC</dd>
                 </div>
                 <div className="ck-total-line ck-total-sum">
-                  <dt>{copy.lockLabel}</dt>
+                  <dt>{quote.comparison ? copy.compareLockLabel : copy.lockLabel}</dt>
                   <dd data-testid="checkout-amount">{quote.amountDisplay} USDC</dd>
                 </div>
                 {balance ? (
@@ -494,6 +524,57 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
                   </div>
                 ) : null}
               </dl>
+              {quote.comparison ? (
+                <section className="ck-compare" data-testid="checkout-comparison" aria-labelledby="checkout-compare-title">
+                  <h3 id="checkout-compare-title" className="ck-title">{copy.compareTitle}</h3>
+                  <dl className="ck-totals">
+                    <div className="ck-total-line">
+                      <dt>{copy.compareDiaLabel}</dt>
+                      <dd data-testid="checkout-compare-dia">{pesos(quote.comparison.diaSubtotalCentavos)}</dd>
+                    </div>
+                    <div className="ck-total-line">
+                      <dt>{copy.compareOtherLabel}</dt>
+                      <dd data-testid="checkout-compare-coto">{pesos(quote.comparison.otherSubtotalCentavos)}</dd>
+                    </div>
+                    <div className="ck-total-line">
+                      <dt>{copy.compareSavingsLabel}</dt>
+                      <dd data-testid="checkout-compare-savings">{pesos(quote.comparison.savingsCentavos)}</dd>
+                    </div>
+                    <div className="ck-total-line">
+                      <dt>{copy.compareFeeLabel}</dt>
+                      <dd data-testid="checkout-compare-fee">
+                        {pesos(quote.comparison.feeCentavos)} ({(quote.comparison.feeUsdCents / 100).toFixed(2)} USDC)
+                      </dd>
+                    </div>
+                  </dl>
+                  <p className="ck-note" data-testid="checkout-compare-note">{copy.compareLockNote}</p>
+                  {quote.comparison.rows.some((row) => !countsTowardFee(row)) ? (
+                    <>
+                      <h4 className="ck-title">{copy.compareExcludedTitle}</h4>
+                      <ul className="ck-uncounted" data-testid="checkout-compare-excluded">
+                        {quote.comparison.rows.filter((row) => !countsTowardFee(row)).map((row) => (
+                          <li key={row.skuId}>
+                            {row.name}
+                            {row.coto ? ` · ${row.coto.name}` : ''}
+                            {` — ${excludedReason(row, copy)}`}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                </section>
+              ) : cart.retailer === 'dia' ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  data-testid="checkout-compare"
+                  aria-busy={comparing}
+                  disabled={comparing || step === 'locking'}
+                  onClick={() => void compareWithCoto()}
+                >
+                  {comparing ? copy.comparing : copy.compareCta}
+                </button>
+              ) : null}
               <p className="ck-note">{manual ? (lang === 'en' ? 'DIA charges groceries and delivery separately in pesos. The final amount is reviewed in DIA.' : 'DIA cobra los productos y el envío aparte, en pesos. Revisá el importe final en DIA.') : copy.rateNote(quote.rateSource)}</p>
               {quote.postalSource === 'profile' && quote.chatPostalCode && quote.chatPostalCode !== quote.postalCode ? (
                 <p className="ck-note" data-testid="checkout-postal-note">
@@ -581,7 +662,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
                     className="btn"
                     data-testid="checkout-lock"
                     onClick={() => void lock()}
-                    disabled={step === 'locking' || (!pendingOpen && (short || !balance || !ready))}
+                    disabled={comparing || step === 'locking' || (!pendingOpen && (short || !balance || !ready))}
                   >
                     {step === 'locking' ? (pendingOpen ? (lang === 'en' ? 'Checking confirmation…' : 'Consultando confirmación…') : copy.locking)
                       : pendingOpen ? (lang === 'en' ? 'Check payment and resume' : 'Consultar pago y continuar')
