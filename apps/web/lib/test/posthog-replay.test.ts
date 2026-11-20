@@ -68,6 +68,18 @@ test('chat replay blocks images and the receipt, and leaves the thread readable'
   for (const tag of files) assert.match(tag, /ph-no-capture/);
 });
 
+test('the paid rail receipt is blocked and the live basket lines are not', () => {
+  const rail = source('components/CartRail.tsx');
+  const receiptAt = rail.indexOf('function RailReceipt');
+  const linesAt = rail.indexOf('function RailLines');
+  assert.ok(receiptAt >= 0 && linesAt > receiptAt);
+  const receipt = rail.slice(receiptAt, rail.indexOf('function paidOn'));
+  const lines = rail.slice(linesAt);
+
+  assert.match(openingTag(receipt, 'data-testid="rail-receipt"'), /ph-no-capture/);
+  assert.equal(openingTag(lines, 'className="rail-cart-lines"').includes('ph-no-capture'), false);
+});
+
 test('wallet and checkout stay out of the recording', () => {
   for (const path of [
     'components/WalletWidget.tsx',
