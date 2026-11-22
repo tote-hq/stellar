@@ -103,11 +103,11 @@ try {
     if (key === 'manual_checkout_flow' && !['viewer', 'guided', 'headless'].includes(value)) {
       console.error('manual_checkout_flow must be viewer, guided or headless');
       process.exitCode = 2;
-      return;
+    } else {
+      await sql`insert into config (key, value) values (${key}, ${sql.json(value)})
+                on conflict (key) do update set value = excluded.value`;
+      console.log(`${key} = ${JSON.stringify(value)} on ${where(url)}${describe(key, value)}`);
     }
-    await sql`insert into config (key, value) values (${key}, ${sql.json(value)})
-              on conflict (key) do update set value = excluded.value`;
-    console.log(`${key} = ${JSON.stringify(value)} on ${where(url)}${describe(key, value)}`);
   } else {
     console.error('usage: npm run config [-- list | get <key> | set <key> <value>]');
     process.exitCode = 2;
