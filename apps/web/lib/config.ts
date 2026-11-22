@@ -1,10 +1,12 @@
 /**
  * Runtime switches from the `config` table (migration 0008), so the operator
  * can flip them without a redeploy: `npm run config -- set sandbox_mock true`.
+ * `turnstile_disabled` is the same shape (`npm run config -- set turnstile_disabled true`).
  *
  * The table is the only source. A missing row, a missing table or no
  * DATABASE_URL all read as "off", the conservative direction for every flag
- * here. `manual_checkout_flow` is the exception: anything other than
+ * here: Turnstile stays on unless `turnstile_disabled` is explicitly true.
+ * `manual_checkout_flow` is the exception: anything other than
  * `guided` or `headless` reads as `viewer`, which is today's remote browser.
  * Reads are cached for 15 seconds per instance, so a flip takes effect
  * within that on every lambda.
@@ -60,4 +62,13 @@ export interface SandboxFlags {
 export async function sandboxFlags(): Promise<SandboxFlags> {
   const values = await getConfig();
   return { mock: flagOn(values, 'sandbox_mock'), mockFail: flagOn(values, 'sandbox_mock_fail') };
+}
+
+/**
+ * `turnstile_disabled` in the config table. JSON `true` or the string `"true"`
+ * skips the Turnstile widget and the human-token check. A missing row, false,
+ * or an unread database leaves the gate on whatever the Turnstile env keys say.
+ */
+export async function turnstileDisabled(): Promise<boolean> {
+  return flagOn(await getConfig(), 'turnstile_disabled');
 }

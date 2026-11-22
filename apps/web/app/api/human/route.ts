@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 import {
   humanCookieOptions,
-  humanGateMode,
+  resolveHumanGateMode,
   HUMAN_COOKIE,
   mintHumanToken,
   readCookie,
@@ -43,7 +43,7 @@ function withHumanCookie(body: unknown, token: string, status = 200): NextRespon
 
 /** GET — is the current cookie valid? Always includes the public site key when we have one. */
 export async function GET(req: Request): Promise<Response> {
-  const mode = humanGateMode();
+  const mode = await resolveHumanGateMode();
   const siteKey = turnstileSiteKey();
   if (mode === 'open') {
     return json({ ok: true, mode: 'open', siteKey });
@@ -63,7 +63,7 @@ export async function GET(req: Request): Promise<Response> {
 
 /** POST { token } — verify Turnstile and set httpOnly human cookie. */
 export async function POST(req: Request): Promise<Response> {
-  const mode = humanGateMode();
+  const mode = await resolveHumanGateMode();
   if (mode === 'open') {
     const secret = turnstileSecret() || 'dev-only-not-for-prod';
     const minted = await mintHumanToken(secret);

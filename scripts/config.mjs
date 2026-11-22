@@ -5,6 +5,7 @@
  *   npm run config -- get sandbox_mock
  *   npm run config -- set sandbox_mock true
  *   npm run config -- set sandbox_mock_fail false
+ *   npm run config -- set turnstile_disabled true
  *   npm run config -- set manual_checkout_flow guided
  *
  * Connects like scripts/db.mjs: the web app's env file loaded the way Next
@@ -37,6 +38,10 @@ const KNOWN = {
     on
       ? 'any wallet that is not banned can use the faucet'
       : 'the faucet answers only for a wallet row with faucet_allowed',
+  turnstile_disabled: (on) =>
+    on
+      ? 'Cloudflare Turnstile is off: no widget, and APIs do not require a human token'
+      : 'Turnstile follows the env keys (enforce, closed, or open)',
 };
 
 /** String keys. Anything other than the listed values reads as the default. */

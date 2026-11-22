@@ -4,8 +4,8 @@ import {
   AI_BOT_UA,
   hasBrowserFetchHints,
   HUMAN_COOKIE,
-  humanGateMode,
   readCookie,
+  resolveHumanGateMode,
   turnstileSecret,
   verifyHumanToken,
 } from './lib/human-gate';
@@ -35,7 +35,7 @@ export async function middleware(req: NextRequest) {
     }
 
     // Early cookie check when enforcing (route handlers re-check).
-    const mode = humanGateMode(process.env);
+    const mode = await resolveHumanGateMode(process.env);
     if (mode === 'closed') {
       return humansOnly('Changuito es solo para personas. Completá la verificación.');
     }
