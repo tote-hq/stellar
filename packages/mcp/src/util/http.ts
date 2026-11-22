@@ -44,20 +44,19 @@ function limiterFor(host: string): RateLimiter {
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Workers' own fetch stamps CF-Worker on the way out. Node's does not. */
-function onWorkers(): boolean {
-  return typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers';
-}
-
 function isJsonBody(text: string): boolean {
   const head = text.trimStart()[0];
   return head === '{' || head === '[';
 }
 
 /**
- * Read a store response. On a Worker, a block page (or a failed fetch) is
- * tried again over a TLS socket that does not carry the Worker headers.
- * Anywhere else the socket module is never loaded.
+ * Read a store response. When Workers `fetch` returns a block page (or fails),
+ * retry over a TLS socket that does not carry CF-Worker headers.
+ *
+ * Do not gate the socket path on `navigator.userAgent`: under `nodejs_compat` /
+ * vinext that check can be false on a real Worker, and Coto/Constructor then
+ * keep the HTML challenge while Día JSON happens to succeed via fetch.
+ * On Node, `cloudflare:sockets` is missing and the catch falls back.
  */
 async function exchange(
   url: string,
@@ -75,12 +74,14 @@ async function exchange(
     fetchErr = e;
   }
   if (fetched && isJsonBody(fetched.text)) return fetched;
-  if (!onWorkers()) {
+  try {
+    const { socketExchange } = await import('./http-socket.js');
+    return await socketExchange(url, { method, headers, body });
+  } catch (socketErr) {
     if (fetchErr) throw fetchErr;
-    return fetched as { status: number; text: string; headers: Headers };
+    if (fetched) return fetched;
+    throw socketErr;
   }
-  const { socketExchange } = await import('./http-socket.js');
-  return socketExchange(url, { method, headers, body });
 }
 
 export async function request<T>(url: string, opts: HttpOptions = {}): Promise<T> {

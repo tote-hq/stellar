@@ -102,11 +102,6 @@ function isTimeout(e: unknown): boolean {
   return e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
 }
 
-/** Same check as packages/mcp/src/util/http.ts — Workers stamp CF-Worker on fetch. */
-function onWorkers(): boolean {
-  return typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers';
-}
-
 /** Network failures stay generic so a URL that carries the key cannot leak. */
 function networkFailure(e: unknown): RetailerError {
   if (e instanceof RetailerError) return e;
@@ -145,9 +140,9 @@ export function constructorKeyFromEnv(
 }
 
 /**
- * GET for Coto. On a Worker, a blocked fetch (HTML challenge instead of JSON,
- * or a shell without the main bundle) is retried over a TLS socket that does
- * not carry CF-Worker — same shape as the VTEX adapter in util/http.ts.
+ * GET for Coto. When fetch returns a challenge / empty body, retry over a TLS
+ * socket without CF-Worker headers (same idea as util/http.ts). Not gated on
+ * `navigator.userAgent` — that check can miss under vinext `nodejs_compat`.
  */
 async function pacedGet(url: string, accept: string): Promise<{ status: number; text: string }> {
   return paced(async () => {
@@ -169,18 +164,14 @@ async function pacedGet(url: string, accept: string): Promise<{ status: number; 
     }
 
     if (fetched && cotoBodyUsable(fetched.text, accept)) return fetched;
-    if (!onWorkers()) {
-      if (fetchErr) throw networkFailure(fetchErr);
-      if (fetched) return fetched;
-      throw networkFailure(new Error('empty response'));
-    }
-
     try {
       const { socketExchange } = await import('../util/http-socket.js');
       const via = await socketExchange(url, { method: 'GET', headers });
       return { status: via.status, text: via.text };
     } catch (e) {
-      throw networkFailure(fetchErr ?? e);
+      if (fetchErr) throw networkFailure(fetchErr);
+      if (fetched) return fetched;
+      throw networkFailure(e);
     }
   });
 }
