@@ -164,11 +164,12 @@ export async function POST(req: Request): Promise<Response> {
       };
     } catch (err) {
       // Message and RetailerError.code only — never the Constructor URL (it carries the key).
+      // error level so Workers Observability keeps the line (warn was empty in prod queries).
       const name = err instanceof Error ? err.name : 'error';
       const code =
         err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn('[checkout] compare failed', name, code, msg);
+      console.error('[checkout] compare failed', name, code, msg);
       return Response.json(
         { error: 'No pudimos cotizar la comparación con Coto. Podés pagar el changuito de Día igual.' },
         { status: 503 },

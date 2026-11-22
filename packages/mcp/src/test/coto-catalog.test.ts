@@ -331,7 +331,7 @@ describe('cotoBodyUsable', () => {
 
 describe('constructorKeyFromEnv', () => {
   it('accepts only a public key_… value', () => {
-    assert.equal(constructorKeyFromEnv({ COTO_CONSTRUCTOR_KEY: 'key_r6xzz4IAoTWcipni' }), 'key_r6xzz4IAoTWcipni');
+    assert.equal(constructorKeyFromEnv({ COTO_CONSTRUCTOR_KEY: 'key_testFallback01' }), 'key_testFallback01');
     assert.equal(constructorKeyFromEnv({ COTO_CONSTRUCTOR_KEY: '  key_abc  ' }), 'key_abc');
     assert.equal(constructorKeyFromEnv({ COTO_CONSTRUCTOR_KEY: 'not-a-key' }), undefined);
     assert.equal(constructorKeyFromEnv({}), undefined);
