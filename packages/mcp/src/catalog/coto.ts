@@ -102,6 +102,11 @@ function isTimeout(e: unknown): boolean {
   return e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
 }
 
+/** Same check as packages/mcp/src/util/http.ts — Workers stamp CF-Worker on fetch. */
+function onWorkers(): boolean {
+  return typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers';
+}
+
 /** Network failures stay generic so a URL that carries the key cannot leak. */
 function networkFailure(e: unknown): RetailerError {
   if (e instanceof RetailerError) return e;
@@ -109,16 +114,73 @@ function networkFailure(e: unknown): RetailerError {
   return new RetailerError('request failed', 'UPSTREAM');
 }
 
+/**
+ * Whether a Worker fetch body is the real Coto/Constructor payload.
+ * HTML blocks and challenge pages must fall through to the TLS socket path.
+ */
+export function cotoBodyUsable(text: string, accept: string): boolean {
+  if (accept.includes('application/json')) {
+    const head = text.trimStart()[0];
+    return head === '{' || head === '[';
+  }
+  if (accept.includes('text/html')) {
+    return /src="\/main\.[a-f0-9]+\.js"/.test(text);
+  }
+  // Storefront main bundle (*/*): real JS carries the public Constructor key.
+  if (text.includes('constructor:{apiKey:"key_')) return true;
+  const head = text.trimStart();
+  return head.length > 10_000 && head[0] !== '<';
+}
+
+/**
+ * Optional public Constructor key from the environment (`key_…`).
+ * Same value the storefront ships in `constructor.apiKey`. Never logged.
+ */
+export function constructorKeyFromEnv(
+  env: Record<string, string | undefined> = typeof process !== 'undefined' ? process.env : {},
+): string | undefined {
+  const raw = env.COTO_CONSTRUCTOR_KEY?.trim();
+  if (raw && /^key_[A-Za-z0-9]+$/.test(raw)) return raw;
+  return undefined;
+}
+
+/**
+ * GET for Coto. On a Worker, a blocked fetch (HTML challenge instead of JSON,
+ * or a shell without the main bundle) is retried over a TLS socket that does
+ * not carry CF-Worker — same shape as the VTEX adapter in util/http.ts.
+ */
 async function pacedGet(url: string, accept: string): Promise<{ status: number; text: string }> {
   return paced(async () => {
+    const headers = {
+      Accept: accept,
+      'Accept-Language': 'es-AR,es;q=0.9',
+      'User-Agent': UA,
+    };
+    let fetched: { status: number; text: string } | undefined;
+    let fetchErr: unknown;
     try {
       const res = await fetch(url, {
-        headers: { Accept: accept, 'Accept-Language': 'es-AR,es;q=0.9', 'User-Agent': UA },
+        headers,
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
-      return { status: res.status, text: await res.text() };
+      fetched = { status: res.status, text: await res.text() };
     } catch (e) {
-      throw networkFailure(e);
+      fetchErr = e;
+    }
+
+    if (fetched && cotoBodyUsable(fetched.text, accept)) return fetched;
+    if (!onWorkers()) {
+      if (fetchErr) throw networkFailure(fetchErr);
+      if (fetched) return fetched;
+      throw networkFailure(new Error('empty response'));
+    }
+
+    try {
+      const { socketExchange } = await import('../util/http-socket.js');
+      const via = await socketExchange(url, { method: 'GET', headers });
+      return { status: via.status, text: via.text };
+    } catch (e) {
+      throw networkFailure(fetchErr ?? e);
     }
   });
 }
@@ -142,11 +204,17 @@ async function fetchPublicKey(): Promise<string> {
 
 /**
  * The public index key from the storefront bundle (`constructor.apiKey`).
- * Cached for the process. No cookies, no session, and the value is not
- * returned in errors.
+ * Prefer `COTO_CONSTRUCTOR_KEY` when set so a Worker need not scrape the
+ * ~2.4MB main bundle. Cached for the process. No cookies, no session, and
+ * the value is not returned in errors.
  */
 export function discoverPublicKey(): Promise<string> {
   if (cachedKey) return Promise.resolve(cachedKey);
+  const fromEnv = constructorKeyFromEnv();
+  if (fromEnv) {
+    cachedKey = fromEnv;
+    return Promise.resolve(fromEnv);
+  }
   if (!pendingKey) {
     pendingKey = fetchPublicKey()
       .then((key) => {

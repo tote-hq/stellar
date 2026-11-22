@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { selectExact, toCatalogItem, type CatalogItem, type CotoSearchHit } from '../catalog/coto.js';
+import {
+  constructorKeyFromEnv,
+  cotoBodyUsable,
+  selectExact,
+  toCatalogItem,
+  type CatalogItem,
+  type CotoSearchHit,
+} from '../catalog/coto.js';
 import { matchDiaToCoto, pickMatch, scoreCandidate } from '../catalog/match.js';
 import { sizeFromName, sizesEqual } from '../catalog/normalize.js';
 import type { Product } from '../types.js';
@@ -296,5 +303,37 @@ describe('matchDiaToCoto', () => {
     assert.equal(calls.length, 1);
     assert.match(calls[0] ?? '', /LA SERENISIMA/);
     assert.match(calls[0] ?? '', /Leche entera/);
+  });
+});
+
+describe('cotoBodyUsable', () => {
+  it('accepts Constructor JSON and rejects an HTML block', () => {
+    assert.equal(cotoBodyUsable('{"response":{"results":[]}}', 'application/json'), true);
+    assert.equal(cotoBodyUsable('<!DOCTYPE html><html></html>', 'application/json'), false);
+  });
+
+  it('requires the storefront main bundle script in HTML', () => {
+    assert.equal(
+      cotoBodyUsable('<html><script src="/main.abc123.js"></script></html>', 'text/html'),
+      true,
+    );
+    assert.equal(cotoBodyUsable('<html><title>Just a moment</title></html>', 'text/html'), false);
+  });
+
+  it('recognizes the Constructor key inside the main JS bundle', () => {
+    assert.equal(
+      cotoBodyUsable('var x={constructor:{apiKey:"key_abc123XYZ"}}', '*/*'),
+      true,
+    );
+    assert.equal(cotoBodyUsable('<html>challenge</html>', '*/*'), false);
+  });
+});
+
+describe('constructorKeyFromEnv', () => {
+  it('accepts only a public key_… value', () => {
+    assert.equal(constructorKeyFromEnv({ COTO_CONSTRUCTOR_KEY: 'key_r6xzz4IAoTWcipni' }), 'key_r6xzz4IAoTWcipni');
+    assert.equal(constructorKeyFromEnv({ COTO_CONSTRUCTOR_KEY: '  key_abc  ' }), 'key_abc');
+    assert.equal(constructorKeyFromEnv({ COTO_CONSTRUCTOR_KEY: 'not-a-key' }), undefined);
+    assert.equal(constructorKeyFromEnv({}), undefined);
   });
 });
