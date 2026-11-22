@@ -12,8 +12,8 @@ import {
   AI_BOT_UA,
   hasBrowserFetchHints,
   HUMAN_COOKIE,
-  humanGateMode,
   readCookie,
+  resolveHumanGateMode,
   turnstileSecret,
   verifyHumanToken,
 } from './human-gate.ts';
@@ -56,7 +56,7 @@ export async function apiHumanDecision(
 
   if (path.startsWith('/api/') && path !== '/api/human') {
     if (!hasBrowserFetchHints(req)) return { kind: 'humans', message: HUMANS_ONLY };
-    const mode = humanGateMode(env);
+    const mode = await resolveHumanGateMode(env);
     if (mode === 'closed') return { kind: 'humans', message: HUMANS_VERIFY };
     if (mode === 'enforce') {
       const secret = turnstileSecret(env);

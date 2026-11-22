@@ -6,6 +6,7 @@
  * httpOnly cookie. APIs refuse without it in production.
  */
 
+import { turnstileDisabled } from './config.ts';
 import { SOLO_HUMANOS } from './human-gate-ui.ts';
 
 export { SOLO_HUMANOS, HUMAN_REQUIRED_EVENT, clientGateDecision, notifyHumanRequired } from './human-gate-ui.ts';
@@ -56,6 +57,18 @@ export function humanGateMode(env: NodeJS.ProcessEnv = process.env): GateMode {
   if (turnstileSecret(env)) return 'enforce';
   if (env.NODE_ENV === 'production') return 'closed';
   return 'open';
+}
+
+/**
+ * Env mode, unless the operator set `turnstile_disabled` in the config table.
+ * That read lives in `turnstileDisabled` (JSON true or "true"). Already-open
+ * skips the database: local dev without keys must not dial Postgres.
+ */
+export async function resolveHumanGateMode(env: NodeJS.ProcessEnv = process.env): Promise<GateMode> {
+  const mode = humanGateMode(env);
+  if (mode === 'open') return 'open';
+  if (await turnstileDisabled()) return 'open';
+  return mode;
 }
 
 export function soloHumanosResponse(status = 403): Response {
@@ -192,9 +205,11 @@ export async function verifyTurnstile(
  * Call at the top of every cost-bearing route.
  */
 export async function requireHuman(req: Request, env: NodeJS.ProcessEnv = process.env): Promise<Response | null> {
-  const mode = humanGateMode(env);
+  const mode = await resolveHumanGateMode(env);
   if (mode === 'open') {
-    if (!(globalThis as { __chgHumanWarned?: boolean }).__chgHumanWarned) {
+    // The warning is for missing keys. An operator who set turnstile_disabled
+    // already chose this, including in production.
+    if (humanGateMode(env) === 'open' && !(globalThis as { __chgHumanWarned?: boolean }).__chgHumanWarned) {
       (globalThis as { __chgHumanWarned?: boolean }).__chgHumanWarned = true;
       console.warn(
         '[changuito] human-gate OPEN (dev): set NEXT_PUBLIC_TURNSTILE_SITE_KEY + TURNSTILE_SECRET_KEY to enforce.',
