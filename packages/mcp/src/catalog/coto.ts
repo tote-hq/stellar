@@ -20,7 +20,12 @@ const SCRAPE_GAP_MS = 400;
 const SEARCH_GAP_MS = 40;
 const SEARCH_429_BACKOFF_MS = 1_000;
 const TIMEOUT_MS = 25_000;
-const PUBLIC_KEY_MARK = 'constructor:{apiKey:"key_';
+/**
+ * A complete public Constructor key, including the closing quote.
+ * `fetchPublicKey` accepts only this shape. A `key_` prefix is not enough:
+ * that prefix can land at the end of a chunk and drop the rest of the key.
+ */
+const PUBLIC_KEY_RE = /constructor:\{apiKey:"(key_[A-Za-z0-9]+)"/;
 const STOREFRONT = 'https://www.coto.com.ar';
 
 const UA =
@@ -111,9 +116,9 @@ function isConstructor(url: string): boolean {
   return url.startsWith('https://ac.cnstrc.com/');
 }
 
-/** The public key sits early in the ~2.4MB bundle. The rest can be dropped. */
+/** The complete public key sits early in the ~2.4MB bundle. The rest can be dropped. */
 export function bundleHasPublicKey(text: string): boolean {
-  return text.includes(PUBLIC_KEY_MARK);
+  return PUBLIC_KEY_RE.test(text);
 }
 
 function isTimeout(e: unknown): boolean {
@@ -158,8 +163,9 @@ export function constructorKeyFromEnv(
 }
 
 /**
- * Read a Coto response. The storefront bundle trickles; stop once the public
- * key is in hand instead of waiting for the rest of the file.
+ * Read a Coto response. The storefront bundle trickles; stop once the full
+ * public-key regex matches, or when the stream ends. A `key_` prefix at a
+ * chunk boundary is not enough.
  */
 export async function readCotoBody(res: Response, accept: string): Promise<string> {
   if (!accept.includes('*/*') || !res.body) return res.text();
@@ -244,7 +250,7 @@ async function fetchPublicKey(): Promise<string> {
   const bundle = await pacedGet(`${STOREFRONT}${main[1]}`, '*/*');
   if (bundle.status === 429) throw new RetailerError('Rate limited by the store', 'RATE_LIMITED');
   if (bundle.status !== 200) throw new RetailerError(`storefront bundle HTTP ${bundle.status}`, 'UPSTREAM');
-  const found = bundle.text.match(/constructor:\{apiKey:"(key_[A-Za-z0-9]+)"/);
+  const found = bundle.text.match(PUBLIC_KEY_RE);
   if (!found?.[1]) throw new RetailerError('storefront bundle had no public Constructor key', 'UPSTREAM');
   return found[1];
 }

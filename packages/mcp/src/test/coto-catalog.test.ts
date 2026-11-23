@@ -330,6 +330,8 @@ describe('cotoBodyUsable', () => {
     );
     assert.equal(cotoBodyUsable('<html>challenge</html>', '*/*'), false);
     assert.equal(bundleHasPublicKey('constructor:{apiKey:"key_abc"}'), true);
+    assert.equal(bundleHasPublicKey('constructor:{apiKey:"key_'), false);
+    assert.equal(cotoBodyUsable('constructor:{apiKey:"key_', '*/*'), false);
     assert.equal(bundleHasPublicKey('no key yet'), false);
   });
 
@@ -348,6 +350,29 @@ describe('cotoBodyUsable', () => {
     assert.equal(bundleHasPublicKey(text), true);
     assert.equal(text.includes('SHOULD_NOT_NEED'), false);
     assert.equal(pulls, 1);
+  });
+
+  it('keeps reading when the public key is split across two chunks', async () => {
+    let pulls = 0;
+    const res = new Response(new ReadableStream({
+      pull(controller) {
+        pulls += 1;
+        if (pulls === 1) {
+          controller.enqueue(new TextEncoder().encode('var x={constructor:{apiKey:"key_abc'));
+          return;
+        }
+        if (pulls === 2) {
+          controller.enqueue(new TextEncoder().encode('123"'));
+          return;
+        }
+        controller.enqueue(new TextEncoder().encode('SHOULD_NOT_NEED'));
+        controller.close();
+      },
+    }));
+    const text = await readCotoBody(res, '*/*');
+    assert.match(text, /constructor:\{apiKey:"key_abc123"/);
+    assert.equal(text.includes('SHOULD_NOT_NEED'), false);
+    assert.equal(pulls, 2);
   });
 });
 
