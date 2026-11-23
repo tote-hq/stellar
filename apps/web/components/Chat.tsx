@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { Cart } from '@changuito/mcp/types';
 
@@ -31,6 +31,7 @@ import { useLang } from './LangProvider';
 import { useNetwork } from './NetworkProvider';
 import { CameraIcon, ImageIcon, MicIcon, RetryIcon } from './icons';
 import { CheckoutModal } from './CheckoutModal';
+import { PayCard, type PayCardLine } from './PayCard';
 import { ProductGrid } from './ProductGrid';
 import { useShop } from './ShopProvider';
 import { MarkdownText } from './MarkdownText';
@@ -140,7 +141,19 @@ function ChatCore({
   photoRef.current = photo;
   // The basket the payment modal is open over. A cart, not a block id: the
   // user pays for what a card showed, and that object is the record of it.
-  const [paying, setPaying] = useState<{ cart: Cart; handoffUrl?: string } | null>(null);
+  const [paying, setPaying] = useState<{
+    cart: Cart;
+    handoffUrl?: string;
+    payRetailer?: 'coto';
+    demoTopUp?: boolean;
+    receiptLines?: { name: string; quantity: number; lineTotal: string }[];
+  } | null>(null);
+  /** Which pay started. Cleared if the modal closes before escrow open. */
+  const [payLock, setPayLock] = useState<null | 'dia' | 'coto'>(null);
+  const payOpened = useRef(false);
+  const markOpened = useCallback(() => {
+    payOpened.current = true;
+  }, []);
   const thread = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
 
@@ -162,7 +175,7 @@ function ChatCore({
   useEffect(() => {
     if (payRequest === seenPay.current) return;
     seenPay.current = payRequest;
-    if (!shop?.canOrder || !shop.cart) return;
+    if (!shop?.canOrder || !shop.cart || shop.dualCheckout) return;
     track('payment_start', { flow: 'rail' });
     setPaying({ cart: shop.cart, handoffUrl: shop.handoffUrl ?? undefined });
   }, [payRequest, shop]);
@@ -482,7 +495,8 @@ function ChatCore({
                   onPay={
                     // Not just disabled: a paid chat's card is a record of
                     // what was bought, and a Pagar on it invites paying twice.
-                    canOrder
+                    // A dual-checkout basket pays from the cards under the compare.
+                    canOrder && !b.dualCheckout
                       ? (cart) => {
                           track('payment_start', { flow: 'frame' });
                           setPaying({ cart, handoffUrl: b.handoffUrl });
@@ -492,7 +506,42 @@ function ChatCore({
                 />
               );
             case 'compare':
-              return <ComparisonCard key={b.id} block={b} />;
+              return (
+                <div key={b.id} className="compare-pay">
+                  <ComparisonCard block={b} />
+                  <DualPay
+                    block={b}
+                    blocks={state.blocks}
+                    canOrder={canOrder}
+                    payLock={payLock}
+                    paying={paying !== null}
+                    onPay={(which, cart, handoffUrl, receiptLines) => {
+                      setPayLock(which);
+                      payOpened.current = false;
+                      if (!address) {
+                        const body: { cart: Cart; location?: unknown; handoffUrl?: string; payRetailer?: 'coto' } = {
+                          cart,
+                          location: state.snapshot?.location,
+                        };
+                        if (which === 'coto') body.payRetailer = 'coto';
+                        else if (handoffUrl) body.handoffUrl = handoffUrl;
+                        void fetch('/api/checkout/quote', {
+                          method: 'POST',
+                          headers: { 'content-type': 'application/json' },
+                          body: JSON.stringify(body),
+                        });
+                      }
+                      setPaying({
+                        cart,
+                        handoffUrl: which === 'coto' ? undefined : handoffUrl,
+                        payRetailer: which === 'coto' ? 'coto' : undefined,
+                        demoTopUp: true,
+                        receiptLines,
+                      });
+                    }}
+                  />
+                </div>
+              );
             case 'error':
               // The soft-limit line is guest copy. Once the shopper is signed
               // in it is not an error, and leaving it in the thread reads as
@@ -736,13 +785,20 @@ function ChatCore({
           cart={paying.cart}
           location={state.snapshot?.location}
           handoffUrl={paying.handoffUrl}
+          payRetailer={paying.payRetailer}
+          demoTopUp={paying.demoTopUp}
+          receiptLines={paying.receiptLines}
+          onOpened={markOpened}
           // The chat the server knows, which is the one `archiveChat` wrote —
           // `publish` files the record under the agent's session id, so this
           // is the same uuid `orders.chat_id` references. Undefined until the
           // first turn lands, and in preview forever, which is correct: there
           // is no row to be one order of.
           chatId={shop?.activeChatId ?? undefined}
-          onClose={() => setPaying(null)}
+          onClose={() => {
+            setPaying(null);
+            if (!payOpened.current) setPayLock(null);
+          }}
           // settle() closes the chat as well as filing the receipt: one chat
           // is one order, and this is the moment that becomes true.
           onPaid={(receipt) => {
@@ -751,6 +807,81 @@ function ChatCore({
           }}
         />
       ) : null}
+    </div>
+  );
+}
+
+const PESOS = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' });
+
+function cartFor(blocks: Block[], cartId: string): Extract<Block, { kind: 'cart' }> | undefined {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i];
+    if (block && block.kind === 'cart' && block.cart.cartId === cartId) return block;
+  }
+  return undefined;
+}
+
+function DualPay({
+  block,
+  blocks,
+  canOrder,
+  payLock,
+  paying,
+  onPay,
+}: {
+  block: Extract<Block, { kind: 'compare' }>;
+  blocks: Block[];
+  canOrder: boolean;
+  payLock: null | 'dia' | 'coto';
+  paying: boolean;
+  onPay: (
+    which: 'dia' | 'coto',
+    cart: Cart,
+    handoffUrl: string | undefined,
+    receiptLines: { name: string; quantity: number; lineTotal: string }[],
+  ) => void;
+}) {
+  const offer =
+    block.checkoutDemo === true &&
+    (block.status === 'ok' || block.status === 'degraded') &&
+    block.matched >= 1;
+  const cartBlock = cartFor(blocks, block.cartId);
+  if (!offer || !cartBlock || cartBlock.cart.retailer !== 'dia') return null;
+  const diaLines: PayCardLine[] = cartBlock.cart.lines
+    .filter((line) => line.available && line.quantity > 0)
+    .map((line) => ({ key: `${line.index}:${line.skuId}`, name: line.name, quantity: line.quantity }));
+  const cotoRows = block.rows.filter((row) => row.confidence === 'ean' && row.coto?.available === true && row.coto);
+  if (diaLines.length === 0 || cotoRows.length === 0) return null;
+  const cotoLines: PayCardLine[] = cotoRows.map((row) => ({
+    key: row.coto?.id ?? row.skuId,
+    name: row.coto?.name ?? row.name,
+    quantity: row.quantity,
+  }));
+  const diaReceipt = cartBlock.cart.lines
+    .filter((line) => line.available && line.quantity > 0)
+    .map((line) => ({ name: line.name, quantity: line.quantity, lineTotal: line.lineTotal.display }));
+  const cotoReceipt = cotoRows.map((row) => ({
+    name: row.coto?.name ?? row.name,
+    quantity: row.quantity,
+    lineTotal: PESOS.format((row.coto?.lineCentavos ?? 0) / 100),
+  }));
+  const busy = (which: 'dia' | 'coto') => paying || (payLock !== null && payLock !== which);
+  return (
+    <div className="pay-cards">
+      <PayCard
+        which="dia"
+        lines={diaLines}
+        enabled={canOrder}
+        busy={busy('dia')}
+        onPay={() => onPay('dia', cartBlock.cart, cartBlock.handoffUrl, diaReceipt)}
+      />
+      <PayCard
+        which="coto"
+        lines={cotoLines}
+        enabled={canOrder}
+        busy={busy('coto')}
+        onPay={() => onPay('coto', cartBlock.cart, cartBlock.handoffUrl, cotoReceipt)}
+      />
     </div>
   );
 }

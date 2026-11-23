@@ -46,8 +46,8 @@ const KNOWN = {
       : 'Turnstile follows the env keys (enforce, closed, or open)',
   chat_dual_compare: (on) =>
     on
-      ? 'a Día basket shows the in-chat Día vs Coto card after the cart link, and the checkout modal hides Comparar con Coto'
-      : 'the in-chat Día vs Coto card stays off, and the checkout modal keeps Comparar con Coto',
+      ? 'a Día basket shows the in-chat Día vs Coto card after the cart link'
+      : 'the in-chat Día vs Coto card stays off',
   chat_dual_checkout_demo: (on) =>
     on
       ? 'after the Día vs Coto card, the chat can offer mock pay for the full Día basket and the matched Coto lines; Coto checkout still requires sandbox_mock'

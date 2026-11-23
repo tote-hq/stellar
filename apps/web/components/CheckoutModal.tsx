@@ -7,11 +7,12 @@ import type { Cart, LocationContext } from '@changuito/mcp/types';
 import { lockFailureCode, refundFailureCode } from '../lib/funnel';
 import { track } from '../lib/analytics';
 import type { Receipt } from '../lib/chat-store.ts';
-import { countsTowardFee, type ComparisonRow } from '../lib/checkout/compare-fee.ts';
-import { escrowCopy, type EscrowCopy } from '../lib/checkout/copy.ts';
+import { DEMO_TOPUP_CEILING_UNITS } from '../lib/checkout/demo-topup.ts';
+import { escrowCopy } from '../lib/checkout/copy.ts';
 import type { QuoteResponse, StatusResponse } from '../lib/checkout/types.ts';
 import { OpenConfirmationPending, recoverOpen, submitOpen, type OpenSubmission } from '../lib/checkout/open-submission.ts';
 import type { PublicProfile } from '../lib/profile.ts';
+import { faucetOnNetwork } from '../lib/faucet-auth.ts';
 import { postFaucet } from '../lib/faucet-client.ts';
 import { fetchAs } from '../lib/fetch-as.ts';
 import { ensureUserCookie } from '../lib/session-login';
@@ -66,6 +67,13 @@ interface Props {
   location?: Pick<LocationContext, 'postalCode' | 'salesChannel' | 'country'>;
   handoffUrl?: string;
   chatId?: string;
+  /** Coto locks the matched lines. The cart itself stays the Día basket. */
+  payRetailer?: 'coto';
+  /** Either pay card tops the wallet up to 1000 USDC once, then quotes. */
+  demoTopUp?: boolean;
+  receiptLines?: { name: string; quantity: number; lineTotal: string }[];
+  /** Escrow open succeeded. Closing before this re-enables the other pay. */
+  onOpened?: () => void;
   onClose: () => void;
   onPaid: (receipt: Receipt) => void;
 }
@@ -86,24 +94,28 @@ interface DiaLogin {
 
 const EMPTY_LOGIN: DiaLogin = { email: '', password: '', dni: '', street: '', number: '', phone: '' };
 
-function excludedReason(row: ComparisonRow, copy: EscrowCopy): string {
-  if (row.confidence === 'brand_size_unit') return copy.compareExcludedSimilar;
-  if (row.confidence === 'ean' && row.coto && !row.coto.available) return copy.compareExcludedUnavailable;
-  return copy.compareExcludedNone;
-}
-
 function loginReady(d: DiaLogin): boolean {
   return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(d.email.trim()) && d.password.length > 0 && /^\d{7,9}$/.test(d.dni.replace(/\D/g, ''));
 }
 
 type Step = 'login' | 'review' | 'locking' | 'shopping' | 'done' | 'refunded';
 
-export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: Props) {
+export function CheckoutModal({
+  cart,
+  location,
+  handoffUrl,
+  payRetailer,
+  demoTopUp,
+  receiptLines,
+  onOpened,
+  onClose,
+  onPaid,
+}: Props) {
   const lang = useLang();
   const copy = escrowCopy(lang);
   const wallet = useWallet();
   const { network } = useNetwork();
-  const { data: balance, refresh } = useBalances(wallet.address);
+  const { data: balance, loading: balanceLoading, refresh } = useBalances(wallet.address);
 
   const [quote, setQuote] = useState<QuoteResponse | null>(null);
   const [status, setStatus] = useState<StatusResponse | null>(null);
@@ -120,8 +132,8 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
   const [editing, setEditing] = useState(false);
   const [savingDia, setSavingDia] = useState(false);
   const [nativeBusy, setNativeBusy] = useState(false);
-  const [comparing, setComparing] = useState(false);
   const quoting = useRef(false);
+  const topped = useRef(false);
   const stepRef = useRef<Step>('login');
   const alerted = useRef<string | null>(null);
   const field = (k: keyof DiaLogin) => (e: ChangeEvent<HTMLInputElement>) => setDia((d) => ({ ...d, [k]: e.target.value }));
@@ -133,16 +145,31 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
       return;
     }
     if (quote || quoting.current) return;
+    if (demoTopUp && faucetOnNetwork(network) && balanceLoading && !balance) return;
     quoting.current = true;
     setStep('review');
     void (async () => {
       try {
         const ok = await ensureUserCookie(wallet.address!, wallet.accessToken);
         if (!ok) throw new Error(copy.failed);
+        if (demoTopUp && faucetOnNetwork(network) && !topped.current) {
+          topped.current = true;
+          const units = balance?.usdc ? BigInt(balance.usdc) : 0n;
+          if (units < DEMO_TOPUP_CEILING_UNITS) {
+            await postFaucet({ address: wallet.address, sign: wallet.accessToken }, network);
+            refresh();
+          }
+        }
+        const quoteBody: { cart: Cart; location?: Props['location']; handoffUrl?: string; payRetailer?: 'coto' } = {
+          cart,
+          location,
+        };
+        if (payRetailer === 'coto') quoteBody.payRetailer = 'coto';
+        else if (handoffUrl) quoteBody.handoffUrl = handoffUrl;
         const res = await fetchAs({ address: wallet.address, sign: wallet.accessToken }, '/api/checkout/quote', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ cart, handoffUrl, location }),
+          body: JSON.stringify(quoteBody),
         });
         const body = await res.json().catch(() => null);
         if (!res.ok) throw new Error(body?.error ?? copy.failed);
@@ -150,21 +177,28 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
         const p = await fetchAs({ address: wallet.address, sign: wallet.accessToken }, '/api/profile', { cache: 'no-store' }).catch(() => null);
         if (p?.ok) setProfile((await p.json().catch(() => null)) as PublicProfile | null);
         setQuote(body as QuoteResponse);
-        if (body.resumeStatus) { setStatus(body.resumeStatus); setOpenSig(body.resumeStatus.openSig); setStep('shopping'); }
+        if (body.resumeStatus) {
+          setStatus(body.resumeStatus);
+          setOpenSig(body.resumeStatus.openSig);
+          if (body.resumeStatus.openSig) onOpened?.();
+          setStep('shopping');
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : copy.failed);
         quoting.current = false;
       }
     })();
-  }, [wallet.ready, wallet.address, wallet.accessToken, quote, cart, location, handoffUrl, copy.failed]);
+  }, [wallet.ready, wallet.address, wallet.accessToken, quote, cart, location, handoffUrl, copy.failed, payRetailer, demoTopUp, network, balance, balanceLoading, refresh, onOpened]);
 
   stepRef.current = step;
   const short = Boolean(quote && balance && BigInt(balance.usdc) < BigInt(quote.amount));
   const manual = quote?.checkoutKind === 'manual_fee_v1';
   const demo = quote?.mode === 'demo' || status?.mode === 'demo';
+  const cotoPay = payRetailer === 'coto';
   // Only a run that logs into Día needs the login, and it has to be saved first.
-  const needsDia = Boolean(quote) && !demo && (!profile?.complete || editing);
-  const ready = demo || (Boolean(profile?.complete) && !editing);
+  // A Coto mock never asks for the Día email, password, or DNI.
+  const needsDia = Boolean(quote) && !cotoPay && !demo && (!profile?.complete || editing);
+  const ready = cotoPay || demo || (Boolean(profile?.complete) && !editing);
 
   // Saved before the lock, not after: a run that would stop at Día's login
   // page is a lock and a refund for nothing.
@@ -191,27 +225,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
     } finally {
       setSavingDia(false);
     }
-  }, [dia, copy.diaMissing, copy.failed]);
-
-  const compareWithCoto = useCallback(async () => {
-    if (!wallet.address || cart.retailer !== 'dia') return;
-    setComparing(true);
-    setError(null);
-    try {
-      const res = await fetchAs({ address: wallet.address, sign: wallet.accessToken }, '/api/checkout/quote', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ cart, handoffUrl, location, compare: true }),
-      });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(body?.error ?? copy.failed);
-      if (stepRef.current === 'review') setQuote(body as QuoteResponse);
-    } catch (e) {
-      setError(e instanceof Error && e.message ? e.message : copy.failed);
-    } finally {
-      setComparing(false);
-    }
-  }, [cart, copy.failed, handoffUrl, location, wallet.accessToken, wallet.address]);
+  }, [dia, copy.diaMissing, copy.failed, wallet.accessToken, wallet.address]);
 
   const faucet = useCallback(async () => {
     setFunding(true);
@@ -261,6 +275,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
         setPendingOpen(null);
         const sig = fundedSig;
         setOpenSig(sig);
+        onOpened?.();
         track('escrow_open');
         track('pay_open');
         if (manual && opened.status) {
@@ -303,7 +318,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
         setStep('shopping');
       } else setStep('review');
     }
-  }, [quote, wallet, dia, ready, copy.failed, copy.diaMissing, manual, openSig, pendingOpen, lang, refresh]);
+  }, [quote, wallet, dia, ready, copy.failed, copy.diaMissing, manual, openSig, pendingOpen, lang, refresh, onOpened]);
 
   // Confirmation can finish even when the PUT reply never reaches this tab.
   // Poll only the existing order; never build or sign another lock here.
@@ -318,6 +333,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
       inFlight = false;
       if (stopped || !recovered) return;
       setOpenSig(recovered.openSig);
+      onOpened?.();
       setPendingOpen(null);
       setError(null);
       setStatus(recovered.status!);
@@ -327,7 +343,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
     void tick();
     const timer = setInterval(() => void tick(), POLL_MS);
     return () => { stopped = true; clearInterval(timer); };
-  }, [manual, pendingOpen, quote?.orderId, step, wallet.address, wallet.accessToken, refresh]);
+  }, [manual, pendingOpen, quote?.orderId, step, wallet.address, wallet.accessToken, refresh, onOpened]);
 
   // Poll while the sandbox shops.
   useEffect(() => {
@@ -377,13 +393,17 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
     if ((step !== 'done' && !demoFinished) || !quote) return onClose();
     onPaid({
       orderId: quote.orderId.slice(0, 12),
-      retailer: cart.retailer,
+      retailer: cotoPay ? 'coto' : cart.retailer,
       paidDisplay: demoFinished ? copy.demoPaid(quote.amountDisplay) : `${quote.amountDisplay} USDC`,
       paidAt: Date.now(),
-      lines: cart.lines.filter((l) => l.available).map((l) => ({ name: l.name, quantity: l.quantity, lineTotal: l.lineTotal.display })),
-      total: cart.total.display,
+      lines: (receiptLines ?? cart.lines.filter((l) => l.available).map((l) => ({
+        name: l.name,
+        quantity: l.quantity,
+        lineTotal: l.lineTotal.display,
+      }))),
+      total: cotoPay ? pesos(quote.totalCentavos) : cart.total.display,
     });
-  }, [step, demoFinished, quote, cart, copy, onClose, onPaid]);
+  }, [step, demoFinished, quote, cart, copy, onClose, onPaid, cotoPay, receiptLines]);
 
   // Closing mid-purchase is allowed: the server keeps shopping and the escrow
   // closes either way. Only the view goes.
@@ -514,7 +534,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
                   <dd data-testid="checkout-rate">{pesos(Math.round(quote.arsPerUsd * 100))} / USDC</dd>
                 </div>
                 <div className="ck-total-line ck-total-sum">
-                  <dt>{quote.comparison ? copy.compareLockLabel : copy.lockLabel}</dt>
+                  <dt>{copy.lockLabel}</dt>
                   <dd data-testid="checkout-amount">{quote.amountDisplay} USDC</dd>
                 </div>
                 {balance ? (
@@ -524,57 +544,6 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
                   </div>
                 ) : null}
               </dl>
-              {quote.comparison ? (
-                <section className="ck-compare" data-testid="checkout-comparison" aria-labelledby="checkout-compare-title">
-                  <h3 id="checkout-compare-title" className="ck-title">{copy.compareTitle}</h3>
-                  <dl className="ck-totals">
-                    <div className="ck-total-line">
-                      <dt>{copy.compareDiaLabel}</dt>
-                      <dd data-testid="checkout-compare-dia">{pesos(quote.comparison.diaSubtotalCentavos)}</dd>
-                    </div>
-                    <div className="ck-total-line">
-                      <dt>{copy.compareOtherLabel}</dt>
-                      <dd data-testid="checkout-compare-coto">{pesos(quote.comparison.otherSubtotalCentavos)}</dd>
-                    </div>
-                    <div className="ck-total-line">
-                      <dt>{copy.compareSavingsLabel}</dt>
-                      <dd data-testid="checkout-compare-savings">{pesos(quote.comparison.savingsCentavos)}</dd>
-                    </div>
-                    <div className="ck-total-line">
-                      <dt>{copy.compareFeeLabel}</dt>
-                      <dd data-testid="checkout-compare-fee">
-                        {pesos(quote.comparison.feeCentavos)} ({(quote.comparison.feeUsdCents / 100).toFixed(2)} USDC)
-                      </dd>
-                    </div>
-                  </dl>
-                  <p className="ck-note" data-testid="checkout-compare-note">{copy.compareLockNote}</p>
-                  {quote.comparison.rows.some((row) => !countsTowardFee(row)) ? (
-                    <>
-                      <h4 className="ck-title">{copy.compareExcludedTitle}</h4>
-                      <ul className="ck-uncounted" data-testid="checkout-compare-excluded">
-                        {quote.comparison.rows.filter((row) => !countsTowardFee(row)).map((row) => (
-                          <li key={row.skuId}>
-                            {row.name}
-                            {row.coto ? ` · ${row.coto.name}` : ''}
-                            {` — ${excludedReason(row, copy)}`}
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  ) : null}
-                </section>
-              ) : cart.retailer === 'dia' && !quote.dualCompare ? (
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  data-testid="checkout-compare"
-                  aria-busy={comparing}
-                  disabled={comparing || step === 'locking'}
-                  onClick={() => void compareWithCoto()}
-                >
-                  {comparing ? copy.comparing : copy.compareCta}
-                </button>
-              ) : null}
               <p className="ck-note">{manual ? (lang === 'en' ? 'DIA charges groceries and delivery separately in pesos. The final amount is reviewed in DIA.' : 'DIA cobra los productos y el envío aparte, en pesos. Revisá el importe final en DIA.') : copy.rateNote(quote.rateSource)}</p>
               {quote.postalSource === 'profile' && quote.chatPostalCode && quote.chatPostalCode !== quote.postalCode ? (
                 <p className="ck-note" data-testid="checkout-postal-note">
@@ -662,7 +631,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
                     className="btn"
                     data-testid="checkout-lock"
                     onClick={() => void lock()}
-                    disabled={comparing || step === 'locking' || (!pendingOpen && (short || !balance || !ready))}
+                    disabled={step === 'locking' || (!pendingOpen && (short || !balance || !ready))}
                   >
                     {step === 'locking' ? (pendingOpen ? (lang === 'en' ? 'Checking confirmation…' : 'Consultando confirmación…') : copy.locking)
                       : pendingOpen ? (lang === 'en' ? 'Check payment and resume' : 'Consultar pago y continuar')

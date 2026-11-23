@@ -21,7 +21,7 @@
  * same status rather than starting a second job.
  */
 import { readOrder } from '../../../../lib/checkout/escrow-server.ts';
-import { cotoCheckoutBlocked } from '../../../../lib/checkout/coto-guard.ts';
+import { cotoCheckoutBlocked, cotoDemoPayRecord } from '../../../../lib/checkout/coto-guard.ts';
 import { startJob } from '../../../../lib/checkout/sandbox.ts';
 import { readShopper } from '../../../../lib/checkout/shopper.ts';
 import { checkoutMode } from '../../../../lib/checkout/mode.ts';
@@ -53,21 +53,25 @@ export async function POST(req: Request): Promise<Response> {
   const store = checkoutStore();
   const rec = await store.get(orderId);
   if (!rec || rec.buyer !== user.address) return Response.json({ error: 'No encontramos ese pedido.' }, { status: 404 });
-  if (cotoCheckoutBlocked(rec.retailer)) {
+  if (cotoCheckoutBlocked(rec.retailer) && !cotoDemoPayRecord(rec)) {
     return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
   }
   if (rec.checkoutKind === 'manual_fee_v1') return startManual(rec, body);
 
   if (!rec.jobId) {
     const flags = await sandboxFlags();
-    const mode = checkoutMode({ mock: flags.mock, manual: false });
+    // A Coto mock keeps the mode the quote stored. Reading the 15s cache here
+    // would turn it into `demo` (mock-h, refund-always) the moment the flag flips.
+    const cotoDemo = cotoDemoPayRecord(rec);
+    const mode = cotoDemo ? rec.mode! : checkoutMode({ mock: flags.mock, manual: false });
 
     // A login typed into the modal wins for this one checkout; otherwise the
     // saved profile, decrypted here and nowhere else (lib/profile.ts). The
-    // demo run never logs in, so it asks for neither.
+    // demo run never logs in, so it asks for neither. A Coto mock does not
+    // log into Día either: the lines were priced from the catalog.
     let shopper: SandboxShopper | undefined;
-    if (mode !== 'demo') shopper = readShopper(body?.dia, body?.address, rec.postalCode);
-    if (mode !== 'demo' && !shopper) {
+    if (!cotoDemo && mode !== 'demo') shopper = readShopper(body?.dia, body?.address, rec.postalCode);
+    if (!cotoDemo && mode !== 'demo' && !shopper) {
       try {
         shopper = readShopper(await getProfile(user.address), body?.address, rec.postalCode);
       } catch (err) {
@@ -75,7 +79,7 @@ export async function POST(req: Request): Promise<Response> {
         return Response.json({ error: 'No pudimos leer tu perfil. Probá de nuevo en un rato.' }, { status: 503 });
       }
     }
-    if (mode !== 'demo' && !shopper) {
+    if (!cotoDemo && mode !== 'demo' && !shopper) {
       return Response.json({ error: 'Completá tu email, contraseña y DNI de Día.' }, { status: 400 });
     }
     // A just-confirmed transaction can lag one RPC node behind another.
@@ -93,10 +97,13 @@ export async function POST(req: Request): Promise<Response> {
     }
 
     rec.openSig = typeof body?.openSig === 'string' ? body.openSig : rec.openSig;
-    rec.mode = mode;
+    if (!cotoDemo) rec.mode = mode;
     const items = rec.lines.map((l) => ({ name: l.name, quantity: l.quantity, sku: l.skuId }));
     try {
-      if (mode === 'demo') {
+      if (cotoDemo) {
+        // mock-k places and settles. mock-f is sandbox_mock_fail and refunds. Never mock-h.
+        rec.jobId = await startJob(orderId, items, undefined, undefined, { mock: true, mockFail: flags.mockFail });
+      } else if (mode === 'demo') {
         rec.jobId = await startJob(orderId, items, undefined, undefined, flags, process.env, { demo: true });
         console.log('[checkout/start] demo run');
       } else {

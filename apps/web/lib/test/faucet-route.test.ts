@@ -24,7 +24,7 @@ mockBindings();
 mockResolver();
 
 // One tester per case: the per-address cooldown is real.
-const testers = Array.from({ length: 6 }, () => Keypair.random());
+const testers = Array.from({ length: 8 }, () => Keypair.random());
 __setWalletDirectoryForTests(granted(testers.map((kp) => kp.publicKey())));
 
 describe('/api/faucet', () => {
@@ -137,6 +137,43 @@ describe('/api/faucet', () => {
     assert.match(text, /No pudimos cargar USDC de prueba/);
     assert.doesNotMatch(text, /horizon|https?:/i);
     assert.match(logs.join('\n'), /\[faucet\] failed/);
+  });
+
+  it('a balance above 100 USDC and below 1000 still refuses when the demo flags are off', async () => {
+    const kp = testers[5]!;
+    accounts.set(kp.publicKey(), 100);
+    chain.balances.set(kp.publicKey(), 2_000_000_000n);
+    const res = await post(kp);
+    assert.equal(res.status, 429);
+    assert.ok(!chain.calls.some((c) => c.method === 'mint'));
+  });
+
+  it('mints the shortfall to 1000 USDC when the demo flags are on, and ignores a body amount', async () => {
+    const { __setConfigForTests } = await import('../config.ts');
+    __setConfigForTests({ chat_dual_checkout_demo: true, sandbox_mock: true });
+    try {
+      const kp = testers[6]!;
+      accounts.set(kp.publicKey(), 100);
+      chain.balances.set(kp.publicKey(), 2_000_000_000n);
+      const res = await POST(
+        new Request('https://app.changuito.me/api/faucet', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', cookie: human },
+          body: JSON.stringify({ address: kp.publicKey(), proof: signedProof(kp, 'faucet'), amount: '1' }),
+        }),
+      );
+      assert.equal(res.status, 200);
+      const mint = chain.calls.find((c) => c.method === 'mint');
+      assert.equal((mint?.args as { amount: string }).amount, '8000000000');
+      const full = testers[7]!;
+      accounts.set(full.publicKey(), 100);
+      chain.balances.set(full.publicKey(), 10_000_000_000n);
+      const again = await post(full);
+      assert.equal(again.status, 429);
+      assert.ok(!chain.calls.some((c) => c.method === 'mint' && (c.args as { to: string }).to === full.publicKey()));
+    } finally {
+      __setConfigForTests(null);
+    }
   });
 });
 

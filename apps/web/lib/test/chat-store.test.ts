@@ -349,3 +349,46 @@ describe('chat store: receipts', () => {
     assert.equal(loadChat('c1')?.receipt, null);
   });
 });
+
+describe('chat store: dual checkout flags', () => {
+  it('keeps the pay flags on a cart and a settled compare, and drops them from a pending one', () => {
+    const cartBlock: Block = {
+      kind: 'cart',
+      id: 'b4',
+      cart: cart(),
+      handoffUrl: 'https://dia.example/cart',
+      dualCheckout: true,
+    };
+    const settled: Block = {
+      kind: 'compare',
+      id: 'b9',
+      status: 'ok',
+      cartId: 'cart-1',
+      handoffUrl: 'https://dia.example/cart',
+      matched: 1,
+      lines: 1,
+      rows: [],
+      checkoutDemo: true,
+    };
+    const pending: Block = {
+      kind: 'compare',
+      id: 'b8',
+      status: 'pending',
+      cartId: 'cart-1',
+      handoffUrl: 'https://dia.example/cart',
+      matched: 0,
+      lines: 0,
+      rows: [],
+      checkoutDemo: true,
+    };
+    save({ state: { blocks: [cartBlock, settled, pending], cart: { cart: cart(), dualCheckout: true } } });
+    const back = loadChat('c1');
+    const storedCart = back?.blocks.find((b) => b.kind === 'cart');
+    const storedSettled = back?.blocks.find((b) => b.id === 'b9');
+    const storedPending = back?.blocks.find((b) => b.id === 'b8');
+    assert.equal(storedCart?.kind === 'cart' && storedCart.dualCheckout, true);
+    assert.equal(storedSettled?.kind === 'compare' && storedSettled.checkoutDemo, true);
+    assert.equal(storedPending?.kind === 'compare' && storedPending.checkoutDemo, undefined);
+    assert.equal(back?.dualCheckout, true);
+  });
+});

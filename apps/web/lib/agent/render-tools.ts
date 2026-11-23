@@ -45,6 +45,11 @@ export interface RenderCache {
    */
   compareFor?: string;
   compareResult?: CompareCard;
+  /**
+   * `chat_dual_checkout_demo` for this hop. Set in the loop before the cart
+   * is drawn, and not written into the stored turn: the next hop reads it again.
+   */
+  dualCheckout?: boolean;
 }
 
 export const emptyCache = (): RenderCache => ({ products: new Map() });
@@ -129,7 +134,7 @@ export function autoRenderCart(cache: RenderCache, emit: (e: UiEvent) => void): 
   if (print === cache.drawn) return false;
 
   cache.drawn = print;
-  emit({ t: 'cart', cart, handoffUrl });
+  emit({ t: 'cart', cart, handoffUrl, ...(cache.dualCheckout ? { dualCheckout: true } : {}) });
   return true;
 }
 
@@ -218,7 +223,7 @@ export function runRenderTool(
     // Recorded as drawn so the automatic render does not immediately repeat
     // what this call just put on screen.
     cache.drawn = cardPrint(cache.cart, handoffUrl);
-    emit({ t: 'cart', cart: cache.cart, handoffUrl });
+    emit({ t: 'cart', cart: cache.cart, handoffUrl, ...(cache.dualCheckout ? { dualCheckout: true } : {}) });
     return result(`Rendered the cart: ${cache.cart.lines.length} line(s), ${cache.cart.total.display}.`);
   }
 

@@ -1,7 +1,7 @@
 import type { Cart, CartLine, LocationContext, Money, Product, Seller } from '@changuito/mcp/types';
 import type { SessionSnapshot } from '@changuito/mcp/session';
 
-import type { Block, ChatState, ToolRun } from './chat-state.ts';
+import { dualCheckoutOn, type Block, type ChatState, type ToolRun } from './chat-state.ts';
 import type { CompareLineView, CompareOffer } from './protocol';
 
 /**
@@ -92,6 +92,8 @@ export interface StoredChat {
   snapshot: SessionSnapshot | null;
   cart: Cart | null;
   handoffUrl: string | null;
+  /** The open basket is offering the dual mock pay cards. Absent means off. */
+  dualCheckout?: boolean;
   receipt: Receipt | null;
 }
 
@@ -178,10 +180,13 @@ function packBlock(b: Block): Block | null {
       return b.note === undefined
         ? { kind: 'products', id: b.id, items: b.items.map(packProduct) }
         : { kind: 'products', id: b.id, items: b.items.map(packProduct), note: b.note };
-    case 'cart':
-      return b.handoffUrl === undefined
+    case 'cart': {
+      const packed: Extract<Block, { kind: 'cart' }> = b.handoffUrl === undefined
         ? { kind: 'cart', id: b.id, cart: packCart(b.cart) }
         : { kind: 'cart', id: b.id, cart: packCart(b.cart), handoffUrl: b.handoffUrl };
+      if (b.dualCheckout) packed.dualCheckout = true;
+      return packed;
+    }
     case 'compare':
       return packCompare(b);
     case 'error':
@@ -236,6 +241,7 @@ function packCompare(b: Extract<Block, { kind: 'compare' }>): Extract<Block, { k
       gapCentavos: b.gap.gapCentavos,
     };
   }
+  if (b.checkoutDemo) out.checkoutDemo = true;
   return out;
 }
 
@@ -429,6 +435,9 @@ function asCompare(v: Record<string, unknown>, id: string): Extract<Block, { kin
       block.gap = { diaSubtotalCentavos, cotoSubtotalCentavos, gapCentavos };
     }
   }
+  if (v.checkoutDemo === true && (block.status === 'ok' || block.status === 'degraded') && block.matched >= 1) {
+    block.checkoutDemo = true;
+  }
   return block;
 }
 
@@ -463,7 +472,11 @@ function asBlock(v: unknown): Block | null {
       const cart = asCart(v.cart);
       if (!cart) return null;
       const handoffUrl = str(v.handoffUrl);
-      return handoffUrl === null ? { kind: 'cart', id, cart } : { kind: 'cart', id, cart, handoffUrl };
+      const block: Extract<Block, { kind: 'cart' }> = handoffUrl === null
+        ? { kind: 'cart', id, cart }
+        : { kind: 'cart', id, cart, handoffUrl };
+      if (v.dualCheckout === true) block.dualCheckout = true;
+      return block;
     }
     case 'compare':
       return asCompare(v, id);
@@ -640,6 +653,7 @@ export function loadChat(id: string): StoredChat | null {
     snapshot: asSnapshot(v.snapshot),
     cart: asCart(v.cart),
     handoffUrl: str(v.handoffUrl),
+    ...(v.dualCheckout === true ? { dualCheckout: true } : {}),
     receipt: asReceipt(v.receipt),
   };
 }
@@ -680,6 +694,7 @@ export function saveChat(input: SaveInput): ChatSummary | null {
     snapshot: state.snapshot ? packSnapshot(state.snapshot) : null,
     cart: state.cart ? packCart(state.cart.cart) : null,
     handoffUrl: state.cart?.handoffUrl ?? null,
+    ...(dualCheckoutOn(state) ? { dualCheckout: true } : {}),
     receipt: input.receipt ? packReceipt(input.receipt) : null,
   };
   if (!write(chatKey(id), record)) return null;

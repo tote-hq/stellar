@@ -24,6 +24,7 @@
  */
 import { createHash } from 'node:crypto';
 
+import { cotoDemoPayRecord, settleBasis } from '../../../../lib/checkout/coto-guard.ts';
 import { readOrder, refundOrder, settleOrder } from '../../../../lib/checkout/escrow-server.ts';
 import { refundReason } from '../../../../lib/checkout/failure.ts';
 import { checkoutAlert, resolverFailureCode, resolverLogLine } from '../../../../lib/checkout/resolver-alert.ts';
@@ -109,7 +110,9 @@ export async function GET(req: Request): Promise<Response> {
       rec.phase = job.phase;
       if (job.status === 'done' || job.status === 'failed') {
         rec.payment = job.result?.payment ?? 'not_attempted';
-        rec.storeOrderForm = job.result?.cart?.orderFormId;
+        // A Coto mock must not inherit the Día order form or the payment URL
+        // the in-process mock stamps on every job. Those belong to Día.
+        if (!cotoDemoPayRecord(rec)) rec.storeOrderForm = job.result?.cart?.orderFormId;
         // A demo run that reached payment is a finished order too: the
         // treasury takes the (testnet) USDC as it would for a placed one, so
         // the demo ends the way a purchase does. Its receipt says what it was.
@@ -162,7 +165,7 @@ export async function GET(req: Request): Promise<Response> {
             basketHash: order.basketHash,
             amountUnits: order.amount.toString(),
             settledAt: new Date().toISOString(),
-          }).replace('basis|buyer-confirmed', rec.mode === 'demo' ? 'basis|demo-reached-payment' : 'basis|sandbox-order-placed') +
+          }).replace('basis|buyer-confirmed', settleBasis(rec)) +
           `job|${rec.jobId}\norderform|${rec.storeOrderForm ?? ''}\nstore-order|${rec.storeOrderId ?? ''}\n`;
         // basketHash comes from the on-chain order, never from a re-quoted cart.
         rec.closeSig = await settleOrder(order, createHash('sha256').update(receipt).digest());

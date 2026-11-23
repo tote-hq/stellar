@@ -117,6 +117,17 @@ Screenshot, video, and trace are on for this project. They land in
 `test-results/` and `playwright-report/`, which are gitignored. Do not
 commit them.
 
+## Dual mock checkout
+
+`npm run test:e2e:dual-checkout` runs project `dual-checkout` with
+`DUAL_CHECKOUT_E2E=1`. Without that variable the spec skips. It seeds one
+stored chat, stubs `GET /api/human`, and does not flip config rows or call
+the model. It checks both pay cards (heading, accessible name, and a 44px
+target at 390 and 1440), no `checkout-compare`, no `20%`, no `rail-pay`,
+that the Coto quote body sends `payRetailer: "coto"` and no amount, and that
+starting one pay disables the other. Settlement basis stays a unit test.
+Screenshot and video are on. Do not commit `test-results/`.
+
 ## GitHub Actions
 
 Actions runs `.github/workflows/unit.yml` on every pull request and on every

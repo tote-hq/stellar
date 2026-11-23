@@ -19,14 +19,14 @@
  */
 import { compareDiaToCoto } from '@changuito/mcp/compare';
 import { arsToUsdCents } from '@changuito/mcp/fx';
-import type { Cart } from '@changuito/mcp/types';
+import type { Cart, CartLine } from '@changuito/mcp/types';
 
-import { comparisonTotals, feeUsdFrom, type ComparisonQuote } from '../../../../lib/checkout/compare-fee.ts';
+import { comparisonTotals, countsTowardFee, feeUsdFrom, type ComparisonQuote, type ComparisonRow } from '../../../../lib/checkout/compare-fee.ts';
 import { cotoCheckoutBlocked } from '../../../../lib/checkout/coto-guard.ts';
 import { quoteRate } from '../../../../lib/checkout/rate.ts';
 import { NO_DELIVERY, quoteShipping, type ShippingLocation } from '../../../../lib/checkout/shipping.ts';
 import { checkoutStore } from '../../../../lib/checkout/store.ts';
-import { sandboxFlags, getConfig, flagOn, memberFlow, chatDualCompareEnabled } from '../../../../lib/config.ts';
+import { sandboxFlags, getConfig, flagOn, memberFlow } from '../../../../lib/config.ts';
 import { checkoutMode } from '../../../../lib/checkout/mode.ts';
 import { manualAvailable, manualMember, manualStatus } from '../../../../lib/checkout/manual-server.ts';
 import { MANUAL_KIND, SERVICE_FEE_CENTS, SERVICE_FEE_UNITS, serviceOrderId, VIEWER_SECONDS } from '../../../../lib/checkout/manual-policy.ts';
@@ -64,13 +64,19 @@ export async function POST(req: Request): Promise<Response> {
   if (!user.ok) return Response.json({ error: 'Iniciá sesión para pagar.' }, { status: 401 });
 
   const body = (await req.json().catch(() => null)) as {
-    cart?: unknown; handoffUrl?: unknown; location?: unknown; compare?: unknown;
+    cart?: unknown; handoffUrl?: unknown; location?: unknown; compare?: unknown; payRetailer?: unknown;
   } | null;
   if (!isCart(body?.cart)) return Response.json({ error: 'Falta el changuito.' }, { status: 400 });
   const cart = body.cart;
   if (cotoCheckoutBlocked(cart.retailer)) {
     return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
   }
+  // A client cart whose retailer is Coto stayed blocked above. The demo pays
+  // the Día basket's matched lines, and the browser sends no amount.
+  if (body.payRetailer !== undefined && body.payRetailer !== 'coto') {
+    return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
+  }
+  if (body.payRetailer === 'coto') return quoteCotoDemo(user.address, cart, body.location);
   const compare = body.compare === true;
   if (compare && cart.retailer !== 'dia') {
     return Response.json({ error: 'La comparación solo está disponible para un changuito de Día.' }, { status: 400 });
@@ -79,8 +85,6 @@ export async function POST(req: Request): Promise<Response> {
   if (lines.length === 0 || cart.total.centavos <= 0) {
     return Response.json({ error: 'El changuito está vacío.' }, { status: 400 });
   }
-  const dualCompare = await chatDualCompareEnabled();
-
   // Resume funded sessions across a full app reload without another fee lock.
   // A compared quote must not resume into the 0.10 record.
   const currentHash = toHex(await basketHash(cart));
@@ -100,7 +104,6 @@ export async function POST(req: Request): Promise<Response> {
         totalCentavos: cart.total.centavos + (rec.shippingCentavos ?? 0), postalCode: rec.postalCode,
         postalSource: 'profile', chatPostalCode: null, programId: contractIds(DEFAULT_NETWORK).escrowId,
         usdcMint: contractIds(DEFAULT_NETWORK).usdcId, mode: 'live', resumeStatus: manualStatus(rec),
-        dualCompare,
         ...(rec.manualFlow ? { manualFlow: rec.manualFlow } : {}),
       }, { headers: { 'cache-control': 'no-store' } });
     } catch (err) { if ((err as { code?: string }).code !== '42P01') throw err; }
@@ -237,8 +240,144 @@ export async function POST(req: Request): Promise<Response> {
     programId: contractIds(DEFAULT_NETWORK).escrowId,
     usdcMint: contractIds(DEFAULT_NETWORK).usdcId,
     mode,
-    dualCompare,
     ...(comparison ? { comparison } : {}),
   };
   return Response.json(res);
+}
+
+const ARS = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' });
+const pesos = (centavos: number) => ARS.format(centavos / 100);
+
+/**
+ * Mock pay for the matched Coto lines of a Día basket.
+ * The client total is ignored. Shipping and the 20% fee are zero. The hash
+ * is the server-built lines, and the record is Coto with no Día cart link.
+ */
+async function quoteCotoDemo(buyer: string, cart: Cart, locationInput: unknown): Promise<Response> {
+  if (cart.retailer !== 'dia') {
+    return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
+  }
+  const lines = cart.lines.filter((l) => l.available && l.quantity > 0);
+  if (lines.length === 0) return Response.json({ error: 'El changuito está vacío.' }, { status: 400 });
+
+  const config = await getConfig();
+  const flags = await sandboxFlags();
+  const manual = !flags.mock && (await manualMember(buyer)) && flagOn(config, 'manual_checkout_enabled');
+  const mode = checkoutMode({ mock: flags.mock, manual });
+  if (!flagOn(config, 'chat_dual_checkout_demo') || mode !== 'mock' || manual) {
+    return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
+  }
+
+  let saved: string | undefined;
+  try {
+    saved = (await getProfile(buyer))?.postcode;
+  } catch (err) {
+    console.warn('[checkout] profile unreadable for quote', err instanceof Error ? err.name : err);
+  }
+  const chatPostal = isLocation(locationInput) ? locationInput.postalCode : undefined;
+  const location = saved
+    ? { ...(isLocation(locationInput) ? locationInput : {}), postalCode: saved }
+    : locationInput;
+  if (!isLocation(location)) {
+    return Response.json({ error: 'Falta tu código postal. Contale al chat dónde estás y volvé a intentar.' }, { status: 400 });
+  }
+
+  const override = Number(process.env.ARS_PER_USD);
+  let rate;
+  try {
+    rate = await quoteRate(Number.isFinite(override) && override > 0 ? { override } : {});
+  } catch (e) {
+    console.warn('[checkout] quote failed', e instanceof Error ? e.message : String(e));
+    return Response.json({ error: 'No pudimos cotizar el envío o el cambio. Probá de nuevo en un rato.' }, { status: 503 });
+  }
+
+  let rows: ComparisonRow[];
+  try {
+    const compared = await compareDiaToCoto(
+      lines.map((l) => ({ skuId: l.skuId, name: l.name, quantity: l.quantity, lineTotal: l.lineTotal })),
+      location.postalCode,
+    );
+    rows = compared.rows.filter(countsTowardFee);
+  } catch (err) {
+    const name = err instanceof Error ? err.name : 'error';
+    const code = err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[checkout] coto quote failed', name, code, msg);
+    return Response.json({ error: 'No pudimos cotizar Coto. Probá de nuevo en un rato.' }, { status: 503 });
+  }
+
+  const serverCart = cotoServerCart(cart.cartId, rows);
+  if (serverCart.lines.length === 0 || serverCart.total.centavos <= 0) {
+    return Response.json({ error: 'El changuito está vacío.' }, { status: 400 });
+  }
+  const cents = arsToUsdCents(serverCart.total.centavos as never, rate.arsPerUsd, buffer()) as unknown as number;
+  const nonce = newOrderId();
+  const orderId = toHex(nonce);
+  const units = centsToUnits(Math.round(cents)).toString();
+  const hash = toHex(await basketHash(serverCart));
+
+  await checkoutStore().set({
+    orderId,
+    buyer,
+    amount: units,
+    amountCents: cents,
+    basketHash: hash,
+    arsPerUsd: rate.arsPerUsd,
+    rateSource: rate.source,
+    shippingCentavos: 0,
+    postalCode: location.postalCode,
+    totalDisplay: serverCart.total.display,
+    retailer: 'coto',
+    lines: serverCart.lines.map((l) => ({ name: l.name, skuId: l.skuId, quantity: l.quantity, lineTotal: l.lineTotal.display })),
+    handoffUrl: null,
+    createdAt: Date.now(),
+    mode: 'mock',
+  });
+
+  const res: QuoteResponse = {
+    orderId,
+    amount: units,
+    amountCents: cents,
+    amountDisplay: (cents / 100).toFixed(2),
+    basketHash: hash,
+    timeoutSecs: DEFAULT_TIMEOUT_SECS,
+    arsPerUsd: rate.arsPerUsd,
+    rateSource: rate.source,
+    subtotalCentavos: serverCart.total.centavos,
+    shippingCentavos: 0,
+    totalCentavos: serverCart.total.centavos,
+    postalCode: location.postalCode,
+    postalSource: saved ? 'profile' : 'chat',
+    chatPostalCode: chatPostal ?? null,
+    programId: contractIds(DEFAULT_NETWORK).escrowId,
+    usdcMint: contractIds(DEFAULT_NETWORK).usdcId,
+    mode: 'mock',
+  };
+  return Response.json(res);
+}
+
+/** Matched available Coto lines only. The Día total never enters the hash. */
+function cotoServerCart(diaCartId: string, rows: ComparisonRow[]): Cart {
+  const lines: CartLine[] = rows.map((row, index) => {
+    const offer = row.coto!;
+    const unit = row.quantity > 0 ? Math.round(offer.lineCentavos / row.quantity) : offer.lineCentavos;
+    return {
+      index,
+      skuId: offer.id,
+      name: offer.name,
+      quantity: row.quantity,
+      sellerId: 'coto',
+      unitPrice: { centavos: unit, display: pesos(unit) },
+      lineTotal: { centavos: offer.lineCentavos, display: pesos(offer.lineCentavos) },
+      available: true,
+    };
+  });
+  const total = lines.reduce((sum, line) => sum + line.lineTotal.centavos, 0);
+  return {
+    retailer: 'coto',
+    cartId: `coto:${diaCartId}`,
+    lines,
+    total: { centavos: total, display: pesos(total) },
+    messages: [],
+  };
 }

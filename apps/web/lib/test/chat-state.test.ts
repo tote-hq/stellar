@@ -4,6 +4,7 @@ import { beforeEach, describe, it } from 'node:test';
 import {
   applyEvent,
   canRetry,
+  dualCheckoutOn,
   endTurn,
   failTurn,
   initialState,
@@ -350,5 +351,31 @@ describe('failTurn after the server acknowledged the message', () => {
     const g = gate.blocks[0];
     assert.equal(g.kind === 'user' && g.text, JUMBO);
     assert.deepEqual(g.kind === 'user' ? g.failed : undefined, login);
+  });
+});
+
+describe('dual checkout flags on the transcript', () => {
+  it('keeps the pay offer on a settled compare and not on a pending one', () => {
+    const cartEvent = { t: 'cart' as const, cart: cart('c1'), handoffUrl: 'https://dia/checkout', dualCheckout: true as const };
+    const pending = { t: 'compare' as const, status: 'pending' as const, cartId: 'c1', handoffUrl: 'https://dia/checkout' };
+    const settled = {
+      t: 'compare' as const,
+      status: 'ok' as const,
+      cartId: 'c1',
+      handoffUrl: 'https://dia/checkout',
+      matched: 1,
+      lines: 1,
+      rows: [],
+      checkoutDemo: true as const,
+    };
+    const s = run([cartEvent, pending, settled]);
+    const card = s.blocks.find((b) => b.kind === 'cart');
+    const compare = s.blocks.find((b) => b.kind === 'compare');
+    assert.equal(card?.kind === 'cart' && card.dualCheckout, true);
+    assert.equal(compare?.kind === 'compare' && compare.checkoutDemo, true);
+    assert.equal(dualCheckoutOn(s), true);
+    const waiting = run([cartEvent, pending]);
+    const row = waiting.blocks.find((b) => b.kind === 'compare');
+    assert.equal(row?.kind === 'compare' && row.checkoutDemo, undefined);
   });
 });
