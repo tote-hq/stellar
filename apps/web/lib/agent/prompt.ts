@@ -236,6 +236,8 @@ export function stateBanner(state: {
   postalCode?: string;
   cartLines?: number;
   cartTotal?: string;
+  /** From `retailer_search.order` — search / compare seed order. */
+  searchOrder?: Array<'dia' | 'coto'>;
 }): string {
   if (!state.retailer) {
     return '[session: no supermarket or postal code set yet]';
@@ -244,7 +246,11 @@ export function stateBanner(state: {
     state.cartLines && state.cartLines > 0
       ? `cart ${state.cartLines} line(s), ${state.cartTotal}`
       : 'cart empty';
-  return `[session: ${state.retailer}, CP ${state.postalCode}, ${cart}]`;
+  const order =
+    state.searchOrder && state.searchOrder.length > 0
+      ? `, search ${state.searchOrder.join('→')}`
+      : '';
+  return `[session: ${state.retailer}, CP ${state.postalCode}, ${cart}${order}]`;
 }
 
 /** Shown before the first message. Three things worth trying, in the user's words. */

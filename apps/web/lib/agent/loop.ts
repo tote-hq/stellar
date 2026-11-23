@@ -4,7 +4,7 @@ import { callMcpTool, mcpToolsToAnthropic } from '../mcp/bridge';
 import type { Session } from '../mcp/session';
 import { DEFAULT_LANG, inLang, type Lang } from '../lang.ts';
 import type { ChatImage } from '../chat-image.ts';
-import { chatDualCheckoutDemoEnabled, chatDualCompareEnabled } from '../config.ts';
+import { chatDualCheckoutDemoEnabled, chatDualCompareEnabled, getRetailerSearch } from '../config.ts';
 import type { UiEvent } from '../protocol';
 import { autoCompare } from './auto-compare';
 import { earlyLocationAsk } from './early-ask';
@@ -142,6 +142,7 @@ export async function runTurn(
   // Before early-ask and before the model. An off-topic message is not a
   // basket, so it must not become the postal-code question and it must not
   // open a tool. Ambiguous grocery talk falls through; see topic-guard.ts.
+  const search = await getRetailerSearch();
   if (classifyTopic(userText, { hasImage: Boolean(image) }) === 'refuse') {
     const reply = offTopicRefusal(lang, userText);
     const location = session.state.getLocation();
@@ -156,6 +157,7 @@ export async function runTurn(
             postalCode: location?.postalCode,
             cartLines: cart?.lines.length,
             cartTotal: cart?.total.display,
+            searchOrder: search.order,
           }),
           image,
         ),
@@ -199,6 +201,7 @@ export async function runTurn(
         postalCode: location?.postalCode,
         cartLines: cart?.lines.length,
         cartTotal: cart?.total.display,
+        searchOrder: search.order,
       }),
       image,
     ),
@@ -273,7 +276,9 @@ export async function runTurn(
     // messages teaches the model not to call tools in parallel.
     const results: Anthropic.ToolResultBlockParam[] = [];
     // Once per hop, before any cart card. The bit is not stored on the turn.
-    turn.cache.dualCheckout = await chatDualCheckoutDemoEnabled();
+    // retailer_search.enabled.coto off turns off compare + Coto pay; Día stays on.
+    const retailers = await getRetailerSearch();
+    turn.cache.dualCheckout = (await chatDualCheckoutDemoEnabled()) && retailers.enabled.coto;
     for (const use of uses) {
       // The trail is for work, not for drawing. An MCP call reaches a
       // supermarket and can take twenty seconds, so naming it explains the
@@ -307,7 +312,7 @@ export async function runTurn(
         const note = await autoCompare({
           cache: turn.cache,
           toolName: use.name,
-          enabled: await chatDualCompareEnabled(),
+          enabled: (await chatDualCompareEnabled()) && retailers.enabled.coto,
           postalCode: session.state.getLocation()?.postalCode,
           emit,
         });

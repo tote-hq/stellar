@@ -15,7 +15,7 @@ const HANDOFF =
   'https://diaonline.supermercadosdia.com.ar/checkout/?orderFormId=e2e-cart-105#/cart';
 
 const DIA_LABEL = 'Pagar el changuito completo de Día';
-const COTO_LABEL = 'Pagar las líneas que coinciden en Coto';
+const COTO_LABEL = 'Pagar las alternativas aceptadas de Coto';
 
 const CART_BLOCK = {
   kind: 'cart',

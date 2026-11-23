@@ -11,7 +11,7 @@ import { FaucetConfirm } from '../../../components/FaucetConfirm';
 import { PollarSpanish } from '../../../components/PollarSpanish';
 import { ReceiveModal } from '../../../components/ReceiveModal';
 import type { ChatState } from '../../../lib/chat-state';
-import { ENOUGH_UNITS } from '../../../lib/faucet-policy';
+import { CAP_UNITS } from '../../../lib/faucet-policy';
 
 /**
  * The fixtures that need event handlers. A server component cannot hand a
@@ -124,12 +124,12 @@ export function Fixtures() {
           Cargar USDC (saldo 0)
         </button>
         <button type="button" className="btn btn-sm btn-ghost" onClick={() => setFaucet('full')}>
-          Cargar USDC (saldo 100)
+          Cargar USDC (saldo 1000)
         </button>
       </div>
       {faucet ? (
         <FaucetConfirm
-          balanceUnits={faucet === 'empty' ? 0n : ENOUGH_UNITS}
+          balanceUnits={faucet === 'empty' ? 0n : CAP_UNITS}
           onClose={() => setFaucet(null)}
           onConfirm={() => setFaucet(null)}
         />

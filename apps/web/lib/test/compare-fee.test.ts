@@ -51,7 +51,7 @@ describe('compare fee', () => {
     assert.equal(totals.feeCentavos, 0);
   });
 
-  it('charges nothing when no line is an EAN match', () => {
+  it('charges nothing when no line is a similar match', () => {
     const totals = comparisonTotals([
       row({ diaLineCentavos: 500, confidence: 'none', coto: undefined }),
     ]);
@@ -60,7 +60,7 @@ describe('compare fee', () => {
     assert.equal(totals.feeCentavos, 0);
   });
 
-  it('leaves brand + size out of both subtotals and the fee', () => {
+  it('counts brand + size similars toward both subtotals and the fee', () => {
     const similar = row({
       skuId: 'similar',
       diaLineCentavos: 400,
@@ -72,12 +72,12 @@ describe('compare fee', () => {
       diaLineCentavos: 1000,
       coto: { id: 'e', name: 'Igual', shelfCentavos: 800, lineCentavos: 800, available: true },
     });
-    assert.equal(countsTowardFee(similar), false);
+    assert.equal(countsTowardFee(similar), true);
     const totals = comparisonTotals([similar, exact]);
-    assert.equal(totals.diaSubtotalCentavos, 1000);
-    assert.equal(totals.otherSubtotalCentavos, 800);
-    assert.equal(totals.savingsCentavos, 200);
-    assert.equal(totals.feeCentavos, 40);
+    assert.equal(totals.diaSubtotalCentavos, 1400);
+    assert.equal(totals.otherSubtotalCentavos, 900);
+    assert.equal(totals.savingsCentavos, 500);
+    assert.equal(totals.feeCentavos, 100);
   });
 
   it('leaves an unavailable Coto row out', () => {

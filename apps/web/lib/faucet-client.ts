@@ -13,13 +13,17 @@ import type { NetworkId } from './deployments.ts';
 import { fetchAs, type Who } from './fetch-as.ts';
 import { signWalletProof } from './wallet-proof.ts';
 
-export async function postFaucet(who: Who, network: NetworkId): Promise<Response | null> {
+export async function postFaucet(
+  who: Who,
+  network: NetworkId,
+  chunks = 1,
+): Promise<Response | null> {
   if (!who.address) return null;
   const proof = await signWalletProof(who.sign, 'faucet', who.address);
   if (!proof) return null;
   return fetchAs(who, '/api/faucet', {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify({ address: who.address, network, proof }),
+    body: JSON.stringify({ address: who.address, network, proof, chunks }),
   });
 }

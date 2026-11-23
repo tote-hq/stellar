@@ -1,6 +1,7 @@
 /**
- * Fee on the absolute gap between matched product subtotals.
- * Shipping is not an input. Only an available EAN match is counted.
+ * Fee on the absolute gap between similar product subtotals.
+ * Shipping is not an input. An available EAN or brand+size match counts
+ * (similars, not EAN-only). Fee may be 0 when the gap is 0.
  * No imports: the checkout tests load this file by stripping types.
  */
 
@@ -26,15 +27,21 @@ export interface ComparisonTotals {
   feeCentavos: number;
 }
 
+export type FeeBasis = 'gap' | 'no_refs' | 'timeout' | 'other_disabled' | 'compare_failed';
+
 export interface ComparisonQuote extends ComparisonTotals {
   /** US cents added on top of the Día basket. Zero when the fee is zero. */
   feeUsdCents: number;
   rows: ComparisonRow[];
+  feeBasis?: FeeBasis;
 }
 
-/** High confidence is an EAN match that Coto can sell. Brand + size stays out. */
+/** Similar available Coto lines: EAN or brand+size. Fee may still be 0. */
 export function countsTowardFee(row: ComparisonRow): boolean {
-  return row.confidence === 'ean' && row.coto?.available === true;
+  return (
+    (row.confidence === 'ean' || row.confidence === 'brand_size_unit') &&
+    row.coto?.available === true
+  );
 }
 
 /**

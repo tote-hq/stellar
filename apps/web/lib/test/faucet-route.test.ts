@@ -24,7 +24,7 @@ mockBindings();
 mockResolver();
 
 // One tester per case: the per-address cooldown is real.
-const testers = Array.from({ length: 8 }, () => Keypair.random());
+const testers = Array.from({ length: 10 }, () => Keypair.random());
 __setWalletDirectoryForTests(granted(testers.map((kp) => kp.publicKey())));
 
 describe('/api/faucet', () => {
@@ -74,12 +74,16 @@ describe('/api/faucet', () => {
     console.error = (...a: unknown[]) => void logs.push(a.map(String).join(' '));
   });
 
-  const post = (kp: Keypair, { proof = true, cookie = human } = {}) =>
+  const post = (kp: Keypair, { proof = true, cookie = human, chunks }: { proof?: boolean; cookie?: string; chunks?: number } = {}) =>
     POST(
       new Request('https://app.changuito.me/api/faucet', {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie },
-        body: JSON.stringify({ address: kp.publicKey(), ...(proof ? { proof: signedProof(kp, 'faucet') } : {}) }),
+        body: JSON.stringify({
+          address: kp.publicKey(),
+          ...(proof ? { proof: signedProof(kp, 'faucet') } : {}),
+          ...(chunks !== undefined ? { chunks } : {}),
+        }),
       }),
     );
 
@@ -102,7 +106,7 @@ describe('/api/faucet', () => {
     assert.ok(!chain.calls.some((c) => c.method === 'mint'));
   });
 
-  it('a new tester gets XLM from friendbot and a mint signed by the resolver', async () => {
+  it('a new tester gets XLM from friendbot and a +100 USDC mint signed by the resolver', async () => {
     const kp = testers[2]!;
     const res = await post(kp);
     assert.equal(res.status, 200);
@@ -114,9 +118,10 @@ describe('/api/faucet', () => {
     const mint = chain.calls.find((c) => c.method === 'mint');
     assert.equal(mint?.signedBy, RESOLVER_PUBLIC);
     assert.equal((mint?.args as { to: string }).to, kp.publicKey());
+    assert.equal((mint?.args as { amount: string }).amount, '1000000000');
   });
 
-  it('enough USDC already is a 429 answer with the balance, and no mint', async () => {
+  it('cap USDC already is a 429 with reasonKind cap, and no mint', async () => {
     const kp = testers[3]!;
     accounts.set(kp.publicKey(), 100);
     chain.balances.set(kp.publicKey(), 10_000_000_000n);
@@ -124,7 +129,8 @@ describe('/api/faucet', () => {
     assert.equal(res.status, 429);
     const body = await res.json();
     assert.equal(body.txHash, null);
-    assert.ok(body.note);
+    assert.equal(body.reasonKind, 'cap');
+    assert.match(body.note, /máximo|1000/);
     assert.equal(friendbotCalls, 0, 'a funded account is not sent to friendbot');
     assert.ok(!chain.calls.some((c) => c.method === 'mint'));
   });
@@ -139,41 +145,41 @@ describe('/api/faucet', () => {
     assert.match(logs.join('\n'), /\[faucet\] failed/);
   });
 
-  it('a balance above 100 USDC and below 1000 still refuses when the demo flags are off', async () => {
+  it('mints +100 when balance is above 100 and below the 1000 cap', async () => {
     const kp = testers[5]!;
     accounts.set(kp.publicKey(), 100);
     chain.balances.set(kp.publicKey(), 2_000_000_000n);
     const res = await post(kp);
-    assert.equal(res.status, 429);
-    assert.ok(!chain.calls.some((c) => c.method === 'mint'));
+    assert.equal(res.status, 200);
+    const mint = chain.calls.find((c) => c.method === 'mint');
+    assert.equal((mint?.args as { amount: string }).amount, '1000000000');
   });
 
-  it('mints the shortfall to 1000 USDC when the demo flags are on, and ignores a body amount', async () => {
-    const { __setConfigForTests } = await import('../config.ts');
-    __setConfigForTests({ chat_dual_checkout_demo: true, sandbox_mock: true });
-    try {
-      const kp = testers[6]!;
-      accounts.set(kp.publicKey(), 100);
-      chain.balances.set(kp.publicKey(), 2_000_000_000n);
-      const res = await POST(
-        new Request('https://app.changuito.me/api/faucet', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', cookie: human },
-          body: JSON.stringify({ address: kp.publicKey(), proof: signedProof(kp, 'faucet'), amount: '1' }),
-        }),
-      );
-      assert.equal(res.status, 200);
-      const mint = chain.calls.find((c) => c.method === 'mint');
-      assert.equal((mint?.args as { amount: string }).amount, '8000000000');
-      const full = testers[7]!;
-      accounts.set(full.publicKey(), 100);
-      chain.balances.set(full.publicKey(), 10_000_000_000n);
-      const again = await post(full);
-      assert.equal(again.status, 429);
-      assert.ok(!chain.calls.some((c) => c.method === 'mint' && (c.args as { to: string }).to === full.publicKey()));
-    } finally {
-      __setConfigForTests(null);
-    }
+  it('clips the last chunk to the cap (950 → +50) and rejects invalid chunks', async () => {
+    const kp = testers[6]!;
+    accounts.set(kp.publicKey(), 100);
+    chain.balances.set(kp.publicKey(), 9_500_000_000n);
+    const res = await post(kp);
+    assert.equal(res.status, 200);
+    const mint = chain.calls.find((c) => c.method === 'mint');
+    assert.equal((mint?.args as { amount: string }).amount, '500000000');
+
+    const bad = testers[7]!;
+    accounts.set(bad.publicKey(), 100);
+    const refused = await post(bad, { chunks: 0 });
+    assert.equal(refused.status, 400);
+    const refusedHigh = await post(bad, { chunks: 11 });
+    assert.equal(refusedHigh.status, 400);
+  });
+
+  it('honours a multi-chunk POST for a lock shortfall', async () => {
+    const kp = testers[8]!;
+    accounts.set(kp.publicKey(), 100);
+    chain.balances.set(kp.publicKey(), 1_500_000_000n);
+    const res = await post(kp, { chunks: 2 });
+    assert.equal(res.status, 200);
+    const mint = chain.calls.find((c) => c.method === 'mint');
+    assert.equal((mint?.args as { amount: string }).amount, '2000000000');
   });
 });
 
