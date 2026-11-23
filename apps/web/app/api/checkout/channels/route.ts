@@ -1,4 +1,6 @@
 import { channelsClient, channelsKey, noteLanded, prepareOpen, stellarSimulator, submitOpen, type OpenFields } from '../../../../lib/server/channels.ts';
+import { checkoutStore } from '../../../../lib/checkout/store.ts';
+import { cotoCheckoutBlocked } from '../../../../lib/checkout/coto-guard.ts';
 import { readSessionUser, sessionMismatchResponse } from '../../../../lib/session-match.ts';
 
 export const runtime = 'nodejs';
@@ -16,6 +18,14 @@ export async function POST(req: Request): Promise<Response> {
   const body = await req.json().catch(() => null);
   const input = fields(body);
   if (!input) return Response.json({ error: 'bad request' }, { status: 400 });
+  try {
+    const rec = await checkoutStore().get(input.orderId);
+    if (rec && cotoCheckoutBlocked(rec.retailer)) {
+      return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
+    }
+  } catch (err) {
+    console.error('[checkout/channels] record', err instanceof Error ? err.name : 'read failed');
+  }
   const step = body?.step;
   try {
     const deps = {

@@ -26,6 +26,7 @@ import { uiCopy } from '../lib/ui-copy.ts';
 import { useChat } from '../lib/use-chat';
 import { useWallet } from '../lib/use-wallet.ts';
 import { CartCard } from './CartCard';
+import { ComparisonCard } from './ComparisonCard';
 import { useLang } from './LangProvider';
 import { useNetwork } from './NetworkProvider';
 import { CameraIcon, ImageIcon, MicIcon, RetryIcon } from './icons';
@@ -490,6 +491,8 @@ function ChatCore({
                   }
                 />
               );
+            case 'compare':
+              return <ComparisonCard key={b.id} block={b} />;
             case 'error':
               // The soft-limit line is guest copy. Once the shopper is signed
               // in it is not an error, and leaving it in the thread reads as

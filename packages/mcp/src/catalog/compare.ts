@@ -237,3 +237,4 @@ export async function compareDiaToCoto(
 }
 
 export { PROBE_BASKET, PROBE_POSTAL } from './probe-basket.js';
+export { compareForCard } from './compare-card.js';

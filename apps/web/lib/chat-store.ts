@@ -2,6 +2,7 @@ import type { Cart, CartLine, LocationContext, Money, Product, Seller } from '@c
 import type { SessionSnapshot } from '@changuito/mcp/session';
 
 import type { Block, ChatState, ToolRun } from './chat-state.ts';
+import type { CompareLineView, CompareOffer } from './protocol';
 
 /**
  * Chats in localStorage.
@@ -181,6 +182,8 @@ function packBlock(b: Block): Block | null {
       return b.handoffUrl === undefined
         ? { kind: 'cart', id: b.id, cart: packCart(b.cart) }
         : { kind: 'cart', id: b.id, cart: packCart(b.cart), handoffUrl: b.handoffUrl };
+    case 'compare':
+      return packCompare(b);
     case 'error':
       return { kind: 'error', id: b.id, message: b.message, recoverable: b.recoverable };
     default: {
@@ -189,6 +192,51 @@ function packBlock(b: Block): Block | null {
       return null;
     }
   }
+}
+
+function packOffer(offer: CompareOffer): CompareOffer {
+  const out: CompareOffer = {
+    id: offer.id,
+    name: offer.name,
+    shelfCentavos: offer.shelfCentavos,
+    lineCentavos: offer.lineCentavos,
+    available: offer.available,
+  };
+  if (offer.url !== undefined && /^https?:\/\//i.test(offer.url)) out.url = offer.url;
+  return out;
+}
+
+function packCompareRow(row: CompareLineView): CompareLineView {
+  const out: CompareLineView = {
+    skuId: row.skuId,
+    name: row.name,
+    quantity: row.quantity,
+    diaLineCentavos: row.diaLineCentavos,
+    confidence: row.confidence,
+  };
+  if (row.coto && row.coto.lineCentavos > 0 && row.coto.shelfCentavos > 0) out.coto = packOffer(row.coto);
+  return out;
+}
+
+function packCompare(b: Extract<Block, { kind: 'compare' }>): Extract<Block, { kind: 'compare' }> {
+  const out: Extract<Block, { kind: 'compare' }> = {
+    kind: 'compare',
+    id: b.id,
+    status: b.status,
+    cartId: b.cartId,
+    handoffUrl: b.handoffUrl,
+    matched: b.matched,
+    lines: b.lines,
+    rows: b.rows.map(packCompareRow),
+  };
+  if (b.gap) {
+    out.gap = {
+      diaSubtotalCentavos: b.gap.diaSubtotalCentavos,
+      cotoSubtotalCentavos: b.gap.cotoSubtotalCentavos,
+      gapCentavos: b.gap.gapCentavos,
+    };
+  }
+  return out;
 }
 
 /**
@@ -307,6 +355,83 @@ function asTool(v: unknown): ToolRun | null {
   return out;
 }
 
+const COMPARE_STATUS = new Set(['pending', 'ok', 'degraded', 'timed_out']);
+const COMPARE_CONFIDENCE = new Set(['ean', 'brand_size_unit', 'none', 'failed']);
+
+function httpUrl(value: unknown): string | undefined {
+  return typeof value === 'string' && /^https?:\/\//i.test(value) ? value : undefined;
+}
+
+function asOffer(value: unknown): CompareOffer | undefined {
+  if (!isObj(value)) return undefined;
+  const id = str(value.id);
+  const name = str(value.name);
+  const shelfCentavos = num(value.shelfCentavos);
+  const lineCentavos = num(value.lineCentavos);
+  if (id === null || name === null || shelfCentavos === null || lineCentavos === null) return undefined;
+  if (shelfCentavos <= 0 || lineCentavos <= 0) return undefined;
+  const offer: CompareOffer = {
+    id,
+    name,
+    shelfCentavos,
+    lineCentavos,
+    available: value.available === true,
+  };
+  const url = httpUrl(value.url);
+  if (url) offer.url = url;
+  return offer;
+}
+
+function asCompareRow(value: unknown): CompareLineView | null {
+  if (!isObj(value)) return null;
+  const skuId = str(value.skuId);
+  const name = str(value.name);
+  const quantity = num(value.quantity);
+  const diaLineCentavos = num(value.diaLineCentavos);
+  const confidence = str(value.confidence);
+  if (skuId === null || name === null || quantity === null || diaLineCentavos === null) return null;
+  if (confidence === null || !COMPARE_CONFIDENCE.has(confidence)) return null;
+  const row: CompareLineView = {
+    skuId,
+    name,
+    quantity,
+    diaLineCentavos,
+    confidence: confidence as CompareLineView['confidence'],
+  };
+  const coto = asOffer(value.coto);
+  if (coto) row.coto = coto;
+  return row;
+}
+
+function asCompare(v: Record<string, unknown>, id: string): Extract<Block, { kind: 'compare' }> | null {
+  const status = str(v.status);
+  const cartId = str(v.cartId);
+  const handoffUrl = str(v.handoffUrl);
+  const matched = num(v.matched);
+  const lines = num(v.lines);
+  if (status === null || !COMPARE_STATUS.has(status) || cartId === null || handoffUrl === null) return null;
+  if (matched === null || lines === null) return null;
+  const block: Extract<Block, { kind: 'compare' }> = {
+    kind: 'compare',
+    id,
+    status: status as Extract<Block, { kind: 'compare' }>['status'],
+    cartId,
+    handoffUrl,
+    matched,
+    lines,
+    rows: arr(v.rows).map(asCompareRow).filter((row): row is CompareLineView => row !== null),
+  };
+  if (isObj(v.gap)) {
+    const diaSubtotalCentavos = num(v.gap.diaSubtotalCentavos);
+    const cotoSubtotalCentavos = num(v.gap.cotoSubtotalCentavos);
+    const gapCentavos = num(v.gap.gapCentavos);
+    if (diaSubtotalCentavos !== null && cotoSubtotalCentavos !== null && gapCentavos !== null && gapCentavos >= 0) {
+      block.gap = { diaSubtotalCentavos, cotoSubtotalCentavos, gapCentavos };
+    }
+  }
+  return block;
+}
+
 /** Anything that does not parse is dropped, not repaired. A half-block is worse than a gap. */
 function asBlock(v: unknown): Block | null {
   if (!isObj(v)) return null;
@@ -340,6 +465,8 @@ function asBlock(v: unknown): Block | null {
       const handoffUrl = str(v.handoffUrl);
       return handoffUrl === null ? { kind: 'cart', id, cart } : { kind: 'cart', id, cart, handoffUrl };
     }
+    case 'compare':
+      return asCompare(v, id);
     case 'error': {
       const message = str(v.message);
       return message === null ? null : { kind: 'error', id, message, recoverable: v.recoverable === true };

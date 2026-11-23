@@ -42,6 +42,11 @@ export interface QuoteResponse {
    * `amountCents` already includes `feeUsdCents`. Coto is not checked out.
    */
   comparison?: ComparisonQuote;
+  /**
+   * The in-chat Día vs Coto card is on, so the modal does not offer the same
+   * comparison again. Absent or false keeps the compare button.
+   */
+  dualCompare?: boolean;
 }
 
 export type CheckoutStage = 'quoted' | 'locked' | 'shopping' | 'done' | 'refunded';

@@ -22,10 +22,11 @@ import { arsToUsdCents } from '@changuito/mcp/fx';
 import type { Cart } from '@changuito/mcp/types';
 
 import { comparisonTotals, feeUsdFrom, type ComparisonQuote } from '../../../../lib/checkout/compare-fee.ts';
+import { cotoCheckoutBlocked } from '../../../../lib/checkout/coto-guard.ts';
 import { quoteRate } from '../../../../lib/checkout/rate.ts';
 import { NO_DELIVERY, quoteShipping, type ShippingLocation } from '../../../../lib/checkout/shipping.ts';
 import { checkoutStore } from '../../../../lib/checkout/store.ts';
-import { sandboxFlags, getConfig, flagOn, memberFlow } from '../../../../lib/config.ts';
+import { sandboxFlags, getConfig, flagOn, memberFlow, chatDualCompareEnabled } from '../../../../lib/config.ts';
 import { checkoutMode } from '../../../../lib/checkout/mode.ts';
 import { manualAvailable, manualMember, manualStatus } from '../../../../lib/checkout/manual-server.ts';
 import { MANUAL_KIND, SERVICE_FEE_CENTS, SERVICE_FEE_UNITS, serviceOrderId, VIEWER_SECONDS } from '../../../../lib/checkout/manual-policy.ts';
@@ -67,6 +68,9 @@ export async function POST(req: Request): Promise<Response> {
   } | null;
   if (!isCart(body?.cart)) return Response.json({ error: 'Falta el changuito.' }, { status: 400 });
   const cart = body.cart;
+  if (cotoCheckoutBlocked(cart.retailer)) {
+    return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
+  }
   const compare = body.compare === true;
   if (compare && cart.retailer !== 'dia') {
     return Response.json({ error: 'La comparación solo está disponible para un changuito de Día.' }, { status: 400 });
@@ -75,6 +79,7 @@ export async function POST(req: Request): Promise<Response> {
   if (lines.length === 0 || cart.total.centavos <= 0) {
     return Response.json({ error: 'El changuito está vacío.' }, { status: 400 });
   }
+  const dualCompare = await chatDualCompareEnabled();
 
   // Resume funded sessions across a full app reload without another fee lock.
   // A compared quote must not resume into the 0.10 record.
@@ -95,6 +100,7 @@ export async function POST(req: Request): Promise<Response> {
         totalCentavos: cart.total.centavos + (rec.shippingCentavos ?? 0), postalCode: rec.postalCode,
         postalSource: 'profile', chatPostalCode: null, programId: contractIds(DEFAULT_NETWORK).escrowId,
         usdcMint: contractIds(DEFAULT_NETWORK).usdcId, mode: 'live', resumeStatus: manualStatus(rec),
+        dualCompare,
         ...(rec.manualFlow ? { manualFlow: rec.manualFlow } : {}),
       }, { headers: { 'cache-control': 'no-store' } });
     } catch (err) { if ((err as { code?: string }).code !== '42P01') throw err; }
@@ -231,6 +237,7 @@ export async function POST(req: Request): Promise<Response> {
     programId: contractIds(DEFAULT_NETWORK).escrowId,
     usdcMint: contractIds(DEFAULT_NETWORK).usdcId,
     mode,
+    dualCompare,
     ...(comparison ? { comparison } : {}),
   };
   return Response.json(res);

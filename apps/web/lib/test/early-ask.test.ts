@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { STARTERS } from '../agent/prompt.ts';
-import { EARLY_LOCATION_ASK, earlyLocationAsk, mentionsPostalCode } from '../agent/early-ask.ts';
+import { EARLY_LOCATION_ASK, EARLY_LOCATION_ASK_EN, earlyLocationAsk, mentionsPostalCode } from '../agent/early-ask.ts';
 
 const first = (text: string) => earlyLocationAsk({ hasLocation: false, firstMessage: true, text });
 
@@ -10,6 +10,19 @@ describe('earlyLocationAsk', () => {
   it('asks in-process on the first message when there is no location and no postal code', () => {
     // The QA path: a guest taps a starter and waited 40s for this question.
     for (const s of STARTERS) assert.equal(first(s), EARLY_LOCATION_ASK, s);
+  });
+
+  it('names Día and a postal code, in both languages, and does not ask which supermarket', () => {
+    assert.equal(EARLY_LOCATION_ASK, 'Para buscar precios reales en Día necesito tu **código postal**. ¿Cuál es?');
+    assert.equal(
+      EARLY_LOCATION_ASK_EN,
+      'To look up real prices at Día I need your **postcode**. What is it?',
+    );
+    assert.equal(earlyLocationAsk({ hasLocation: false, firstMessage: true, text: 'leche', lang: 'es' }), EARLY_LOCATION_ASK);
+    assert.equal(earlyLocationAsk({ hasLocation: false, firstMessage: true, text: 'leche', lang: 'en' }), EARLY_LOCATION_ASK_EN);
+    for (const line of [EARLY_LOCATION_ASK, EARLY_LOCATION_ASK_EN]) {
+      assert.equal(/Jumbo|Disco|Carrefour/i.test(line), false, line);
+    }
   });
 
   it('leaves a postal code, a known location, and a follow-up to the model', () => {

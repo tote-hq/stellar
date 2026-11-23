@@ -1,7 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Cart, Product } from '@changuito/mcp/types';
 
-import type { UiEvent } from '../protocol';
+import type { CompareCard, UiEvent } from '../protocol';
 
 /**
  * Tools the model calls to draw things, which never reach the MCP server.
@@ -37,6 +37,14 @@ export interface RenderCache {
    * a second card; a changed one is worth it without being asked for.
    */
   drawn?: string;
+  /**
+   * Fingerprint of the Día vs Coto card last compared, and the card itself.
+   * Optional, like `drawn`: a version bump would drop every conversation in
+   * flight. A later turn with the same fingerprint re-emits `compareResult`
+   * and does not call Coto.
+   */
+  compareFor?: string;
+  compareResult?: CompareCard;
 }
 
 export const emptyCache = (): RenderCache => ({ products: new Map() });

@@ -72,3 +72,13 @@ export async function sandboxFlags(): Promise<SandboxFlags> {
 export async function turnstileDisabled(): Promise<boolean> {
   return flagOn(await getConfig(), 'turnstile_disabled');
 }
+
+/**
+ * `chat_dual_compare` in the config table. JSON `true` or the string `"true"`
+ * draws the in-chat Día vs Coto card. A missing row, false, or an unread
+ * database leaves it off, so a deploy before the row is set changes nothing
+ * the shopper sees. It is not a Worker variable.
+ */
+export async function chatDualCompareEnabled(): Promise<boolean> {
+  return flagOn(await getConfig(), 'chat_dual_compare');
+}
