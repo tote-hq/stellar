@@ -1,12 +1,12 @@
 # End-to-end
 
-Playwright, in three projects. Unit tests stay on `npm test` and do not open a
-browser.
+Playwright. Unit tests stay on `npm test` and do not open a browser.
 
 | Project | Target |
 |---|---|
 | `landing` | `LANDING_BASE_URL`, default `https://www.changuito.me` |
 | `app` | `APP_BASE_URL`, default `https://app.changuito.me` |
+| `compare` | `APP_BASE_URL`. Opt-in. `npm run test:e2e:compare` |
 
 The first two are smokes, and production is their target on purpose. A local
 preview needs Pollar, Turnstile, and the model keys the app already has on
@@ -92,6 +92,30 @@ issues a fixed test code. Google OAuth is intentionally not automated.
 
 If the modal has no email field, the spec skips and records that the widget
 was Google or wallet only.
+
+## Día vs Coto card
+
+`npm run test:e2e:compare` runs project `compare` with `COMPARE_E2E=1`.
+Without that variable the spec skips, so `npm run test:e2e` stays the
+production smoke. The target is the Worker at `APP_BASE_URL`.
+
+The spec does not shop, does not call the model, and does not flip
+`chat_dual_compare`, `sandbox_mock`, `sandbox_mock_fail`, or
+`turnstile_disabled`. It writes one stored chat into `localStorage` (the
+transcript the shopper already keeps) and opens it from the history rail.
+`GET /api/human` is answered as `{ "mode": "open" }` inside the test only,
+so the human gate does not hide the card. Checkout routes are not stubbed.
+
+It asserts the card at `data-testid=compare-card`: the Spanish match line
+(`2 de 3 productos coinciden` for the fixture), no `20%` and no fee words
+on that card, a Día link whose href is the cart handoff, and a Coto link
+on `https://www.coto.com.ar/`. After each click, no request goes to
+`/api/checkout/quote`, `/api/checkout/start`, `/api/checkout/open`, or
+`/api/checkout/channels`.
+
+Screenshot, video, and trace are on for this project. They land in
+`test-results/` and `playwright-report/`, which are gitignored. Do not
+commit them.
 
 ## GitHub Actions
 
