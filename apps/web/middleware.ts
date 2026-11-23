@@ -18,6 +18,16 @@ function humansOnly(message: string) {
 }
 
 export async function middleware(req: NextRequest) {
+  const path = req.nextUrl.pathname;
+  // The probe authenticates with its own bearer and answers 404 without it.
+  // The smoke script has no Turnstile cookie and no browser hints.
+  // Kept inline so this edge middleware does not import node:crypto.
+  if (path === '/api/compare/probe' && req.method === 'GET') {
+    const res = NextResponse.next();
+    res.headers.set('Cache-Control', 'no-store');
+    return res;
+  }
+
   const ua = req.headers.get('user-agent') ?? '';
   if (AI_BOT_UA.test(ua)) {
     return new NextResponse('Solo humanos.', {
@@ -25,8 +35,6 @@ export async function middleware(req: NextRequest) {
       headers: { 'content-type': 'text/plain; charset=utf-8', ...PRIVATE_NO_STORE },
     });
   }
-
-  const path = req.nextUrl.pathname;
 
   // Conservative non-browser reject on APIs (keep UI fetch working).
   if (path.startsWith('/api/') && path !== '/api/human') {

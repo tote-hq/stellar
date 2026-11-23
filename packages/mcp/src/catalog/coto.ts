@@ -10,8 +10,17 @@ import { fromPesos } from '../util/money.js';
 import { normalizeEan, sizeFromName, type NameSize } from './normalize.js';
 
 const ANONYMOUS_STORE = '200';
-const GAP_MS = 400;
+/** Storefront HTML and the main bundle. Left at the original gap. */
+const SCRAPE_GAP_MS = 400;
+/**
+ * Constructor search. A warm call is about 200ms, and a 15-line basket
+ * does not fit in 10s behind the 400ms storefront gap. One 429 is retried
+ * inside the slot.
+ */
+const SEARCH_GAP_MS = 40;
+const SEARCH_429_BACKOFF_MS = 1_000;
 const TIMEOUT_MS = 25_000;
+const PUBLIC_KEY_MARK = 'constructor:{apiKey:"key_';
 const STOREFRONT = 'https://www.coto.com.ar';
 
 const UA =
@@ -89,13 +98,22 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let tail: Promise<void> = Promise.resolve();
 
 /** One Constructor or storefront call at a time, with a gap after each. */
-function paced<T>(fn: () => Promise<T>): Promise<T> {
+function paced<T>(fn: () => Promise<T>, gapMs: number): Promise<T> {
   const run = tail.then(fn, fn);
   tail = run.then(
-    () => sleep(GAP_MS),
-    () => sleep(GAP_MS),
+    () => sleep(gapMs),
+    () => sleep(gapMs),
   ).then(() => undefined);
   return run;
+}
+
+function isConstructor(url: string): boolean {
+  return url.startsWith('https://ac.cnstrc.com/');
+}
+
+/** The public key sits early in the ~2.4MB bundle. The rest can be dropped. */
+export function bundleHasPublicKey(text: string): boolean {
+  return text.includes(PUBLIC_KEY_MARK);
 }
 
 function isTimeout(e: unknown): boolean {
@@ -122,7 +140,7 @@ export function cotoBodyUsable(text: string, accept: string): boolean {
     return /src="\/main\.[a-f0-9]+\.js"/.test(text);
   }
   // Storefront main bundle (*/*): real JS carries the public Constructor key.
-  if (text.includes('constructor:{apiKey:"key_')) return true;
+  if (bundleHasPublicKey(text)) return true;
   const head = text.trimStart();
   return head.length > 10_000 && head[0] !== '<';
 }
@@ -140,28 +158,66 @@ export function constructorKeyFromEnv(
 }
 
 /**
+ * Read a Coto response. The storefront bundle trickles; stop once the public
+ * key is in hand instead of waiting for the rest of the file.
+ */
+export async function readCotoBody(res: Response, accept: string): Promise<string> {
+  if (!accept.includes('*/*') || !res.body) return res.text();
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let text = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += dec.decode(value, { stream: true });
+      if (bundleHasPublicKey(text)) break;
+    }
+    text += dec.decode();
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  return text;
+}
+
+async function fetchOnce(
+  url: string,
+  accept: string,
+  headers: Record<string, string>,
+): Promise<{ status: number; text: string } | { error: unknown }> {
+  try {
+    const res = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    return { status: res.status, text: await readCotoBody(res, accept) };
+  } catch (error) {
+    return { error };
+  }
+}
+
+/**
  * GET for Coto. When fetch returns a challenge / empty body, retry over a TLS
  * socket without CF-Worker headers (same idea as util/http.ts). Not gated on
  * `navigator.userAgent` — that check can miss under vinext `nodejs_compat`.
+ * Constructor searches use a shorter gap and one 429 retry. The storefront
+ * scrape keeps the original gap.
  */
 async function pacedGet(url: string, accept: string): Promise<{ status: number; text: string }> {
+  const gapMs = isConstructor(url) ? SEARCH_GAP_MS : SCRAPE_GAP_MS;
   return paced(async () => {
     const headers = {
       Accept: accept,
       'Accept-Language': 'es-AR,es;q=0.9',
       'User-Agent': UA,
     };
-    let fetched: { status: number; text: string } | undefined;
-    let fetchErr: unknown;
-    try {
-      const res = await fetch(url, {
-        headers,
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      });
-      fetched = { status: res.status, text: await res.text() };
-    } catch (e) {
-      fetchErr = e;
+    let attempt = await fetchOnce(url, accept, headers);
+    if (!('error' in attempt) && attempt.status === 429 && isConstructor(url)) {
+      await sleep(SEARCH_429_BACKOFF_MS);
+      attempt = await fetchOnce(url, accept, headers);
     }
+    const fetched = 'error' in attempt ? undefined : attempt;
+    const fetchErr = 'error' in attempt ? attempt.error : undefined;
 
     if (fetched && cotoBodyUsable(fetched.text, accept)) return fetched;
     try {
@@ -173,7 +229,7 @@ async function pacedGet(url: string, accept: string): Promise<{ status: number; 
       if (fetched) return fetched;
       throw networkFailure(e);
     }
-  });
+  }, gapMs);
 }
 
 let cachedKey: string | undefined;

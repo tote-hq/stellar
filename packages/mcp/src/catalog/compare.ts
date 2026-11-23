@@ -5,7 +5,7 @@
  */
 import { getAdapter } from '../adapters/registry.js';
 import type { Product } from '../types.js';
-import { CotoCatalog } from './coto.js';
+import { CotoCatalog, discoverPublicKey } from './coto.js';
 import { matchDiaToCoto, type CotoSearcher, type MatchConfidence } from './match.js';
 
 export interface CompareLine {
@@ -37,6 +37,24 @@ export interface CompareRow {
   coto?: CompareCoto;
 }
 
+/** EAN matches over lines. `brandSizeMatches` is reported and is not part of the rate. */
+export interface CompareStats {
+  lines: number;
+  eanMatches: number;
+  brandSizeMatches: number;
+  none: number;
+  matchRate: number;
+  durationMs: number;
+}
+
+export interface CompareRunOpts {
+  /** Optional deadline. #103 aborts a card that has already waited 10s. */
+  signal?: AbortSignal;
+}
+
+/** How many Día product reads may be in flight. Coto stays on its own queue. */
+const DIA_PREFETCH = 4;
+
 function assertLine(line: CompareLine): void {
   if (!line.skuId || !line.name) throw new Error('dia line missing identity');
   if (!Number.isSafeInteger(line.quantity) || line.quantity <= 0) throw new Error('dia line quantity');
@@ -45,11 +63,62 @@ function assertLine(line: CompareLine): void {
   }
 }
 
-async function compareLine(line: CompareLine, dia: DiaCatalog, coto: CotoSearcher): Promise<CompareRow> {
-  assertLine(line);
-  const product = await dia.getProduct(line.skuId);
-  if (!product) throw new Error('dia product missing');
+function abortError(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error) return signal.reason;
+  const err = new Error('The operation was aborted');
+  err.name = 'AbortError';
+  return err;
+}
 
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortError(signal);
+}
+
+async function mapPool<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Math.min(Math.max(limit, 1), items.length);
+  async function worker(): Promise<void> {
+    for (;;) {
+      const index = next;
+      next += 1;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index] as T);
+    }
+  }
+  if (workers > 0) await Promise.all(Array.from({ length: workers }, () => worker()));
+  return results;
+}
+
+type DiaPrefetch =
+  | { ok: true; product: Pick<Product, 'brand' | 'ean'> }
+  | { ok: false; error: unknown };
+
+async function prefetchDia(
+  line: CompareLine,
+  dia: DiaCatalog,
+  signal?: AbortSignal,
+): Promise<DiaPrefetch> {
+  throwIfAborted(signal);
+  try {
+    assertLine(line);
+    const product = await dia.getProduct(line.skuId);
+    if (!product) return { ok: false, error: new Error('dia product missing') };
+    return { ok: true, product };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
+async function compareLine(
+  line: CompareLine,
+  product: Pick<Product, 'brand' | 'ean'>,
+  coto: CotoSearcher,
+): Promise<CompareRow> {
   const asProduct: Product = {
     skuId: line.skuId,
     productId: line.skuId,
@@ -85,17 +154,51 @@ async function compareLine(line: CompareLine, dia: DiaCatalog, coto: CotoSearche
   return row;
 }
 
+export function compareStats(rows: readonly CompareRow[], durationMs: number): CompareStats {
+  let eanMatches = 0;
+  let brandSizeMatches = 0;
+  let none = 0;
+  for (const row of rows) {
+    if (row.confidence === 'ean') eanMatches += 1;
+    else if (row.confidence === 'brand_size_unit') brandSizeMatches += 1;
+    else none += 1;
+  }
+  const lines = rows.length;
+  return {
+    lines,
+    eanMatches,
+    brandSizeMatches,
+    none,
+    matchRate: lines === 0 ? 0 : eanMatches / lines,
+    durationMs,
+  };
+}
+
 /**
  * One row per available Día line. `coto.lineCentavos` is the shelf times quantity.
  * Brand + size is returned on the row and is not a high-confidence match.
+ * Día products are read at most four at a time. Row order is the input order.
+ * The first Día failure, in that order, rejects the basket before any Coto call.
  */
 export async function compareBasket(
   lines: readonly CompareLine[],
   dia: DiaCatalog,
   coto: CotoSearcher,
+  signal?: AbortSignal,
 ): Promise<CompareRow[]> {
+  throwIfAborted(signal);
+  const prefetched = await mapPool(lines, DIA_PREFETCH, (line) => prefetchDia(line, dia, signal));
+  const products: Array<Pick<Product, 'brand' | 'ean'>> = [];
+  for (const hit of prefetched) {
+    if (!hit.ok) throw hit.error;
+    products.push(hit.product);
+  }
+  throwIfAborted(signal);
   const rows: CompareRow[] = [];
-  for (const line of lines) rows.push(await compareLine(line, dia, coto));
+  for (let i = 0; i < lines.length; i += 1) {
+    throwIfAborted(signal);
+    rows.push(await compareLine(lines[i] as CompareLine, products[i] as Pick<Product, 'brand' | 'ean'>, coto));
+  }
   return rows;
 }
 
@@ -115,3 +218,22 @@ export function diaLookup(postalCode: string): DiaCatalog {
 export function cotoSearcher(): CotoSearcher {
   return new CotoCatalog();
 }
+
+/**
+ * The quote route, the probe and the chat card all enter here.
+ * A lookup failure rejects. `opts` is omitted by the quote route, which keeps
+ * its own 503 and never prices a fee of 0.
+ */
+export async function compareDiaToCoto(
+  lines: readonly CompareLine[],
+  postalCode: string,
+  opts?: CompareRunOpts,
+): Promise<{ rows: CompareRow[]; stats: CompareStats }> {
+  const started = Date.now();
+  // The storefront key overlaps the Día prefetch. Searches join the same flight.
+  void discoverPublicKey().catch(() => undefined);
+  const rows = await compareBasket(lines, diaLookup(postalCode), cotoSearcher(), opts?.signal);
+  return { rows, stats: compareStats(rows, Date.now() - started) };
+}
+
+export { PROBE_BASKET, PROBE_POSTAL } from './probe-basket.js';

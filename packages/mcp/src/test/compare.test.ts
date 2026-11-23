@@ -115,4 +115,45 @@ describe('compareBasket', () => {
     );
     assert.equal(second, true);
   });
+
+  it('prefetches at most four Día products at once and keeps row order', async () => {
+    let inFlight = 0;
+    let max = 0;
+    const ids = ['a', 'b', 'c', 'd', 'e', 'f'];
+    const rows = await compareBasket(
+      ids.map((skuId) => line({ skuId, name: `Leche ${skuId} 1 L` })),
+      {
+        async getProduct() {
+          inFlight += 1;
+          max = Math.max(max, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          inFlight -= 1;
+          return { ean: '7790000000001', brand: 'La Serenisima' };
+        },
+      },
+      searcher([item('Otra leche 1 L', { product_main_ean: '7790000000001' })]),
+    );
+    assert.ok(max > 1);
+    assert.ok(max <= 4);
+    assert.deepEqual(rows.map((row) => row.skuId), ids);
+  });
+
+  it('does not start lookups when the signal is already aborted', async () => {
+    let called = false;
+    await assert.rejects(
+      () => compareBasket(
+        [line()],
+        {
+          async getProduct() {
+            called = true;
+            return { brand: 'La Serenisima' };
+          },
+        },
+        searcher([]),
+        AbortSignal.abort(),
+      ),
+      { name: 'AbortError' },
+    );
+    assert.equal(called, false);
+  });
 });

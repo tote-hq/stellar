@@ -7,6 +7,7 @@
  * thin wrapper around this function: a native wallet route is allowed
  * through here, and the route handler still has to authenticate it.
  */
+import { isCompareProbe } from './compare-probe.ts';
 import { isCheckoutServiceCallback } from './service-callback.ts';
 import {
   AI_BOT_UA,
@@ -38,6 +39,9 @@ export async function apiHumanDecision(
   cookies?: HumanGateCookieJar,
 ): Promise<ApiHumanDecision> {
   const path = new URL(req.url).pathname;
+  // The probe's handler checks a bearer of its own and is 404 without it.
+  // A smoke script has no Turnstile cookie.
+  if (isCompareProbe(path, req.method)) return { kind: 'allow' };
   // The service worker has no browser hints and no Turnstile cookie.
   // Its handler checks a bearer of its own.
   if (isCheckoutServiceCallback(path, req.method)) return { kind: 'allow' };
