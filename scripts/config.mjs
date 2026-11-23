@@ -7,6 +7,7 @@
  *   npm run config -- set sandbox_mock_fail false
  *   npm run config -- set turnstile_disabled true
  *   npm run config -- set chat_dual_compare true
+ *   npm run config -- set chat_dual_checkout_demo true
  *   npm run config -- set manual_checkout_flow guided
  *
  * Connects like scripts/db.mjs: the web app's env file loaded the way Next
@@ -47,6 +48,10 @@ const KNOWN = {
     on
       ? 'a Día basket shows the in-chat Día vs Coto card after the cart link, and the checkout modal hides Comparar con Coto'
       : 'the in-chat Día vs Coto card stays off, and the checkout modal keeps Comparar con Coto',
+  chat_dual_checkout_demo: (on) =>
+    on
+      ? 'after the Día vs Coto card, the chat can offer mock pay for the full Día basket and the matched Coto lines; Coto checkout still requires sandbox_mock'
+      : 'Coto stays a catalog with no checkout, and the chat does not offer the dual mock pay cards',
 };
 
 /** String keys. Anything other than the listed values reads as the default. */
