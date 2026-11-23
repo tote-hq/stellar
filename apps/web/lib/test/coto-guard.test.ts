@@ -69,4 +69,21 @@ describe('cotoCheckoutBlocked', () => {
     assert.equal(settleBasis({ retailer: 'dia', mode: 'demo' }), 'basis|demo-reached-payment');
     assert.equal(settleBasis({ retailer: 'dia' }), 'basis|sandbox-order-placed');
   });
+
+  it('does not render the Día account on a Coto quote', () => {
+    const modal = read('components/CheckoutModal.tsx');
+    const review = modal.slice(
+      modal.indexOf('data-testid="checkout-lock-step"'),
+      modal.indexOf('data-testid="checkout-shopping-step"'),
+    );
+    const guard = review.indexOf('cotoPay ? null : demo ?');
+    const profile = review.indexOf('data-testid="checkout-dia-profile"');
+    const fields = review.indexOf('data-testid="checkout-dia"');
+    assert.ok(guard !== -1, 'a Coto quote skips the Día account branch');
+    assert.ok(profile > guard, 'the saved Día account stays behind the Coto guard');
+    assert.ok(fields > profile, 'the Día credential form stays behind the Coto guard');
+    assert.match(review, /checkout-password/);
+    assert.match(review, /copy\.dniLabel/);
+    assert.match(review, /copy\.profileOther/);
+  });
 });

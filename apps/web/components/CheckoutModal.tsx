@@ -554,7 +554,10 @@ export function CheckoutModal({
                 ? 'Lock 0.10 test USDC for checkout preparation. The fee is charged when the browser is ready, even if you never open it, abandon, or DIA declines payment. You then have 15 minutes to pay DIA with your own card. Preparation failures refund the fee.'
                 : 'Bloqueás 0,10 USDC de prueba por preparar el pago. La comisión se cobra cuando el navegador está listo, aunque no lo abras, abandones o DIA rechace el pago. Tenés 15 minutos para pagar en DIA con tu tarjeta. Si falla la preparación, devolvemos la comisión.') : copy.escrowNote}</p>
 
-              {demo ? (
+              {/* A Coto mock never logs into Día. needsDia is already false
+                  and the quote mode is mock, so the Día branch below would
+                  otherwise show the saved account and its edit control. */}
+              {cotoPay ? null : demo ? (
                 <p className="ck-note ck-demo" data-testid="checkout-demo-note">
                   {copy.demoNote}
                 </p>
