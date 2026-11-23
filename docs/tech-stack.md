@@ -170,7 +170,9 @@ A missing row is off. When the row is on, a Día basket draws the in-chat Día
 vs Coto card after the cart link. It is not a Worker variable. A person turns
 it on with `npm run config -- set chat_dual_compare true`.
 
-`npm run test:e2e` runs Playwright. Two specs set
+`npm run test:e2e` runs Playwright. `npm run test:e2e:compare` is the opt-in
+Día vs Coto card proof (`COMPARE_E2E=1`, project `compare`). It is not part
+of `npm test` or GitHub Actions. Two specs set
 `test.use({ trace: 'off', video: 'off', screenshot: 'off' })` and must keep it:
 the repo is public and one of them walks past a card number.
 

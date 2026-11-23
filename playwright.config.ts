@@ -40,8 +40,22 @@ export default defineConfig({
     },
     {
       name: 'app',
-      testMatch: /app-.*\.spec\.ts/,
+      testMatch: /app-(guest|auth)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'], baseURL: appBaseURL },
+    },
+    {
+      // Opt-in Día vs Coto card. `npm run test:e2e:compare` sets COMPARE_E2E.
+      // Screenshot and video stay on so a green run still has evidence.
+      // test-results/ and playwright-report/ are gitignored.
+      name: 'compare',
+      testMatch: /app-dual-compare\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: appBaseURL,
+        screenshot: 'on',
+        video: 'on',
+        trace: 'on',
+      },
     },
   ],
 });
