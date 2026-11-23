@@ -151,13 +151,19 @@ to Upstash in December 2024. This app talks to Upstash's REST API directly.
 ## Tests
 
 ```
-npm test                          # 603: mcp 180 · trust 1 · web 422
-npm test -w @changuito/mcp        # 304 — adapters, money, FX, cart maths
-npm test -w @changuito/web        # 467 — chat-state, order-check, deposit, copy, …
+npm test                          # 652: mcp 192 · trust 1 · web 459
+npm test -w @changuito/mcp        # 192 — adapters, money, FX, cart maths
+npm test -w @changuito/web        # 459 — chat-state, order-check, deposit, copy, …
 npm run contracts:test            #   34 — escrow 19 · mock_usdc 15
 npm run typecheck -w @changuito/web
 npm run build
+npm run smoke:compare             # 20 hits on GET /api/compare/probe; not part of npm test
 ```
+
+`GET /api/compare/probe` runs a fixed Día basket against the Coto catalog and
+returns match rate and latency. It answers 404 unless `COMPARE_PROBE_TOKEN`
+matches. `npm run smoke:compare` calls it 20 times and exits non-zero on any
+non-200 or when client p95 is over 10s.
 
 `npm run test:e2e` runs Playwright. Two specs set
 `test.use({ trace: 'off', video: 'off', screenshot: 'off' })` and must keep it:

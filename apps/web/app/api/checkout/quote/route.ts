@@ -17,7 +17,7 @@
  * instead of hiding it in a buffer. QUOTE_BUFFER (default 0) adds slack on
  * top if a window's price starts moving between quote and run.
  */
-import { compareBasket, cotoSearcher, diaLookup } from '@changuito/mcp/compare';
+import { compareDiaToCoto } from '@changuito/mcp/compare';
 import { arsToUsdCents } from '@changuito/mcp/fx';
 import type { Cart } from '@changuito/mcp/types';
 
@@ -151,10 +151,9 @@ export async function POST(req: Request): Promise<Response> {
   let comparison: ComparisonQuote | undefined;
   if (compare) {
     try {
-      const rows = await compareBasket(
+      const { rows } = await compareDiaToCoto(
         lines.map((l) => ({ skuId: l.skuId, name: l.name, quantity: l.quantity, lineTotal: l.lineTotal })),
-        diaLookup(location.postalCode),
-        cotoSearcher(),
+        location.postalCode,
       );
       const totals = comparisonTotals(rows);
       comparison = {

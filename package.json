@@ -20,6 +20,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "db:migrate": "node scripts/db.mjs migrate",
+    "smoke:compare": "node scripts/compare-smoke.mjs",
     "config": "node scripts/config.mjs",
     "wallet": "node scripts/wallet.mjs",
     "db:status": "node scripts/db.mjs status",

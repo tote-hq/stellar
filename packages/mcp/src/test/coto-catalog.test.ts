@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { compareBasket, compareStats, type CompareLine } from '../catalog/compare.js';
 import {
+  bundleHasPublicKey,
   constructorKeyFromEnv,
   cotoBodyUsable,
+  readCotoBody,
   selectExact,
   toCatalogItem,
   type CatalogItem,
@@ -326,6 +329,50 @@ describe('cotoBodyUsable', () => {
       true,
     );
     assert.equal(cotoBodyUsable('<html>challenge</html>', '*/*'), false);
+    assert.equal(bundleHasPublicKey('constructor:{apiKey:"key_abc"}'), true);
+    assert.equal(bundleHasPublicKey('constructor:{apiKey:"key_'), false);
+    assert.equal(cotoBodyUsable('constructor:{apiKey:"key_', '*/*'), false);
+    assert.equal(bundleHasPublicKey('no key yet'), false);
+  });
+
+  it('stops reading the storefront bundle once the public key is present', async () => {
+    let pulls = 0;
+    const res = new Response(new ReadableStream({
+      pull(controller) {
+        pulls += 1;
+        const chunk = pulls === 1
+          ? 'var x={constructor:{apiKey:"key_abc123"}};'
+          : 'SHOULD_NOT_NEED';
+        controller.enqueue(new TextEncoder().encode(chunk));
+      },
+    }));
+    const text = await readCotoBody(res, '*/*');
+    assert.equal(bundleHasPublicKey(text), true);
+    assert.equal(text.includes('SHOULD_NOT_NEED'), false);
+    assert.equal(pulls, 1);
+  });
+
+  it('keeps reading when the public key is split across two chunks', async () => {
+    let pulls = 0;
+    const res = new Response(new ReadableStream({
+      pull(controller) {
+        pulls += 1;
+        if (pulls === 1) {
+          controller.enqueue(new TextEncoder().encode('var x={constructor:{apiKey:"key_abc'));
+          return;
+        }
+        if (pulls === 2) {
+          controller.enqueue(new TextEncoder().encode('123"'));
+          return;
+        }
+        controller.enqueue(new TextEncoder().encode('SHOULD_NOT_NEED'));
+        controller.close();
+      },
+    }));
+    const text = await readCotoBody(res, '*/*');
+    assert.match(text, /constructor:\{apiKey:"key_abc123"/);
+    assert.equal(text.includes('SHOULD_NOT_NEED'), false);
+    assert.equal(pulls, 2);
   });
 });
 
@@ -335,5 +382,45 @@ describe('constructorKeyFromEnv', () => {
     assert.equal(constructorKeyFromEnv({ COTO_CONSTRUCTOR_KEY: '  key_abc  ' }), 'key_abc');
     assert.equal(constructorKeyFromEnv({ COTO_CONSTRUCTOR_KEY: 'not-a-key' }), undefined);
     assert.equal(constructorKeyFromEnv({}), undefined);
+  });
+});
+
+describe('compareStats', () => {
+  it('reports matchRate 0.5 for one EAN hit and one miss', async () => {
+    const lines: CompareLine[] = [
+      {
+        skuId: 'a',
+        name: 'Leche entera La Serenisima 1 L',
+        quantity: 1,
+        lineTotal: { centavos: 1200 },
+      },
+      {
+        skuId: 'b',
+        name: 'Yerba 500 g',
+        quantity: 1,
+        lineTotal: { centavos: 800 },
+      },
+    ];
+    const rows = await compareBasket(
+      lines,
+      {
+        async getProduct(skuId: string) {
+          if (skuId === 'a') return { ean: '7790000000001', brand: 'La Serenisima' };
+          return { ean: '7790000000002', brand: 'Taragui' };
+        },
+      },
+      {
+        async search() {
+          return [item('Otra leche 1 L', { id: 'ean-hit', product_main_ean: '7790000000001', product_brand: 'LA SERENISIMA' })];
+        },
+      },
+    );
+    const stats = compareStats(rows, 42);
+    assert.equal(stats.lines, 2);
+    assert.equal(stats.eanMatches, 1);
+    assert.equal(stats.brandSizeMatches, 0);
+    assert.equal(stats.none, 1);
+    assert.equal(stats.matchRate, 0.5);
+    assert.equal(stats.durationMs, 42);
   });
 });
