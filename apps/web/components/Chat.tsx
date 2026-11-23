@@ -498,10 +498,20 @@ function ChatCore({
                     // Not just disabled: a paid chat's card is a record of
                     // what was bought, and a Pagar on it invites paying twice.
                     // A dual-checkout basket pays from the cards under the compare.
+                    // Solo Día (demo on, Coto search off): one PayCard, still fees.
                     canOrder && !b.dualCheckout
                       ? (cart) => {
                           track('payment_start', { flow: 'frame' });
-                          setPaying({ cart, handoffUrl: b.handoffUrl });
+                          setPaying(
+                            b.soloDia
+                              ? {
+                                  cart,
+                                  handoffUrl: b.handoffUrl,
+                                  demoTopUp: true,
+                                  checkoutPath: 'solo_dia',
+                                }
+                              : { cart, handoffUrl: b.handoffUrl },
+                          );
                         }
                       : undefined
                   }

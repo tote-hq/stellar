@@ -354,6 +354,11 @@ async function quoteCotoDemo(
     return Response.json({ error: 'No pudimos cotizar el envío o el cambio. Probá de nuevo en un rato.' }, { status: 503 });
   }
 
+  // Accepted ids are required. The server never defaults to every similar.
+  if (!accepted || accepted.length === 0) {
+    return Response.json({ error: 'Elegí al menos una alternativa de Coto.' }, { status: 400 });
+  }
+
   let rows: ComparisonRow[];
   let feeBasis: FeeBasis = 'gap';
   try {
@@ -361,18 +366,18 @@ async function quoteCotoDemo(
       lines.map((l) => ({ skuId: l.skuId, name: l.name, quantity: l.quantity, lineTotal: l.lineTotal })),
       location.postalCode,
     );
-    rows = compared.rows.filter(countsTowardFee);
-    if (accepted && accepted.length > 0) {
-      const want = new Set(accepted.map((a) => `${a.diaSkuId}:${a.cotoId}`));
-      rows = rows.filter((row) => row.coto && want.has(`${row.skuId}:${row.coto.id}`));
+    const want = new Set(accepted.map((a) => `${a.diaSkuId}:${a.cotoId}`));
+    rows = compared.rows.filter(
+      (row) => countsTowardFee(row) && row.coto && want.has(`${row.skuId}:${row.coto.id}`),
+    );
+    if (rows.length === 0) {
+      return Response.json({ error: 'Elegí al menos una alternativa de Coto.' }, { status: 400 });
     }
-    if (rows.length === 0) feeBasis = 'no_refs';
   } catch (err) {
     const name = err instanceof Error ? err.name : 'error';
     const code = err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
     const msg = err instanceof Error ? err.message : String(err);
-    console.error('[checkout] coto quote failed; fee 0', name, code, msg);
-    // Still payable with fee 0 when compare fails — but with no lines there is nothing to lock.
+    console.error('[checkout] coto quote failed', name, code, msg);
     return Response.json({ error: 'No pudimos cotizar Coto. Probá de nuevo en un rato.' }, { status: 503 });
   }
 

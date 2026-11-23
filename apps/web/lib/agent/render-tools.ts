@@ -50,6 +50,11 @@ export interface RenderCache {
    * is drawn, and not written into the stored turn: the next hop reads it again.
    */
   dualCheckout?: boolean;
+  /**
+   * Solo Día: dual demo is on but Coto search is disabled. The cart PayCard
+   * still prices the 20% gap fee (feeBasis other_disabled → 0).
+   */
+  soloDia?: boolean;
 }
 
 export const emptyCache = (): RenderCache => ({ products: new Map() });
@@ -134,7 +139,13 @@ export function autoRenderCart(cache: RenderCache, emit: (e: UiEvent) => void): 
   if (print === cache.drawn) return false;
 
   cache.drawn = print;
-  emit({ t: 'cart', cart, handoffUrl, ...(cache.dualCheckout ? { dualCheckout: true } : {}) });
+  emit({
+    t: 'cart',
+    cart,
+    handoffUrl,
+    ...(cache.dualCheckout ? { dualCheckout: true } : {}),
+    ...(cache.soloDia ? { soloDia: true } : {}),
+  });
   return true;
 }
 
@@ -223,7 +234,13 @@ export function runRenderTool(
     // Recorded as drawn so the automatic render does not immediately repeat
     // what this call just put on screen.
     cache.drawn = cardPrint(cache.cart, handoffUrl);
-    emit({ t: 'cart', cart: cache.cart, handoffUrl, ...(cache.dualCheckout ? { dualCheckout: true } : {}) });
+    emit({
+      t: 'cart',
+      cart: cache.cart,
+      handoffUrl,
+      ...(cache.dualCheckout ? { dualCheckout: true } : {}),
+      ...(cache.soloDia ? { soloDia: true } : {}),
+    });
     return result(`Rendered the cart: ${cache.cart.lines.length} line(s), ${cache.cart.total.display}.`);
   }
 

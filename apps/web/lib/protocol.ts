@@ -78,7 +78,7 @@ export type UiEvent =
   | { t: 'tool_end'; id: string; ok: boolean; ms: number }
   /** The model chose to show these. Not everything it searched. */
   | { t: 'products'; items: Product[]; note?: string }
-  | { t: 'cart'; cart: Cart; handoffUrl?: string; dualCheckout?: boolean }
+  | { t: 'cart'; cart: Cart; handoffUrl?: string; dualCheckout?: boolean; soloDia?: boolean }
   /**
    * The Día vs Coto card. The server draws it; the model does not supply a price.
    * `pending` has no Coto prices. A later event for the same cart in the turn

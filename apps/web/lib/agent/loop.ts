@@ -278,7 +278,10 @@ export async function runTurn(
     // Once per hop, before any cart card. The bit is not stored on the turn.
     // retailer_search.enabled.coto off turns off compare + Coto pay; Día stays on.
     const retailers = await getRetailerSearch();
-    turn.cache.dualCheckout = (await chatDualCheckoutDemoEnabled()) && retailers.enabled.coto;
+    const demoOn = await chatDualCheckoutDemoEnabled();
+    // Dual UI needs Coto on. Solo Día keeps the demo fee path with Coto off.
+    turn.cache.dualCheckout = demoOn && retailers.enabled.coto;
+    turn.cache.soloDia = demoOn && !retailers.enabled.coto;
     for (const use of uses) {
       // The trail is for work, not for drawing. An MCP call reaches a
       // supermarket and can take twenty seconds, so naming it explains the

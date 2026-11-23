@@ -7,7 +7,7 @@ import type { Cart, LocationContext } from '@changuito/mcp/types';
 import { lockFailureCode, refundFailureCode } from '../lib/funnel';
 import { track } from '../lib/analytics';
 import type { Receipt } from '../lib/chat-store.ts';
-import { chunksForShortfall } from '../lib/checkout/demo-topup.ts';
+import { chunksForShortfall } from '../lib/faucet-policy.ts';
 import { escrowCopy } from '../lib/checkout/copy.ts';
 import type { QuoteResponse, StatusResponse } from '../lib/checkout/types.ts';
 import { OpenConfirmationPending, recoverOpen, submitOpen, type OpenSubmission } from '../lib/checkout/open-submission.ts';
