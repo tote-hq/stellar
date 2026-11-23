@@ -624,7 +624,22 @@ body:not(:has(.topbar)) .shell {
   border-color: var(--border);
 }
 .btn-ghost:hover { background: rgba(42, 26, 20, 0.06); }
-.btn-pay { flex: 1; }
+.btn-pay { flex: 1; min-width: 44px; min-height: 44px; }
+
+.pay-cards {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0 4px;
+}
+.pay-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  background: var(--surface);
+}
+.pay-card h3 { margin: 0 0 8px; font-size: 1rem; }
+.pay-card-lines { margin: 0 0 12px; padding-left: 1.1rem; }
+.pay-card .btn-pay { min-width: 44px; min-height: 44px; }
 
 .composer {
   display: grid;

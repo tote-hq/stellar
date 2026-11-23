@@ -40,6 +40,9 @@
  * very much alive: it is the house pattern for "we are about to spend
  * something on your behalf", and POST /api/deposit/demo follows it.
  */
+import { demoTopUpShortfall } from '../../../lib/checkout/demo-topup.ts';
+import { flagOn, getConfig } from '../../../lib/config.ts';
+import { faucetOnNetwork } from '../../../lib/faucet-auth.ts';
 import { faucetButton, gateFaucet } from '../../../lib/faucet-gate.ts';
 import { faucetVerdict } from '../../../lib/faucet-policy.ts';
 import { requireHuman } from '../../../lib/human-gate.ts';
@@ -93,7 +96,40 @@ export async function POST(req: Request): Promise<Response> {
     }
 
     // 2. Then the token, if they need it.
+    // The body still has no amount. Admission, ban, and cooldown already ran
+    // in gateFaucet. The demo ceiling replaces only the 50 USDC grant, and
+    // only on a network that has a faucet.
     const before = await usdcBalance(address, network);
+    const config = await getConfig();
+    const demoTopUp =
+      flagOn(config, 'chat_dual_checkout_demo') && flagOn(config, 'sandbox_mock') && faucetOnNetwork(network);
+    if (demoTopUp) {
+      const amount = demoTopUpShortfall(before);
+      if (amount === 0n) {
+        const body: FaucetResponse & { note: string } = {
+          address,
+          xlm,
+          created,
+          usdc: before.toString(),
+          usdcDisplay: formatUsdc(before),
+          txHash: null,
+          note: 'Ya tenés USDC de prueba suficiente para completar una compra.',
+        };
+        return Response.json(body, { status: created ? 200 : 429 });
+      }
+      const tx = await usdcAsAdmin(network).mint({ to: address, amount });
+      const sent = await tx.signAndSend();
+      const after = before + amount;
+      const topped: FaucetResponse = {
+        address,
+        xlm,
+        created,
+        usdc: after.toString(),
+        usdcDisplay: formatUsdc(after),
+        txHash: sent.sendTransactionResponse?.hash ?? null,
+      };
+      return Response.json(topped);
+    }
     const verdict = faucetVerdict({
       balanceUnits: before,
       now: Date.now(),

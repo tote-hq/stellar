@@ -82,3 +82,18 @@ export async function turnstileDisabled(): Promise<boolean> {
 export async function chatDualCompareEnabled(): Promise<boolean> {
   return flagOn(await getConfig(), 'chat_dual_compare');
 }
+
+/**
+ * `chat_dual_checkout_demo` in the config table. JSON `true` or the string
+ * `"true"` lets a Día basket offer a mock pay for the matched Coto lines.
+ * A missing row, false, or an unread database leaves it off. It is not a
+ * Worker variable. Coto checkout still requires `sandbox_mock`.
+ */
+export async function chatDualCheckoutDemoEnabled(): Promise<boolean> {
+  return flagOn(await getConfig(), 'chat_dual_checkout_demo');
+}
+
+/** Test-only. A null cache makes the next read hit the table (or read as off). */
+export function __setConfigForTests(values: Record<string, unknown> | null, now = Date.now()): void {
+  cached = values === null ? null : { at: now, values };
+}

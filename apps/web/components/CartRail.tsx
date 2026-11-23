@@ -48,7 +48,7 @@ export function CartRail() {
         ) : cart && cart.lines.length > 0 ? (
           // Pagar under the basket too, not only on the card in the thread,
           // which has usually scrolled away by the time the basket is ready.
-          <RailLines cart={cart} onPay={shop?.canOrder ? shop.requestPay : undefined} />
+          <RailLines cart={cart} onPay={shop?.canOrder && !shop.dualCheckout ? shop.requestPay : undefined} />
         ) : (
           <EmptyRail />
         )}

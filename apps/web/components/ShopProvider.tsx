@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 
 import type { Cart } from '@changuito/mcp/types';
 
-import type { ChatState } from '../lib/chat-state.ts';
+import { dualCheckoutOn, type ChatState } from '../lib/chat-state.ts';
 import {
   deleteChat,
   isResumable,
@@ -91,6 +91,8 @@ interface ShopValue {
    */
   payRequest: number;
   requestPay: () => void;
+  /** The thread's pay cards are the way to pay. The rail does not offer another. */
+  dualCheckout: boolean;
 }
 
 const ShopContext = createContext<ShopValue | null>(null);
@@ -107,6 +109,7 @@ export function ShopProvider({ children }: { children: ReactNode }) {
   const [request, setRequest] = useState<ChatRequest | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [payRequest, setPayRequest] = useState(0);
+  const [dualCheckout, setDualCheckout] = useState(false);
   const requestPay = useCallback(() => setPayRequest((n) => n + 1), []);
 
   // After hydration, never during render: reading storage while rendering
@@ -164,6 +167,7 @@ export function ShopProvider({ children }: { children: ReactNode }) {
 
       const next = state.cart?.cart ?? null;
       setCart(next);
+      setDualCheckout(dualCheckoutOn(state));
       // An absent url does not erase one we already have. The agent renders the
       // cart before it has the link and again after, and the second render is
       // the one that carries it — dropping it on the first would blank the
@@ -189,6 +193,7 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     setCreatedAt(Date.now());
     setCart(null);
     setHandoffUrl(null);
+    setDualCheckout(false);
     setOrderState('none');
     setReceipt(null);
     setReadOnly(false);
@@ -211,6 +216,7 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     setCreatedAt(chat.createdAt);
     setCart(chat.cart);
     setHandoffUrl(chat.handoffUrl);
+    setDualCheckout(chat.dualCheckout === true || dualCheckoutOn({ blocks: chat.blocks, cart: undefined }));
     setOrderState(chat.orderState);
     setReceipt(chat.receipt);
     setReadOnly(!live);
@@ -259,11 +265,12 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       setHistoryOpen,
       payRequest,
       requestPay,
+      dualCheckout,
     }),
     [
       chats, activeChatId, cart, handoffUrl, orderState, receipt, readOnly,
       publish, openChat, newChat, forgetChat, settle, request, ack, historyOpen,
-      payRequest, requestPay,
+      payRequest, requestPay, dualCheckout,
     ],
   );
 

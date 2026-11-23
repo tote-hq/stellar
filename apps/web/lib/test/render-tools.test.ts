@@ -227,4 +227,14 @@ describe('product cards', () => {
     assert.equal(res.is_error, true);
     assert.equal(events.length, 0);
   });
+
+  it('marks the cart when the dual checkout flag is on for this hop', () => {
+    const cache = emptyCache();
+    cache.dualCheckout = true;
+    const { events, emit } = recorder();
+    rememberStructured(cache, getCartLink(cart()));
+    assert.equal(autoRenderCart(cache, emit), true);
+    const drawn = events.find((e) => e.t === 'cart');
+    assert.equal(drawn?.t === 'cart' && drawn.dualCheckout, true);
+  });
 });

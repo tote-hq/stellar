@@ -47,7 +47,7 @@ export type Block =
   | { kind: 'user'; id: string; text: string; failed?: SendFailure; image?: ChatImage }
   | { kind: 'say'; id: string; text: string; thinking: string; tools: ToolRun[] }
   | { kind: 'products'; id: string; items: Product[]; note?: string }
-  | { kind: 'cart'; id: string; cart: Cart; handoffUrl?: string }
+  | { kind: 'cart'; id: string; cart: Cart; handoffUrl?: string; dualCheckout?: boolean }
   | {
       kind: 'compare';
       id: string;
@@ -58,6 +58,8 @@ export type Block =
       lines: number;
       gap?: CompareCard['gap'];
       rows: CompareLineView[];
+      /** Set when this card may offer the dual mock pay. Pending and timed out never do. */
+      checkoutDemo?: boolean;
     }
   | { kind: 'error'; id: string; message: string; recoverable: boolean };
 
@@ -70,10 +72,27 @@ export interface ChatState {
   /** Opaque to the browser; handed back on the next turn so the agent remembers. */
   snapshot?: SessionSnapshot;
   /** The newest cart seen, wherever it appeared. What the pay button settles. */
-  cart?: { cart: Cart; handoffUrl?: string };
+  cart?: { cart: Cart; handoffUrl?: string; dualCheckout?: boolean };
 }
 
 export const initialState: ChatState = { blocks: [], streaming: false };
+
+/** The rail hides its pay control while the dual mock cards are the way to pay. */
+export function dualCheckoutOn(state: Pick<ChatState, 'blocks' | 'cart'>): boolean {
+  if (state.cart?.dualCheckout) return true;
+  for (const block of state.blocks) {
+    if (block.kind === 'cart' && block.dualCheckout) return true;
+    if (
+      block.kind === 'compare' &&
+      block.checkoutDemo &&
+      (block.status === 'ok' || block.status === 'degraded') &&
+      block.matched >= 1
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 let seq = 0;
 const nextId = () => `b${++seq}`;
@@ -241,6 +260,8 @@ export function applyEvent(state: ChatState, e: UiEvent): ChatState {
         // that adds it is the second of the pair, so this only matters in the
         // other order, where dropping it would remove a button the user saw.
         handoffUrl: e.handoffUrl ?? prior?.handoffUrl,
+        // The flag is read every hop. A later card without it is the flag off.
+        ...(e.dualCheckout ? { dualCheckout: true } : {}),
       });
 
       const blocks = prior
@@ -249,7 +270,11 @@ export function applyEvent(state: ChatState, e: UiEvent): ChatState {
 
       return {
         ...state,
-        cart: { cart: e.cart, handoffUrl: e.handoffUrl ?? prior?.handoffUrl },
+        cart: {
+          cart: e.cart,
+          handoffUrl: e.handoffUrl ?? prior?.handoffUrl,
+          ...(e.dualCheckout ? { dualCheckout: true } : {}),
+        },
         // Reusing the id matters: React keys off it, so the card updates in
         // place instead of unmounting and animating back in. The cart-link
         // row is removed in the same step, so it does not sit under the card
@@ -289,6 +314,9 @@ export function applyEvent(state: ChatState, e: UiEvent): ChatState {
             lines: e.lines,
             rows: e.rows,
             ...(e.gap ? { gap: e.gap } : {}),
+            ...(e.checkoutDemo && (e.status === 'ok' || e.status === 'degraded') && e.matched >= 1
+              ? { checkoutDemo: true }
+              : {}),
           };
       const blocks = prior
         ? state.blocks.map((b, i) => (i === existing ? block : b))

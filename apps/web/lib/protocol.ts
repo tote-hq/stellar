@@ -78,14 +78,14 @@ export type UiEvent =
   | { t: 'tool_end'; id: string; ok: boolean; ms: number }
   /** The model chose to show these. Not everything it searched. */
   | { t: 'products'; items: Product[]; note?: string }
-  | { t: 'cart'; cart: Cart; handoffUrl?: string }
+  | { t: 'cart'; cart: Cart; handoffUrl?: string; dualCheckout?: boolean }
   /**
    * The Día vs Coto card. The server draws it; the model does not supply a price.
    * `pending` has no Coto prices. A later event for the same cart in the turn
    * replaces that block.
    */
   | { t: 'compare'; status: 'pending'; cartId: string; handoffUrl: string }
-  | ({ t: 'compare' } & CompareCard)
+  | ({ t: 'compare'; checkoutDemo?: boolean } & CompareCard)
   | { t: 'error'; message: string; recoverable: boolean }
   /** Always last. Carries the snapshot the browser must send back next turn. */
   | {

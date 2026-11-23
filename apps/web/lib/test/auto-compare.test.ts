@@ -163,4 +163,22 @@ describe('autoCompare', () => {
     assert.equal(cache.compareResult, undefined);
     assert.equal(cache.compareFor, undefined);
   });
+
+  it('offers Coto pay only on a settled card with a match', async () => {
+    const events: UiEvent[] = [];
+    const cache = cacheFor();
+    cache.dualCheckout = true;
+    await autoCompare({
+      ...base,
+      cache,
+      enabled: true,
+      emit: (event) => events.push(event),
+      compare: async () => finished,
+    });
+    const pending = events[0];
+    const done = events[1];
+    assert.equal(pending?.t === 'compare' && pending.status, 'pending');
+    assert.equal(pending?.t === 'compare' && 'checkoutDemo' in pending, false);
+    assert.equal(done?.t === 'compare' && done.status === 'ok' && done.checkoutDemo, true);
+  });
 });

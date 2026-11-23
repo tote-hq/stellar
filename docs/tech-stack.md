@@ -153,7 +153,7 @@ to Upstash in December 2024. This app talks to Upstash's REST API directly.
 ```
 npm test                          # 668: mcp 199 · trust 1 · web 468
 npm test -w @changuito/mcp        # 199 — adapters, money, FX, cart maths
-npm test -w @changuito/web        # 468 — chat-state, order-check, deposit, copy, …
+npm test -w @changuito/web        # 477 — chat-state, order-check, deposit, copy, …
 npm run contracts:test            #   34 — escrow 19 · mock_usdc 15
 npm run typecheck -w @changuito/web
 npm run build
@@ -170,9 +170,20 @@ A missing row is off. When the row is on, a Día basket draws the in-chat Día
 vs Coto card after the cart link. It is not a Worker variable. A person turns
 it on with `npm run config -- set chat_dual_compare true`.
 
+`chat_dual_checkout_demo` is another row in that table. A missing row is off.
+When it is on, and `sandbox_mock` is on, the compare card can offer a mock pay
+for the full Día basket and for the matched Coto lines. It is not a Worker
+variable. A person turns the show on with `npm run config -- set chat_dual_compare true`,
+`npm run config -- set chat_dual_checkout_demo true`, and
+`npm run config -- set sandbox_mock true`.
+
 `npm run test:e2e` runs Playwright. `npm run test:e2e:compare` is the opt-in
-Día vs Coto card proof (`COMPARE_E2E=1`, project `compare`). It is not part
-of `npm test` or GitHub Actions. Two specs set
+Día vs Coto card proof (`COMPARE_E2E=1`, project `compare`).
+`npm run test:e2e:dual-checkout` is the opt-in pay-card proof
+(`DUAL_CHECKOUT_E2E=1`, project `dual-checkout`). These opt-in runs are not part
+of `npm test` or GitHub Actions.
+
+Two specs set
 `test.use({ trace: 'off', video: 'off', screenshot: 'off' })` and must keep it:
 the repo is public and one of them walks past a card number.
 

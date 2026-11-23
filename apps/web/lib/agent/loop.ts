@@ -4,7 +4,7 @@ import { callMcpTool, mcpToolsToAnthropic } from '../mcp/bridge';
 import type { Session } from '../mcp/session';
 import { DEFAULT_LANG, inLang, type Lang } from '../lang.ts';
 import type { ChatImage } from '../chat-image.ts';
-import { chatDualCompareEnabled } from '../config.ts';
+import { chatDualCheckoutDemoEnabled, chatDualCompareEnabled } from '../config.ts';
 import type { UiEvent } from '../protocol';
 import { autoCompare } from './auto-compare';
 import { earlyLocationAsk } from './early-ask';
@@ -272,6 +272,8 @@ export async function runTurn(
     // Every result goes back in one user message. Splitting them across
     // messages teaches the model not to call tools in parallel.
     const results: Anthropic.ToolResultBlockParam[] = [];
+    // Once per hop, before any cart card. The bit is not stored on the turn.
+    turn.cache.dualCheckout = await chatDualCheckoutDemoEnabled();
     for (const use of uses) {
       // The trail is for work, not for drawing. An MCP call reaches a
       // supermarket and can take twenty seconds, so naming it explains the

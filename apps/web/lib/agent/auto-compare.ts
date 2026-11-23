@@ -109,7 +109,7 @@ export async function autoCompare(args: {
   const fingerprint = compareFingerprint(cart);
   const stored = args.cache.compareResult;
   if (args.cache.compareFor === fingerprint && stored && stored.cartId === cart.cartId) {
-    args.emit({ t: 'compare', ...stored, handoffUrl });
+    args.emit(compareEvent(stored, handoffUrl, args.cache.dualCheckout === true));
     return compareSummary({ ...stored, handoffUrl });
   }
   if (!args.postalCode) return undefined;
@@ -149,6 +149,13 @@ export async function autoCompare(args: {
   }
   args.cache.compareFor = fingerprint;
   args.cache.compareResult = card;
-  args.emit({ t: 'compare', ...card });
+  args.emit(compareEvent(card, handoffUrl, args.cache.dualCheckout === true));
   return compareSummary(card);
+}
+
+/** Pending and timed_out never offer Coto pay. A match on ok or degraded may. */
+function compareEvent(card: CompareCard, handoffUrl: string, demo: boolean): UiEvent {
+  const offer =
+    demo && (card.status === 'ok' || card.status === 'degraded') && card.matched >= 1;
+  return { t: 'compare', ...card, handoffUrl, ...(offer ? { checkoutDemo: true } : {}) };
 }

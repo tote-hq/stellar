@@ -57,5 +57,17 @@ export default defineConfig({
         trace: 'on',
       },
     },
+    {
+      // Opt-in dual mock pay cards. `npm run test:e2e:dual-checkout` sets DUAL_CHECKOUT_E2E.
+      name: 'dual-checkout',
+      testMatch: /app-dual-checkout\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: appBaseURL,
+        screenshot: 'on',
+        video: 'on',
+        trace: 'on',
+      },
+    },
   ],
 });
