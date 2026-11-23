@@ -132,8 +132,14 @@ export async function autoCompare(args: {
     card = toCard(await compare(lines, args.postalCode, { signal }), cart.cartId, handoffUrl);
   } catch (error) {
     const aborted = signal.aborted || (error instanceof Error && error.name === 'AbortError');
+    if (aborted) {
+      // Finished rows are the value compareForCard returns. A throw has
+      // already dropped them; an empty card would stand in for that result
+      // and, once cached, would not be compared again.
+      throw error;
+    }
     card = {
-      status: aborted ? 'timed_out' : 'degraded',
+      status: 'degraded',
       cartId: cart.cartId,
       handoffUrl,
       matched: 0,

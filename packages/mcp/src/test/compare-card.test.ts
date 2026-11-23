@@ -76,6 +76,71 @@ describe('compareLinesForCard', () => {
     assert.equal(JSON.stringify(result).includes('"shelfCentavos":0'), false);
   });
 
+  it('settles when a lookup never returns and keeps the rows that already finished', { timeout: 1_000 }, async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 30);
+    const started = Date.now();
+    try {
+      const hungSearch = await compareLinesForCard(
+        [line({ skuId: 'a' }), line({ skuId: 'b', name: 'Yerba 500 g' })],
+        {
+          async getProduct(skuId: string) {
+            return {
+              ean: skuId === 'a' ? '7790000000001' : '7790000000002',
+              brand: 'La Serenisima',
+            };
+          },
+        },
+        {
+          async search(query: string) {
+            if (query === '7790000000001') {
+              return [item('Otra leche 1 L', { id: 'ean-hit', product_main_ean: '7790000000001' })];
+            }
+            return new Promise(() => {});
+          },
+        },
+        ctrl.signal,
+      );
+      assert.ok(Date.now() - started < 800);
+      assert.equal(hungSearch.status, 'timed_out');
+      assert.equal(hungSearch.rows.length, 1);
+      assert.equal(hungSearch.rows[0]?.skuId, 'a');
+      assert.equal(hungSearch.rows[0]?.coto?.lineCentavos, 8_000);
+      assert.equal(hungSearch.rows.some((row) => row.skuId === 'b'), false);
+      assert.equal(JSON.stringify(hungSearch).includes('"lineCentavos":0'), false);
+      assert.equal(JSON.stringify(hungSearch).includes('"shelfCentavos":0'), false);
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const diaCtrl = new AbortController();
+    const diaTimer = setTimeout(() => diaCtrl.abort(), 30);
+    const diaStarted = Date.now();
+    try {
+      const hungDia = await compareLinesForCard(
+        [line({ skuId: 'a' }), line({ skuId: 'b', name: 'Yerba 500 g' })],
+        {
+          getProduct(skuId: string) {
+            if (skuId === 'b') return new Promise(() => {});
+            return Promise.resolve({ ean: '7790000000001', brand: 'La Serenisima' });
+          },
+        },
+        searcher([item('Otra leche 1 L', { id: 'ean-hit', product_main_ean: '7790000000001' })]),
+        diaCtrl.signal,
+      );
+      assert.ok(Date.now() - diaStarted < 800);
+      assert.equal(hungDia.status, 'timed_out');
+      assert.equal(hungDia.rows.length, 1);
+      assert.equal(hungDia.rows[0]?.skuId, 'a');
+      assert.equal(hungDia.rows[0]?.coto?.lineCentavos, 8_000);
+      assert.equal(hungDia.rows.some((row) => row.skuId === 'b'), false);
+      assert.equal(JSON.stringify(hungDia).includes('"lineCentavos":0'), false);
+      assert.equal(JSON.stringify(hungDia).includes('"shelfCentavos":0'), false);
+    } finally {
+      clearTimeout(diaTimer);
+    }
+  });
+
   it('gives a failed line no Coto price and no zero', async () => {
     const result = await compareLinesForCard(
       [line({ skuId: 'a' }), line({ skuId: 'b', name: 'Yerba 500 g' })],

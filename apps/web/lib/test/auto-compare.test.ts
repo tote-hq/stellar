@@ -139,4 +139,28 @@ describe('autoCompare', () => {
     const last = events.at(-1);
     assert.equal(last?.t === 'compare' && last.status, 'ok');
   });
+
+  it('does not publish an empty card when the compare call throws on abort', async () => {
+    const events: UiEvent[] = [];
+    const cache = cacheFor();
+    const err = new Error('The operation was aborted');
+    err.name = 'AbortError';
+    await assert.rejects(
+      () => autoCompare({
+        ...base,
+        cache,
+        enabled: true,
+        signal: AbortSignal.abort(),
+        emit: (event) => events.push(event),
+        compare: async () => {
+          throw err;
+        },
+      }),
+      (error: unknown) => error instanceof Error && error.name === 'AbortError',
+    );
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.t === 'compare' && events[0].status, 'pending');
+    assert.equal(cache.compareResult, undefined);
+    assert.equal(cache.compareFor, undefined);
+  });
 });

@@ -53,6 +53,49 @@ function isAbort(error: unknown, signal?: AbortSignal): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
+function abortError(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error) return signal.reason;
+  const err = new Error('The operation was aborted');
+  err.name = 'AbortError';
+  return err;
+}
+
+/**
+ * A Día read or a Coto search that never observes `signal` must not hold the
+ * card. This settles when the lookup finishes or when the signal aborts,
+ * whichever is first. A lookup that loses the race keeps running; its later
+ * result is ignored and a later rejection is swallowed.
+ */
+function untilAbort<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return work;
+  const pending = Promise.resolve(work);
+  void pending.catch(() => undefined);
+  if (signal.aborted) return Promise.reject(abortError(signal));
+  return new Promise((resolve, reject) => {
+    let closed = false;
+    const onAbort = () => {
+      if (closed) return;
+      closed = true;
+      reject(abortError(signal));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    pending.then(
+      (value) => {
+        if (closed) return;
+        closed = true;
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        if (closed) return;
+        closed = true;
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 function failedRow(line: CompareLine): CardRow {
   return {
     skuId: line.skuId,
@@ -148,7 +191,8 @@ function finish(lines: number, rows: CardRow[], aborted: boolean, failed: boolea
 
 /**
  * One row per line that finished. A lookup error becomes a failed row with no
- * Coto price. An abort keeps the rows already finished and stops.
+ * Coto price. An abort keeps the rows already finished, adds nothing for the
+ * line still in flight, and returns. It does not throw.
  */
 export async function compareLinesForCard(
   lines: readonly CompareLine[],
@@ -166,14 +210,14 @@ export async function compareLinesForCard(
       continue;
     }
     try {
-      const product = await dia.getProduct(line.skuId);
+      const product = await untilAbort(dia.getProduct(line.skuId), signal);
       if (signal?.aborted) return finish(lines.length, rows, true, failed);
       if (!product) {
         failed = true;
         rows.push(failedRow(line));
         continue;
       }
-      const row = await matchRow(line, product, coto);
+      const row = await untilAbort(matchRow(line, product, coto), signal);
       rows.push(row);
       if (signal?.aborted) return finish(lines.length, rows, true, failed);
     } catch (error) {
@@ -187,6 +231,7 @@ export async function compareLinesForCard(
 
 /**
  * The chat card's entry. A missing or aborted lookup does not reject the basket.
+ * The call settles when `signal` aborts, even if that lookup ignores the signal.
  * `compareDiaToCoto` stays the quote path.
  */
 export async function compareForCard(
