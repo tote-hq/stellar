@@ -6,6 +6,7 @@
  *   npm run config -- set sandbox_mock true
  *   npm run config -- set sandbox_mock_fail false
  *   npm run config -- set turnstile_disabled true
+ *   npm run config -- set chat_dual_compare true
  *   npm run config -- set manual_checkout_flow guided
  *
  * Connects like scripts/db.mjs: the web app's env file loaded the way Next
@@ -42,6 +43,10 @@ const KNOWN = {
     on
       ? 'Cloudflare Turnstile is off: no widget, and APIs do not require a human token'
       : 'Turnstile follows the env keys (enforce, closed, or open)',
+  chat_dual_compare: (on) =>
+    on
+      ? 'a Día basket shows the in-chat Día vs Coto card after the cart link, and the checkout modal hides Comparar con Coto'
+      : 'the in-chat Día vs Coto card stays off, and the checkout modal keeps Comparar con Coto',
 };
 
 /** String keys. Anything other than the listed values reads as the default. */
