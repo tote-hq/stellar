@@ -2,7 +2,7 @@ import type { Cart, Product } from '@changuito/mcp/types';
 import type { SessionSnapshot } from '@changuito/mcp/session';
 
 import type { ChatImage } from './chat-image.ts';
-import type { TurnStage, UiEvent } from './protocol';
+import type { CompareCard, CompareLineView, TurnStage, UiEvent } from './protocol';
 
 /**
  * The transcript, as a reducer over UiEvents.
@@ -48,6 +48,17 @@ export type Block =
   | { kind: 'say'; id: string; text: string; thinking: string; tools: ToolRun[] }
   | { kind: 'products'; id: string; items: Product[]; note?: string }
   | { kind: 'cart'; id: string; cart: Cart; handoffUrl?: string }
+  | {
+      kind: 'compare';
+      id: string;
+      status: 'pending' | CompareCard['status'];
+      cartId: string;
+      handoffUrl: string;
+      matched: number;
+      lines: number;
+      gap?: CompareCard['gap'];
+      rows: CompareLineView[];
+    }
   | { kind: 'error'; id: string; message: string; recoverable: boolean };
 
 export interface ChatState {
@@ -245,6 +256,44 @@ export function applyEvent(state: ChatState, e: UiEvent): ChatState {
         // it was waiting to draw.
         blocks: withoutCartLinkTrail(blocks, turnStart),
       };
+    }
+
+    case 'compare': {
+      // Same rule as the cart card: one compare block per cart in this turn,
+      // replaced in place so the pending row becomes the finished one without
+      // a second animation. A compare from an earlier turn stays as history.
+      const turnStart = lastIndexWhere(state.blocks, (b) => b.kind === 'user');
+      const existing = lastIndexWhere(
+        state.blocks,
+        (b, i) => i > turnStart && b.kind === 'compare' && b.cartId === e.cartId,
+      );
+      const prior = existing === -1 ? undefined : (state.blocks[existing] as Extract<Block, { kind: 'compare' }>);
+      const block: Extract<Block, { kind: 'compare' }> = e.status === 'pending'
+        ? {
+            kind: 'compare',
+            id: prior?.id ?? nextId(),
+            status: 'pending',
+            cartId: e.cartId,
+            handoffUrl: e.handoffUrl || prior?.handoffUrl || '',
+            matched: 0,
+            lines: 0,
+            rows: [],
+          }
+        : {
+            kind: 'compare',
+            id: prior?.id ?? nextId(),
+            status: e.status,
+            cartId: e.cartId,
+            handoffUrl: e.handoffUrl || prior?.handoffUrl || '',
+            matched: e.matched,
+            lines: e.lines,
+            rows: e.rows,
+            ...(e.gap ? { gap: e.gap } : {}),
+          };
+      const blocks = prior
+        ? state.blocks.map((b, i) => (i === existing ? block : b))
+        : [...state.blocks, block];
+      return { ...state, blocks };
     }
 
     case 'error': {

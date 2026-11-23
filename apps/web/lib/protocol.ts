@@ -28,6 +28,45 @@ import type { Lang } from './lang.ts';
  */
 export type TurnStage = 'received' | 'thinking' | 'fallback';
 
+export type CompareConfidence = 'ean' | 'brand_size_unit' | 'none' | 'failed';
+
+/** A Coto shelf the card may link to. A missing price is omitted, never 0. */
+export interface CompareOffer {
+  id: string;
+  name: string;
+  shelfCentavos: number;
+  lineCentavos: number;
+  available: boolean;
+  url?: string;
+}
+
+export interface CompareLineView {
+  skuId: string;
+  name: string;
+  quantity: number;
+  diaLineCentavos: number;
+  confidence: CompareConfidence;
+  coto?: CompareOffer;
+}
+
+/** Absolute difference of the available EAN matches. Absent when none finished. */
+export interface CompareGap {
+  diaSubtotalCentavos: number;
+  cotoSubtotalCentavos: number;
+  gapCentavos: number;
+}
+
+/** The finished card. Stored on the turn and re-emitted without calling Coto again. */
+export interface CompareCard {
+  status: 'ok' | 'degraded' | 'timed_out';
+  cartId: string;
+  handoffUrl: string;
+  matched: number;
+  lines: number;
+  gap?: CompareGap;
+  rows: CompareLineView[];
+}
+
 export type UiEvent =
   /** Progress without content. Never creates a block in the transcript. */
   | { t: 'status'; stage: TurnStage; hop?: number }
@@ -40,6 +79,13 @@ export type UiEvent =
   /** The model chose to show these. Not everything it searched. */
   | { t: 'products'; items: Product[]; note?: string }
   | { t: 'cart'; cart: Cart; handoffUrl?: string }
+  /**
+   * The Día vs Coto card. The server draws it; the model does not supply a price.
+   * `pending` has no Coto prices. A later event for the same cart in the turn
+   * replaces that block.
+   */
+  | { t: 'compare'; status: 'pending'; cartId: string; handoffUrl: string }
+  | ({ t: 'compare' } & CompareCard)
   | { t: 'error'; message: string; recoverable: boolean }
   /** Always last. Carries the snapshot the browser must send back next turn. */
   | {

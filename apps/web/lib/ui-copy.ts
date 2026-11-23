@@ -241,6 +241,18 @@ export interface CheckoutUiCopy {
   prepareOffline: string;
 }
 
+/** The in-chat Día vs Coto card. No fee, no saving, no percent. */
+export interface CompareCopy {
+  title: string;
+  matched: (matched: number, lines: number) => string;
+  gapLabel: string;
+  pending: string;
+  degraded: string;
+  timedOut: string;
+  diaCta: string;
+  cotoCta: string;
+}
+
 export interface UiCopy {
   cart: CartCopy;
   rail: RailCopy;
@@ -253,6 +265,7 @@ export interface UiCopy {
   chat: ChatCopy;
   gate: GateCopy;
   checkout: CheckoutUiCopy;
+  compare: CompareCopy;
   /** Every dialog's ✕. One key, because it is one word. */
   close: string;
   purchasesUnconfigured: string;
@@ -457,6 +470,16 @@ const ES: UiCopy = {
     sessionFailed: 'No pudimos confirmar tu sesión. Probá de nuevo.',
     prepareFailed: 'No pudimos preparar el pago.',
     prepareOffline: 'No pudimos preparar el pago. Revisá la conexión y volvé a intentar.',
+  },
+  compare: {
+    title: 'Día y Coto',
+    matched: (matched, lines) => `${matched} de ${lines} productos coinciden`,
+    gapLabel: 'Diferencia en los que coinciden',
+    pending: 'Comparando con Coto…',
+    degraded: 'La comparación quedó incompleta. Los precios que faltan no se muestran.',
+    timedOut: 'La comparación tardó demasiado. Los precios que no llegaron no se muestran.',
+    diaCta: 'Abrir el carrito en Día',
+    cotoCta: 'Ver en Coto',
   },
   close: 'Cerrar',
   purchasesUnconfigured: 'Falta configurar el inicio de sesión en esta instalación.',
@@ -665,6 +688,16 @@ const EN: UiCopy = {
     sessionFailed: "We couldn't confirm your session. Try again.",
     prepareFailed: "We couldn't set up the payment.",
     prepareOffline: "We couldn't set up the payment. Check your connection and try again.",
+  },
+  compare: {
+    title: 'Día and Coto',
+    matched: (matched, lines) => `${matched} of ${lines} products match`,
+    gapLabel: 'Difference on the matching products',
+    pending: 'Comparing with Coto…',
+    degraded: 'The comparison is incomplete. Missing prices are not shown.',
+    timedOut: 'The comparison took too long. Prices that did not arrive are not shown.',
+    diaCta: 'Open the cart at Día',
+    cotoCta: 'View at Coto',
   },
   close: 'Close',
   purchasesUnconfigured: 'Signing in has not been configured in this installation.',

@@ -548,6 +548,50 @@ body:not(:has(.topbar)) .shell {
 .cart-warn { margin: 8px 0 0; font-size: 13px; color: var(--warn); }
 .cart-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 
+/* Día vs Coto. Same plate as the cart: surface, border, text. The shop stays
+   on these tokens when the OS is dark, so the card does too. */
+.compare-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  margin: 8px 0;
+  padding: 12px 14px;
+}
+.compare-card-title { font-weight: 650; margin: 0 0 8px; font-size: 17px; }
+.compare-card-note { margin: 8px 0 0; font-size: 14px; color: var(--text); }
+.compare-card-totals { margin: 8px 0 0; }
+.compare-card-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 14px;
+  padding: 2px 0;
+}
+.compare-card-line dd { margin: 0; font-variant-numeric: tabular-nums; }
+.compare-card-rows { list-style: none; margin: 8px 0 0; padding: 0; }
+.compare-card-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+  font-size: 14px;
+}
+.compare-card-name { flex: 1 1 12rem; }
+.compare-card-price { font-variant-numeric: tabular-nums; }
+.compare-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.compare-card a.btn { min-height: 44px; min-width: 44px; }
+
+@media (prefers-color-scheme: dark) {
+  .compare-card {
+    background: var(--surface);
+    color: var(--text);
+    border-color: var(--border);
+  }
+}
+
 /* The cart offer sits in the thread, after the products. It is a normal
    button, not one of the 44px composer icons. */
 .chat-build { display: flex; margin: 8px 0 4px; }

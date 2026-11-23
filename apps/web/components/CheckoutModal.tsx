@@ -563,7 +563,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
                     </>
                   ) : null}
                 </section>
-              ) : cart.retailer === 'dia' ? (
+              ) : cart.retailer === 'dia' && !quote.dualCompare ? (
                 <button
                   type="button"
                   className="btn btn-ghost"

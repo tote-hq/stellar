@@ -77,6 +77,32 @@ test('messages, cart and handoff url survive a round trip', () => {
   assert.equal(back.cache.handoffUrl, 'https://diaonline.supermercadosdia.com.ar/checkout');
 });
 
+test('compare fields round-trip, a turn without them still decodes, and v stays 1', () => {
+  const bare = decodeTurn(JSON.parse(JSON.stringify(encodeTurn(newTurnState()))) as unknown);
+  assert.ok(bare);
+  assert.equal(bare.cache.compareFor, undefined);
+  assert.equal(bare.cache.compareResult, undefined);
+  assert.equal(encodeTurn(newTurnState()).v, 1);
+
+  const turn = newTurnState();
+  turn.cache.compareFor = 'cart-1|0:1:2:630000:1';
+  turn.cache.compareResult = {
+    status: 'ok',
+    cartId: 'cart-1',
+    handoffUrl: 'https://dia.example/cart',
+    matched: 1,
+    lines: 1,
+    rows: [],
+    gap: { diaSubtotalCentavos: 100, cotoSubtotalCentavos: 80, gapCentavos: 20 },
+  };
+  const wire = encodeTurn(turn);
+  assert.equal(wire.v, 1);
+  const back = decodeTurn(JSON.parse(JSON.stringify(wire)) as unknown);
+  assert.equal(back?.cache.compareFor, 'cart-1|0:1:2:630000:1');
+  assert.equal(back?.cache.compareResult?.gap?.gapCentavos, 20);
+  assert.equal(back?.cache.compareResult?.status, 'ok');
+});
+
 test('an empty conversation round trips to an empty one, not to undefined', () => {
   const back = decodeTurn(JSON.parse(JSON.stringify(encodeTurn(newTurnState()))) as unknown);
 

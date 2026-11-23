@@ -164,6 +164,40 @@ describe('applyEvent', () => {
     assert.equal(failedSay.tools[0]?.ok, false);
   });
 
+  it('replaces a pending compare in this turn and keeps an earlier one', () => {
+    const pending = {
+      t: 'compare' as const,
+      status: 'pending' as const,
+      cartId: 'c1',
+      handoffUrl: 'https://dia.example/cart',
+    };
+    const finished = {
+      t: 'compare' as const,
+      status: 'ok' as const,
+      cartId: 'c1',
+      handoffUrl: 'https://dia.example/cart',
+      matched: 1,
+      lines: 2,
+      rows: [],
+      gap: { diaSubtotalCentavos: 100, cotoSubtotalCentavos: 80, gapCentavos: 20 },
+    };
+    const s = run([pending, finished]);
+    assert.equal(s.blocks.length, 1);
+    assert.equal(s.blocks[0]?.kind, 'compare');
+    assert.equal(s.blocks[0]?.kind === 'compare' && s.blocks[0].status, 'ok');
+    assert.equal(s.blocks[0]?.kind === 'compare' && s.blocks[0].id, 'b1');
+    assert.equal(s.blocks[0]?.kind === 'compare' && s.blocks[0].gap?.gapCentavos, 20);
+
+    const first = run([finished], sendUser(initialState, 'armá un desayuno'));
+    const next = run(
+      [{ ...finished, status: 'degraded', gap: undefined }],
+      sendUser(first, 'sumá café'),
+    );
+    assert.deepEqual(next.blocks.map((b) => b.kind), ['user', 'compare', 'user', 'compare']);
+    assert.equal(next.blocks[1]?.kind === 'compare' && next.blocks[1].status, 'ok');
+    assert.equal(next.blocks[3]?.kind === 'compare' && next.blocks[3].status, 'degraded');
+  });
+
   it('done frees the composer and keeps the snapshot for the next turn', () => {
     const sent = sendUser(initialState, 'hola');
     assert.equal(sent.streaming, true);

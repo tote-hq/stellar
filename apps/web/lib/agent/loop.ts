@@ -4,7 +4,9 @@ import { callMcpTool, mcpToolsToAnthropic } from '../mcp/bridge';
 import type { Session } from '../mcp/session';
 import { DEFAULT_LANG, inLang, type Lang } from '../lang.ts';
 import type { ChatImage } from '../chat-image.ts';
+import { chatDualCompareEnabled } from '../config.ts';
 import type { UiEvent } from '../protocol';
+import { autoCompare } from './auto-compare';
 import { earlyLocationAsk } from './early-ask';
 import { changuitoPrompt, stateBanner } from './prompt';
 import { classifyTopic, offTopicRefusal } from './topic-guard.ts';
@@ -37,6 +39,16 @@ export interface Turn {
 }
 
 export const newTurnState = (): Turn => ({ messages: [], cache: emptyCache() });
+
+/** The server's compare line, appended to the `get_cart_link` tool result. */
+function appendCompareNote(
+  content: Anthropic.ToolResultBlockParam['content'],
+  note: string,
+): Anthropic.ToolResultBlockParam['content'] {
+  if (typeof content === 'string') return `${content}\n${note}`;
+  if (Array.isArray(content)) return [...content, { type: 'text', text: note }];
+  return note;
+}
 
 /**
  * The shopper's turn: the photo (when there is one), then what they said,
@@ -288,6 +300,17 @@ export async function runTurn(
       // built it — so a change to it draws itself instead of waiting for the
       // model to call render_cart. See autoRenderCart in render-tools.ts.
       autoRenderCart(turn.cache, emit);
+
+      if (use.name === 'get_cart_link') {
+        const note = await autoCompare({
+          cache: turn.cache,
+          toolName: use.name,
+          enabled: await chatDualCompareEnabled(),
+          postalCode: session.state.getLocation()?.postalCode,
+          emit,
+        });
+        if (note) result = { ...result, content: appendCompareNote(result.content, note) };
+      }
 
       results.push(result);
     }

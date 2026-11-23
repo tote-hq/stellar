@@ -128,6 +128,64 @@ describe('chat store: round trip', () => {
     assert.equal(say?.kind === 'say' ? say.thinking : 'missing', '');
   });
 
+  it('round-trips a compare block and drops a price of zero', () => {
+    const compare: Block = {
+      kind: 'compare',
+      id: 'b9',
+      status: 'ok',
+      cartId: 'cart-1',
+      handoffUrl: 'https://dia.example/cart',
+      matched: 1,
+      lines: 2,
+      gap: { diaSubtotalCentavos: 10_000, cotoSubtotalCentavos: 8_000, gapCentavos: 2_000 },
+      rows: [
+        {
+          skuId: 'sku-1',
+          name: 'Leche',
+          quantity: 1,
+          diaLineCentavos: 10_000,
+          confidence: 'ean',
+          coto: {
+            id: 'coto-1',
+            name: 'Leche Coto',
+            shelfCentavos: 8_000,
+            lineCentavos: 8_000,
+            available: true,
+            url: 'https://www.coto.com.ar/product/leche',
+          },
+        },
+        {
+          skuId: 'sku-2',
+          name: 'Yerba',
+          quantity: 1,
+          diaLineCentavos: 5_000,
+          confidence: 'failed',
+          coto: {
+            id: 'zero',
+            name: 'Nada',
+            shelfCentavos: 0,
+            lineCentavos: 0,
+            available: true,
+          },
+        },
+      ],
+    };
+    Object.assign(compare, { password: 'hunter2' });
+    save({ state: { blocks: [compare] } });
+    const back = loadChat('c1');
+    const restored = back?.blocks[0];
+    assert.equal(restored?.kind, 'compare');
+    if (restored?.kind === 'compare') {
+      assert.equal(restored.status, 'ok');
+      assert.equal(restored.gap?.gapCentavos, 2_000);
+      assert.equal(restored.rows[0]?.coto?.url, 'https://www.coto.com.ar/product/leche');
+      assert.equal(restored.rows[1]?.coto, undefined);
+      assert.equal(restored.handoffUrl, 'https://dia.example/cart');
+    }
+    assert.doesNotMatch(everythingWritten(), /hunter2/);
+    assert.doesNotMatch(everythingWritten(), /"lineCentavos":0/);
+  });
+
   it('writes nothing for a chat with no blocks', () => {
     // The app mints an id on load. An empty chat in the rail is a dead row.
     assert.equal(save({ state: { blocks: [] } }), null);

@@ -5,6 +5,7 @@ import { Redis } from '@upstash/redis';
 // Type-only, deliberately: a store that imported the agent loop would drag the
 // Anthropic client and the whole MCP bridge in behind it, for a file that only
 // ever moves plain data.
+import type { CompareCard } from '../protocol';
 import type { Turn } from './loop';
 
 /**
@@ -60,6 +61,12 @@ interface StoredTurn {
    */
   handoffFor?: string;
   drawn?: string;
+  /**
+   * The Día vs Coto card for this fingerprint. Optional on `v: 1` so a turn
+   * stored before the card existed still decodes. See autoCompare.
+   */
+  compareFor?: string;
+  compareResult?: CompareCard;
 }
 
 export function encodeTurn(turn: Turn): StoredTurn {
@@ -71,7 +78,19 @@ export function encodeTurn(turn: Turn): StoredTurn {
     handoffUrl: turn.cache.handoffUrl,
     handoffFor: turn.cache.handoffFor,
     drawn: turn.cache.drawn,
+    compareFor: turn.cache.compareFor,
+    compareResult: turn.cache.compareResult,
   };
+}
+
+function asCompareCard(value: unknown): CompareCard | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const card = value as Partial<CompareCard>;
+  if (card.status !== 'ok' && card.status !== 'degraded' && card.status !== 'timed_out') return undefined;
+  if (typeof card.cartId !== 'string' || typeof card.handoffUrl !== 'string') return undefined;
+  if (!Number.isSafeInteger(card.matched) || !Number.isSafeInteger(card.lines)) return undefined;
+  if (!Array.isArray(card.rows)) return undefined;
+  return card as CompareCard;
 }
 
 /**
@@ -93,6 +112,8 @@ export function decodeTurn(raw: unknown): Turn | undefined {
       handoffUrl: s.handoffUrl,
       handoffFor: s.handoffFor,
       drawn: s.drawn,
+      compareFor: typeof s.compareFor === 'string' ? s.compareFor : undefined,
+      compareResult: asCompareCard(s.compareResult),
     },
   };
 }

@@ -32,22 +32,16 @@ export function mentionsPostalCode(text: string): boolean {
 }
 
 export const EARLY_LOCATION_ASK =
-  'Para buscar precios reales necesito tu **código postal** y el súper donde querés comprar ' +
-  '(Día, Jumbo, Disco o Carrefour). Si no tenés preferencia, te sugiero **Día**, que es el que ' +
-  'mejor cobertura tiene. ¿Cuál es tu código postal?';
+  'Para buscar precios reales en Día necesito tu **código postal**. ¿Cuál es?';
 
 /**
  * The same question for a reader who set the footer to English.
  *
- * The four store names stay as they are — they are the signs above real
- * shops in Buenos Aires, and translating them would name places that do not
- * exist. "Código postal" becomes "postcode" because that is the thing being
- * asked for, and the model is told in the prompt to keep asking in English.
+ * The store name stays Día — it is the sign above a real shop. "Código postal"
+ * becomes "postcode" because that is the thing being asked for.
  */
 export const EARLY_LOCATION_ASK_EN =
-  'To look up real prices I need your **postcode** and the supermarket you want to shop at ' +
-  '(Día, Jumbo, Disco or Carrefour). If you have no preference I suggest **Día** — it has the ' +
-  'best coverage here. What is your postcode?';
+  'To look up real prices at Día I need your **postcode**. What is it?';
 
 export function earlyLocationAsk(args: {
   hasLocation: boolean;

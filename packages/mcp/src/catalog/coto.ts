@@ -300,7 +300,7 @@ function asText(value: unknown): string {
   return '';
 }
 
-function absoluteUrl(path: string | undefined): string | undefined {
+export function absoluteUrl(path: string | undefined): string | undefined {
   const value = path?.trim();
   if (!value) return undefined;
   if (/^https?:\/\//i.test(value)) return value;

@@ -95,6 +95,11 @@ fingerprint has changed since the last card. Four parts hold it up:
   `v: 2`. A version bump resets every conversation in flight at deploy time,
   which is a worse trade than one redundant card.
 
+The Día vs Coto card draws itself the same way, for a Día cart only, when
+`chat_dual_compare` is on. It is not a model tool. `autoCompare` runs from the
+loop after `get_cart_link`, and the prices on the card come from the catalog
+lookup, never from a tool argument. A missing config row leaves the card off.
+
 `render_cart` survives for the one job left to it: bringing an *unchanged*
 basket back after a question about it. Its description says so, and says never
 to answer a change by pointing at a card already on screen. When the description
