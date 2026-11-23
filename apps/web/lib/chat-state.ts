@@ -47,7 +47,7 @@ export type Block =
   | { kind: 'user'; id: string; text: string; failed?: SendFailure; image?: ChatImage }
   | { kind: 'say'; id: string; text: string; thinking: string; tools: ToolRun[] }
   | { kind: 'products'; id: string; items: Product[]; note?: string }
-  | { kind: 'cart'; id: string; cart: Cart; handoffUrl?: string; dualCheckout?: boolean }
+  | { kind: 'cart'; id: string; cart: Cart; handoffUrl?: string; dualCheckout?: boolean; soloDia?: boolean }
   | {
       kind: 'compare';
       id: string;
@@ -72,7 +72,7 @@ export interface ChatState {
   /** Opaque to the browser; handed back on the next turn so the agent remembers. */
   snapshot?: SessionSnapshot;
   /** The newest cart seen, wherever it appeared. What the pay button settles. */
-  cart?: { cart: Cart; handoffUrl?: string; dualCheckout?: boolean };
+  cart?: { cart: Cart; handoffUrl?: string; dualCheckout?: boolean; soloDia?: boolean };
 }
 
 export const initialState: ChatState = { blocks: [], streaming: false };
@@ -262,6 +262,7 @@ export function applyEvent(state: ChatState, e: UiEvent): ChatState {
         handoffUrl: e.handoffUrl ?? prior?.handoffUrl,
         // The flag is read every hop. A later card without it is the flag off.
         ...(e.dualCheckout ? { dualCheckout: true } : {}),
+        ...(e.soloDia ? { soloDia: true } : {}),
       });
 
       const blocks = prior
@@ -274,6 +275,7 @@ export function applyEvent(state: ChatState, e: UiEvent): ChatState {
           cart: e.cart,
           handoffUrl: e.handoffUrl ?? prior?.handoffUrl,
           ...(e.dualCheckout ? { dualCheckout: true } : {}),
+          ...(e.soloDia ? { soloDia: true } : {}),
         },
         // Reusing the id matters: React keys off it, so the card updates in
         // place instead of unmounting and animating back in. The cart-link

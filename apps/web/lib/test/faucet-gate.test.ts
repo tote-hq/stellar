@@ -43,7 +43,7 @@ describe('POST /api/faucet gate', () => {
   it('lets a granted wallet through with a signed session proof', async () => {
     const book = memoryWallets([{ address: tester.publicKey(), faucetAllowed: true }]);
     const res = await gateFaucet(await post({ address: tester.publicKey(), proof: signed(tester) }), env, now, memoryCounter(), book.directory);
-    assert.deepEqual(res, { address: tester.publicKey(), kind: 'account', network: DEFAULT_NETWORK });
+    assert.deepEqual(res, { address: tester.publicKey(), kind: 'account', network: DEFAULT_NETWORK, chunks: 1 });
     assert.equal(book.inserts(), 0);
   });
 

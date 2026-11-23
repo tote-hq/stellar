@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { track, trackLoginStart } from '../lib/analytics';
-import { GRANT_UNITS } from '../lib/faucet-policy.ts';
+import { CHUNK_UNITS } from '../lib/faucet-policy.ts';
 import { usdcAmount } from '../lib/faucet-copy.ts';
 import { modeCopyFor, previewMasthead } from '../lib/mode-copy.ts';
 import { OPEN_FAUCET_EVENT } from '../lib/onboarding.ts';
@@ -133,7 +133,7 @@ export function WalletWidget() {
       track('payment_success', { flow: 'faucet', code: res.status === 429 ? 'enough' : 'ok' });
       track('faucet', { code: res.status === 429 ? 'enough' : 'ok' });
       setNoteError(false);
-      setNote(json.note ?? copy.fundedAmount(usdcAmount(GRANT_UNITS, lang)));
+      setNote(json.note ?? copy.fundedAmount(usdcAmount(CHUNK_UNITS, lang)));
       refresh();
     } catch (err) {
       track('payment_fail', { flow: 'faucet', code: 'error' });

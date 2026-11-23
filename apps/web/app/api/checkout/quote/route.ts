@@ -21,12 +21,12 @@ import { compareDiaToCoto } from '@changuito/mcp/compare';
 import { arsToUsdCents } from '@changuito/mcp/fx';
 import type { Cart, CartLine } from '@changuito/mcp/types';
 
-import { comparisonTotals, countsTowardFee, feeUsdFrom, type ComparisonQuote, type ComparisonRow } from '../../../../lib/checkout/compare-fee.ts';
+import { comparisonTotals, countsTowardFee, feeUsdFrom, type ComparisonQuote, type ComparisonRow, type FeeBasis } from '../../../../lib/checkout/compare-fee.ts';
 import { cotoCheckoutBlocked } from '../../../../lib/checkout/coto-guard.ts';
 import { quoteRate } from '../../../../lib/checkout/rate.ts';
 import { NO_DELIVERY, quoteShipping, type ShippingLocation } from '../../../../lib/checkout/shipping.ts';
 import { checkoutStore } from '../../../../lib/checkout/store.ts';
-import { sandboxFlags, getConfig, flagOn, memberFlow } from '../../../../lib/config.ts';
+import { sandboxFlags, getConfig, flagOn, memberFlow, retailerSearch } from '../../../../lib/config.ts';
 import { checkoutMode } from '../../../../lib/checkout/mode.ts';
 import { manualAvailable, manualMember, manualStatus } from '../../../../lib/checkout/manual-server.ts';
 import { MANUAL_KIND, SERVICE_FEE_CENTS, SERVICE_FEE_UNITS, serviceOrderId, VIEWER_SECONDS } from '../../../../lib/checkout/manual-policy.ts';
@@ -64,7 +64,13 @@ export async function POST(req: Request): Promise<Response> {
   if (!user.ok) return Response.json({ error: 'Iniciá sesión para pagar.' }, { status: 401 });
 
   const body = (await req.json().catch(() => null)) as {
-    cart?: unknown; handoffUrl?: unknown; location?: unknown; compare?: unknown; payRetailer?: unknown;
+    cart?: unknown;
+    handoffUrl?: unknown;
+    location?: unknown;
+    compare?: unknown;
+    payRetailer?: unknown;
+    acceptedAlternatives?: unknown;
+    checkoutPath?: unknown;
   } | null;
   if (!isCart(body?.cart)) return Response.json({ error: 'Falta el changuito.' }, { status: 400 });
   const cart = body.cart;
@@ -72,11 +78,17 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
   }
   // A client cart whose retailer is Coto stayed blocked above. The demo pays
-  // the Día basket's matched lines, and the browser sends no amount.
+  // accepted Coto alternativas of a Día basket, and the browser sends no amount.
   if (body.payRetailer !== undefined && body.payRetailer !== 'coto') {
     return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
   }
-  if (body.payRetailer === 'coto') return quoteCotoDemo(user.address, cart, body.location);
+  const acceptedAlternatives = parseAccepted(body.acceptedAlternatives);
+  const checkoutPath = parseCheckoutPath(body.checkoutPath);
+  if (body.payRetailer === 'coto') {
+    return quoteCotoDemo(user.address, cart, body.location, acceptedAlternatives, checkoutPath ?? 'solo_coto');
+  }
+  // Fee vs similars when the client asks (`compare: true`) — dual and solo Día
+  // demo pays set it. Ordinary checkout never does.
   const compare = body.compare === true;
   if (compare && cart.retailer !== 'dia') {
     return Response.json({ error: 'La comparación solo está disponible para un changuito de Día.' }, { status: 400 });
@@ -159,29 +171,33 @@ export async function POST(req: Request): Promise<Response> {
   const totalCentavos = cart.total.centavos + shipping.centavos;
   let comparison: ComparisonQuote | undefined;
   if (compare) {
-    try {
-      const { rows } = await compareDiaToCoto(
-        lines.map((l) => ({ skuId: l.skuId, name: l.name, quantity: l.quantity, lineTotal: l.lineTotal })),
-        location.postalCode,
-      );
-      const totals = comparisonTotals(rows);
-      comparison = {
-        ...totals,
-        rows,
-        feeUsdCents: feeUsdFrom(totals.feeCentavos, (centavos) => arsToUsdCents(centavos, rate.arsPerUsd, 0)),
-      };
-    } catch (err) {
-      // Message and RetailerError.code only — never the Constructor URL (it carries the key).
-      // error level so Workers Observability keeps the line (warn was empty in prod queries).
-      const name = err instanceof Error ? err.name : 'error';
-      const code =
-        err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[checkout] compare failed', name, code, msg);
-      return Response.json(
-        { error: 'No pudimos cotizar la comparación con Coto. Podés pagar el changuito de Día igual.' },
-        { status: 503 },
-      );
+    const search = retailerSearch(config);
+    if (!search.enabled.coto) {
+      comparison = emptyComparison('other_disabled');
+    } else {
+      try {
+        const { rows } = await compareDiaToCoto(
+          lines.map((l) => ({ skuId: l.skuId, name: l.name, quantity: l.quantity, lineTotal: l.lineTotal })),
+          location.postalCode,
+        );
+        const totals = comparisonTotals(rows);
+        const feeBasis: FeeBasis = totals.feeCentavos === 0 && !rows.some(countsTowardFee) ? 'no_refs' : 'gap';
+        comparison = {
+          ...totals,
+          rows,
+          feeBasis,
+          feeUsdCents: feeUsdFrom(totals.feeCentavos, (centavos) => arsToUsdCents(centavos, rate.arsPerUsd, 0)),
+        };
+      } catch (err) {
+        // Compare fail / timeout → fee 0, still payable (not 503).
+        const name = err instanceof Error ? err.name : 'error';
+        const code =
+          err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('[checkout] compare failed; fee 0', name, code, msg);
+        const basis: FeeBasis = /abort|timeout/i.test(msg) ? 'timeout' : 'compare_failed';
+        comparison = emptyComparison(basis);
+      }
     }
   }
   const basketCents = arsToUsdCents(totalCentavos as never, rate.arsPerUsd, buffer()) as unknown as number;
@@ -198,6 +214,7 @@ export async function POST(req: Request): Promise<Response> {
   const handoffUrl =
     typeof body.handoffUrl === 'string' && /^https:\/\//.test(body.handoffUrl) ? body.handoffUrl : null;
 
+  const path = checkoutPath ?? (compare ? 'dual' : undefined);
   await checkoutStore().set({
     ...manualFields,
     orderId,
@@ -217,6 +234,7 @@ export async function POST(req: Request): Promise<Response> {
     mode,
     ...(manualFlow ? { manualFlow } : {}),
     ...(comparison ? { comparison } : {}),
+    ...(path ? { checkoutPath: path } : {}),
   });
 
   const res: QuoteResponse = {
@@ -241,6 +259,7 @@ export async function POST(req: Request): Promise<Response> {
     usdcMint: contractIds(DEFAULT_NETWORK).usdcId,
     mode,
     ...(comparison ? { comparison } : {}),
+    ...(path ? { checkoutPath: path } : {}),
   };
   return Response.json(res);
 }
@@ -248,12 +267,52 @@ export async function POST(req: Request): Promise<Response> {
 const ARS = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' });
 const pesos = (centavos: number) => ARS.format(centavos / 100);
 
+type AcceptedAlt = { diaSkuId: string; cotoId: string };
+type CheckoutPath = 'solo_dia' | 'solo_coto' | 'dual';
+
+function parseAccepted(raw: unknown): AcceptedAlt[] | null {
+  if (raw === undefined || raw === null) return null;
+  if (!Array.isArray(raw)) return null;
+  const out: AcceptedAlt[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const diaSkuId = (item as { diaSkuId?: unknown }).diaSkuId;
+    const cotoId = (item as { cotoId?: unknown }).cotoId;
+    if (typeof diaSkuId === 'string' && diaSkuId && typeof cotoId === 'string' && cotoId) {
+      out.push({ diaSkuId, cotoId });
+    }
+  }
+  return out;
+}
+
+function parseCheckoutPath(raw: unknown): CheckoutPath | undefined {
+  return raw === 'solo_dia' || raw === 'solo_coto' || raw === 'dual' ? raw : undefined;
+}
+
+function emptyComparison(feeBasis: FeeBasis): ComparisonQuote {
+  return {
+    diaSubtotalCentavos: 0,
+    otherSubtotalCentavos: 0,
+    savingsCentavos: 0,
+    feeCentavos: 0,
+    feeUsdCents: 0,
+    rows: [],
+    feeBasis,
+  };
+}
+
 /**
- * Mock pay for the matched Coto lines of a Día basket.
- * The client total is ignored. Shipping and the 20% fee are zero. The hash
- * is the server-built lines, and the record is Coto with no Día cart link.
+ * Mock pay for accepted Coto alternativas of a Día basket.
+ * The client total is ignored. Shipping is zero. Fee is 20% of the gap vs
+ * the Día seed lines (may be 0). The hash is the server-built lines.
  */
-async function quoteCotoDemo(buyer: string, cart: Cart, locationInput: unknown): Promise<Response> {
+async function quoteCotoDemo(
+  buyer: string,
+  cart: Cart,
+  locationInput: unknown,
+  accepted: AcceptedAlt[] | null,
+  checkoutPath: CheckoutPath,
+): Promise<Response> {
   if (cart.retailer !== 'dia') {
     return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
   }
@@ -265,6 +324,10 @@ async function quoteCotoDemo(buyer: string, cart: Cart, locationInput: unknown):
   const manual = !flags.mock && (await manualMember(buyer)) && flagOn(config, 'manual_checkout_enabled');
   const mode = checkoutMode({ mock: flags.mock, manual });
   if (!flagOn(config, 'chat_dual_checkout_demo') || mode !== 'mock' || manual) {
+    return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
+  }
+  const search = retailerSearch(config);
+  if (!search.enabled.coto) {
     return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
   }
 
@@ -291,13 +354,25 @@ async function quoteCotoDemo(buyer: string, cart: Cart, locationInput: unknown):
     return Response.json({ error: 'No pudimos cotizar el envío o el cambio. Probá de nuevo en un rato.' }, { status: 503 });
   }
 
+  // Accepted ids are required. The server never defaults to every similar.
+  if (!accepted || accepted.length === 0) {
+    return Response.json({ error: 'Elegí al menos una alternativa de Coto.' }, { status: 400 });
+  }
+
   let rows: ComparisonRow[];
+  let feeBasis: FeeBasis = 'gap';
   try {
     const compared = await compareDiaToCoto(
       lines.map((l) => ({ skuId: l.skuId, name: l.name, quantity: l.quantity, lineTotal: l.lineTotal })),
       location.postalCode,
     );
-    rows = compared.rows.filter(countsTowardFee);
+    const want = new Set(accepted.map((a) => `${a.diaSkuId}:${a.cotoId}`));
+    rows = compared.rows.filter(
+      (row) => countsTowardFee(row) && row.coto && want.has(`${row.skuId}:${row.coto.id}`),
+    );
+    if (rows.length === 0) {
+      return Response.json({ error: 'Elegí al menos una alternativa de Coto.' }, { status: 400 });
+    }
   } catch (err) {
     const name = err instanceof Error ? err.name : 'error';
     const code = err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
@@ -310,11 +385,20 @@ async function quoteCotoDemo(buyer: string, cart: Cart, locationInput: unknown):
   if (serverCart.lines.length === 0 || serverCart.total.centavos <= 0) {
     return Response.json({ error: 'El changuito está vacío.' }, { status: 400 });
   }
-  const cents = arsToUsdCents(serverCart.total.centavos as never, rate.arsPerUsd, buffer()) as unknown as number;
+  const totals = comparisonTotals(rows);
+  const feeUsdCents = feeUsdFrom(totals.feeCentavos, (centavos) => arsToUsdCents(centavos, rate.arsPerUsd, 0));
+  const basketCents = arsToUsdCents(serverCart.total.centavos as never, rate.arsPerUsd, buffer()) as unknown as number;
+  const cents = basketCents + feeUsdCents;
   const nonce = newOrderId();
   const orderId = toHex(nonce);
   const units = centsToUnits(Math.round(cents)).toString();
   const hash = toHex(await basketHash(serverCart));
+  const comparison: ComparisonQuote = {
+    ...totals,
+    rows,
+    feeUsdCents,
+    feeBasis: totals.feeCentavos === 0 && feeBasis === 'gap' && !rows.some(countsTowardFee) ? 'no_refs' : feeBasis,
+  };
 
   await checkoutStore().set({
     orderId,
@@ -332,6 +416,8 @@ async function quoteCotoDemo(buyer: string, cart: Cart, locationInput: unknown):
     handoffUrl: null,
     createdAt: Date.now(),
     mode: 'mock',
+    comparison,
+    checkoutPath,
   });
 
   const res: QuoteResponse = {
@@ -352,11 +438,13 @@ async function quoteCotoDemo(buyer: string, cart: Cart, locationInput: unknown):
     programId: contractIds(DEFAULT_NETWORK).escrowId,
     usdcMint: contractIds(DEFAULT_NETWORK).usdcId,
     mode: 'mock',
+    comparison,
+    checkoutPath,
   };
   return Response.json(res);
 }
 
-/** Matched available Coto lines only. The Día total never enters the hash. */
+/** Accepted available Coto lines only. The Día total never enters the hash. */
 function cotoServerCart(diaCartId: string, rows: ComparisonRow[]): Cart {
   const lines: CartLine[] = rows.map((row, index) => {
     const offer = row.coto!;

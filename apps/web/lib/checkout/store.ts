@@ -48,9 +48,10 @@ export interface CheckoutRecord {
   mode?: 'live' | 'demo' | 'mock';
   /**
    * Present when the shopper compared this Día basket. `amount` / `amountCents`
-   * include the fee. Absent on every other checkout, including the 0.10 preparation fee.
+   * include the fee (may be 0). Absent on every other checkout, including the 0.10 preparation fee.
    */
   comparison?: ComparisonQuote;
+  checkoutPath?: 'solo_dia' | 'solo_coto' | 'dual';
 
   jobId?: string;
   /**

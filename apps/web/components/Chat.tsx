@@ -146,6 +146,8 @@ function ChatCore({
     handoffUrl?: string;
     payRetailer?: 'coto';
     demoTopUp?: boolean;
+    acceptedAlternatives?: { diaSkuId: string; cotoId: string }[];
+    checkoutPath?: 'solo_dia' | 'solo_coto' | 'dual';
     receiptLines?: { name: string; quantity: number; lineTotal: string }[];
   } | null>(null);
   /** Which pay started. Cleared if the modal closes before escrow open. */
@@ -496,10 +498,20 @@ function ChatCore({
                     // Not just disabled: a paid chat's card is a record of
                     // what was bought, and a Pagar on it invites paying twice.
                     // A dual-checkout basket pays from the cards under the compare.
+                    // Solo Día (demo on, Coto search off): one PayCard, still fees.
                     canOrder && !b.dualCheckout
                       ? (cart) => {
                           track('payment_start', { flow: 'frame' });
-                          setPaying({ cart, handoffUrl: b.handoffUrl });
+                          setPaying(
+                            b.soloDia
+                              ? {
+                                  cart,
+                                  handoffUrl: b.handoffUrl,
+                                  demoTopUp: true,
+                                  checkoutPath: 'solo_dia',
+                                }
+                              : { cart, handoffUrl: b.handoffUrl },
+                          );
                         }
                       : undefined
                   }
@@ -507,40 +519,29 @@ function ChatCore({
               );
             case 'compare':
               return (
-                <div key={b.id} className="compare-pay">
-                  <ComparisonCard block={b} />
-                  <DualPay
-                    block={b}
-                    blocks={state.blocks}
-                    canOrder={canOrder}
-                    payLock={payLock}
-                    paying={paying !== null}
-                    onPay={(which, cart, handoffUrl, receiptLines) => {
-                      setPayLock(which);
-                      payOpened.current = false;
-                      if (!address) {
-                        const body: { cart: Cart; location?: unknown; handoffUrl?: string; payRetailer?: 'coto' } = {
-                          cart,
-                          location: state.snapshot?.location,
-                        };
-                        if (which === 'coto') body.payRetailer = 'coto';
-                        else if (handoffUrl) body.handoffUrl = handoffUrl;
-                        void fetch('/api/checkout/quote', {
-                          method: 'POST',
-                          headers: { 'content-type': 'application/json' },
-                          body: JSON.stringify(body),
-                        });
-                      }
-                      setPaying({
-                        cart,
-                        handoffUrl: which === 'coto' ? undefined : handoffUrl,
-                        payRetailer: which === 'coto' ? 'coto' : undefined,
-                        demoTopUp: true,
-                        receiptLines,
-                      });
-                    }}
-                  />
-                </div>
+                <DualCheckout
+                  key={b.id}
+                  block={b}
+                  blocks={state.blocks}
+                  canOrder={canOrder}
+                  payLock={payLock}
+                  paying={paying !== null}
+                  address={address}
+                  location={state.snapshot?.location}
+                  onPay={(which, cart, handoffUrl, receiptLines, acceptedAlternatives) => {
+                    setPayLock(which);
+                    payOpened.current = false;
+                    setPaying({
+                      cart,
+                      handoffUrl: which === 'coto' ? undefined : handoffUrl,
+                      payRetailer: which === 'coto' ? 'coto' : undefined,
+                      demoTopUp: true,
+                      acceptedAlternatives,
+                      checkoutPath: 'dual',
+                      receiptLines,
+                    });
+                  }}
+                />
               );
             case 'error':
               // The soft-limit line is guest copy. Once the shopper is signed
@@ -787,6 +788,8 @@ function ChatCore({
           handoffUrl={paying.handoffUrl}
           payRetailer={paying.payRetailer}
           demoTopUp={paying.demoTopUp}
+          acceptedAlternatives={paying.acceptedAlternatives}
+          checkoutPath={paying.checkoutPath}
           receiptLines={paying.receiptLines}
           onOpened={markOpened}
           // The chat the server knows, which is the one `archiveChat` wrote —
@@ -821,12 +824,14 @@ function cartFor(blocks: Block[], cartId: string): Extract<Block, { kind: 'cart'
   return undefined;
 }
 
-function DualPay({
+function DualCheckout({
   block,
   blocks,
   canOrder,
   payLock,
   paying,
+  address,
+  location,
   onPay,
 }: {
   block: Extract<Block, { kind: 'compare' }>;
@@ -834,11 +839,109 @@ function DualPay({
   canOrder: boolean;
   payLock: null | 'dia' | 'coto';
   paying: boolean;
+  address: string | null | undefined;
+  location: unknown;
   onPay: (
     which: 'dia' | 'coto',
     cart: Cart,
     handoffUrl: string | undefined,
     receiptLines: { name: string; quantity: number; lineTotal: string }[],
+    acceptedAlternatives: { diaSkuId: string; cotoId: string }[],
+  ) => void;
+}) {
+  const similarKeys = block.rows
+    .filter(
+      (row) =>
+        (row.confidence === 'ean' || row.confidence === 'brand_size_unit') &&
+        row.coto?.available === true &&
+        row.coto,
+    )
+    .map((row) => `${row.skuId}:${row.coto!.id}`);
+  const [accepted, setAccepted] = useState(() => new Set(similarKeys));
+  // Re-seed when the compare card settles new rows.
+  useEffect(() => {
+    setAccepted(new Set(similarKeys));
+    // similarKeys is derived from block.rows; join is stable enough for this reset.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [block.id, similarKeys.join('|')]);
+  const onToggle = (key: string) => {
+    setAccepted((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  return (
+    <div className="compare-pay">
+      <ComparisonCard block={block} />
+      <DualPay
+        block={block}
+        blocks={blocks}
+        canOrder={canOrder}
+        payLock={payLock}
+        paying={paying}
+        accepted={accepted}
+        onToggle={onToggle}
+        onPay={(which, cart, handoffUrl, receiptLines, acceptedAlternatives) => {
+          if (!address) {
+            const body: {
+              cart: Cart;
+              location?: unknown;
+              handoffUrl?: string;
+              payRetailer?: 'coto';
+              compare?: boolean;
+              acceptedAlternatives?: { diaSkuId: string; cotoId: string }[];
+              checkoutPath?: 'dual';
+            } = {
+              cart,
+              location,
+              compare: true,
+              checkoutPath: 'dual',
+            };
+            if (which === 'coto') {
+              body.payRetailer = 'coto';
+              body.acceptedAlternatives = acceptedAlternatives;
+            } else if (handoffUrl) {
+              body.handoffUrl = handoffUrl;
+            }
+            void fetch('/api/checkout/quote', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+          }
+          onPay(which, cart, handoffUrl, receiptLines, acceptedAlternatives);
+        }}
+      />
+    </div>
+  );
+}
+
+function DualPay({
+  block,
+  blocks,
+  canOrder,
+  payLock,
+  paying,
+  accepted,
+  onToggle,
+  onPay,
+}: {
+  block: Extract<Block, { kind: 'compare' }>;
+  blocks: Block[];
+  canOrder: boolean;
+  payLock: null | 'dia' | 'coto';
+  paying: boolean;
+  /** Keys `diaSkuId:cotoId` the shopper accepted as Coto alternativas. */
+  accepted: Set<string>;
+  onToggle: (key: string) => void;
+  onPay: (
+    which: 'dia' | 'coto',
+    cart: Cart,
+    handoffUrl: string | undefined,
+    receiptLines: { name: string; quantity: number; lineTotal: string }[],
+    acceptedAlternatives: { diaSkuId: string; cotoId: string }[],
   ) => void;
 }) {
   const offer =
@@ -850,17 +953,28 @@ function DualPay({
   const diaLines: PayCardLine[] = cartBlock.cart.lines
     .filter((line) => line.available && line.quantity > 0)
     .map((line) => ({ key: `${line.index}:${line.skuId}`, name: line.name, quantity: line.quantity }));
-  const cotoRows = block.rows.filter((row) => row.confidence === 'ean' && row.coto?.available === true && row.coto);
-  if (diaLines.length === 0 || cotoRows.length === 0) return null;
-  const cotoLines: PayCardLine[] = cotoRows.map((row) => ({
+  // Similars: EAN or brand+size. PayCard Coto shows accepted alternativas only.
+  const similarRows = block.rows.filter(
+    (row) =>
+      (row.confidence === 'ean' || row.confidence === 'brand_size_unit') &&
+      row.coto?.available === true &&
+      row.coto,
+  );
+  if (diaLines.length === 0 || similarRows.length === 0) return null;
+  const acceptedRows = similarRows.filter((row) => accepted.has(`${row.skuId}:${row.coto!.id}`));
+  const cotoLines: PayCardLine[] = acceptedRows.map((row) => ({
     key: row.coto?.id ?? row.skuId,
     name: row.coto?.name ?? row.name,
     quantity: row.quantity,
   }));
+  const acceptedAlternatives = acceptedRows.map((row) => ({
+    diaSkuId: row.skuId,
+    cotoId: row.coto!.id,
+  }));
   const diaReceipt = cartBlock.cart.lines
     .filter((line) => line.available && line.quantity > 0)
     .map((line) => ({ name: line.name, quantity: line.quantity, lineTotal: line.lineTotal.display }));
-  const cotoReceipt = cotoRows.map((row) => ({
+  const cotoReceipt = acceptedRows.map((row) => ({
     name: row.coto?.name ?? row.name,
     quantity: row.quantity,
     lineTotal: PESOS.format((row.coto?.lineCentavos ?? 0) / 100),
@@ -868,19 +982,39 @@ function DualPay({
   const busy = (which: 'dia' | 'coto') => paying || (payLock !== null && payLock !== which);
   return (
     <div className="pay-cards">
+      <ul className="pay-card-accept" data-testid="coto-alternatives">
+        {similarRows.map((row) => {
+          const key = `${row.skuId}:${row.coto!.id}`;
+          const id = `alt-${key}`;
+          return (
+            <li key={key}>
+              <label htmlFor={id}>
+                <input
+                  id={id}
+                  type="checkbox"
+                  checked={accepted.has(key)}
+                  onChange={() => onToggle(key)}
+                  data-testid={`coto-alt-${row.coto!.id}`}
+                />
+                {row.coto!.name}
+              </label>
+            </li>
+          );
+        })}
+      </ul>
       <PayCard
         which="dia"
         lines={diaLines}
         enabled={canOrder}
         busy={busy('dia')}
-        onPay={() => onPay('dia', cartBlock.cart, cartBlock.handoffUrl, diaReceipt)}
+        onPay={() => onPay('dia', cartBlock.cart, cartBlock.handoffUrl, diaReceipt, acceptedAlternatives)}
       />
       <PayCard
         which="coto"
         lines={cotoLines}
-        enabled={canOrder}
+        enabled={canOrder && cotoLines.length > 0}
         busy={busy('coto')}
-        onPay={() => onPay('coto', cartBlock.cart, cartBlock.handoffUrl, cotoReceipt)}
+        onPay={() => onPay('coto', cartBlock.cart, cartBlock.handoffUrl, cotoReceipt, acceptedAlternatives)}
       />
     </div>
   );

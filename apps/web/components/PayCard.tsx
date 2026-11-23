@@ -19,10 +19,10 @@ const COPY = {
     label: 'Pagar el changuito completo de Día',
   },
   coto: {
-    title: 'Líneas de Coto',
+    title: 'Alternativas de Coto',
     titleId: 'pay-card-coto-title',
     testId: 'pay-card-coto',
-    label: 'Pagar las líneas que coinciden en Coto',
+    label: 'Pagar las alternativas aceptadas de Coto',
   },
 } as const;
 

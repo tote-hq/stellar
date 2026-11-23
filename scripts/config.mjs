@@ -63,6 +63,29 @@ const STRING_KEYS = {
   },
 };
 
+/** JSON object keys with a custom validator. */
+const OBJECT_KEYS = {
+  retailer_search: (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return { ok: false, error: 'retailer_search must be JSON like {"order":["dia","coto"],"enabled":{"dia":true,"coto":true}}' };
+    }
+    const order = value.order;
+    const enabled = value.enabled;
+    if (!Array.isArray(order) || order.length === 0 || !order.every((r) => r === 'dia' || r === 'coto')) {
+      return { ok: false, error: 'retailer_search.order must be a non-empty array of "dia" | "coto"' };
+    }
+    if (!enabled || typeof enabled !== 'object' || typeof enabled.dia !== 'boolean' || typeof enabled.coto !== 'boolean') {
+      return { ok: false, error: 'retailer_search.enabled must be { dia: boolean, coto: boolean }' };
+    }
+    if (enabled.dia === false) {
+      return { ok: false, error: 'enabled.dia=false is rejected: Día is required to seed Solo Coto and compare' };
+    }
+    const describe = () =>
+      `search order ${order.join(' → ')}; Día ${enabled.dia ? 'on' : 'off'}, Coto ${enabled.coto ? 'on' : 'off'}`;
+    return { ok: true, describe };
+  },
+};
+
 /** Never the URL itself — only enough of it to tell one database from another. */
 function where(url) {
   try {
@@ -90,10 +113,14 @@ const parse = (raw) => {
   }
 };
 const describe = (key, value) => {
+  if (OBJECT_KEYS[key]) {
+    const check = OBJECT_KEYS[key](value);
+    return check.ok ? `  → ${check.describe()}` : '';
+  }
   if (STRING_KEYS[key]) return `  → ${STRING_KEYS[key](value)}`;
   return KNOWN[key] ? `  → ${KNOWN[key](value === true || value === 'true')}` : '';
 };
-const known = (key) => Boolean(KNOWN[key] || STRING_KEYS[key]);
+const known = (key) => Boolean(KNOWN[key] || STRING_KEYS[key] || OBJECT_KEYS[key]);
 
 const [cmd = 'list', key, raw] = process.argv.slice(2);
 try {
@@ -105,14 +132,24 @@ try {
     }
   } else if (cmd === 'get' && key) {
     const [r] = await sql`select value from config where key = ${key}`;
-    const missing = key === 'manual_checkout_flow' ? 'reads as viewer' : 'reads as off';
+    const missing = key === 'manual_checkout_flow' ? 'reads as viewer' : key === 'retailer_search' ? 'reads as Día→Coto, both on' : 'reads as off';
     console.log(r ? `${key} = ${JSON.stringify(r.value)}${describe(key, r.value)}` : `${key} is not set (${missing})`);
   } else if (cmd === 'set' && key && raw !== undefined) {
-    if (!known(key)) console.warn(`note: ${key} is not a key the app reads (known: ${[...Object.keys(KNOWN), ...Object.keys(STRING_KEYS)].join(', ')})`);
+    if (!known(key)) console.warn(`note: ${key} is not a key the app reads (known: ${[...Object.keys(KNOWN), ...Object.keys(STRING_KEYS), ...Object.keys(OBJECT_KEYS)].join(', ')})`);
     const value = parse(raw);
     if (key === 'manual_checkout_flow' && !['viewer', 'guided', 'headless'].includes(value)) {
       console.error('manual_checkout_flow must be viewer, guided or headless');
       process.exitCode = 2;
+    } else if (OBJECT_KEYS[key]) {
+      const check = OBJECT_KEYS[key](value);
+      if (!check.ok) {
+        console.error(check.error);
+        process.exitCode = 2;
+      } else {
+        await sql`insert into config (key, value) values (${key}, ${sql.json(value)})
+                  on conflict (key) do update set value = excluded.value`;
+        console.log(`${key} = ${JSON.stringify(value)} on ${where(url)}${describe(key, value)}`);
+      }
     } else {
       await sql`insert into config (key, value) values (${key}, ${sql.json(value)})
                 on conflict (key) do update set value = excluded.value`;

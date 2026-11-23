@@ -39,9 +39,11 @@ export interface QuoteResponse {
   mode: 'live' | 'demo' | 'mock';
   /**
    * Set when this quote compared the Día basket with the Coto catalog.
-   * `amountCents` already includes `feeUsdCents`. Coto is not checked out.
+   * `amountCents` already includes `feeUsdCents` (may be 0). Coto is not checked out.
    */
   comparison?: ComparisonQuote;
+  /** Solo Día / Solo Coto / Dual — drives which PayCard the client showed. */
+  checkoutPath?: 'solo_dia' | 'solo_coto' | 'dual';
 }
 
 export type CheckoutStage = 'quoted' | 'locked' | 'shopping' | 'done' | 'refunded';
