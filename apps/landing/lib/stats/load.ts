@@ -28,10 +28,34 @@ const cached = unstable_cache(
   { revalidate: STATS_REVALIDATE, tags: ['stats'] },
 );
 
-export async function getStatsSnapshot(): Promise<StatsSnapshot> {
+/**
+ * Per-isolate memo. `unstable_cache` has a shared store on Next and may have
+ * none on a Worker; either way one isolate should not repeat the public RPC
+ * scan on every request inside the window. A failed read keeps the previous
+ * value when there is one.
+ */
+let memo: { at: number; value: StatsSnapshot } | undefined;
+
+async function readSnapshot(): Promise<StatsSnapshot> {
   try {
     return await cached();
+  } catch (error) {
+    console.error(
+      '[stats] cached read failed:',
+      error instanceof Error ? error.message.slice(0, 80) : 'unknown',
+    );
+    return loadLiveSnapshot({ fetch, env: process.env, now: () => new Date(), count: countQuery });
+  }
+}
+
+export async function getStatsSnapshot(): Promise<StatsSnapshot> {
+  const now = Date.now();
+  if (memo && now - memo.at < STATS_REVALIDATE * 1000) return memo.value;
+  try {
+    const value = await readSnapshot();
+    memo = { at: now, value };
+    return value;
   } catch {
-    return FALLBACK_SNAPSHOT;
+    return memo?.value ?? FALLBACK_SNAPSHOT;
   }
 }

@@ -1,7 +1,8 @@
 import { getStatsSnapshot } from '../../../lib/stats/load';
 import { statsCsv, parseMode, parseNetwork, parseRange } from '../../../lib/stats/view';
 
-export const revalidate = 300;
+/** Same reason as the page: the export is a request-time read, not a prerender. */
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   const url = new URL(request.url);

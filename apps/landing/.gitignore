@@ -1,3 +1,9 @@
 .vercel
 .env
+.dev.vars
+.dev.vars.*
+
+/dist/
+.vinext/
+.cloudflare/
 
