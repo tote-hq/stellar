@@ -7,7 +7,13 @@
  * Postgres (`STATS_STELLAR_DATABASE_URL`, `STATS_SOLANA_DATABASE_URL`):
  * app accounts and delivered orders. The waitlist figure stays on the
  * last published value. When a source is missing or fails, that part
- * keeps its published value and the snapshot says so. Nothing here throws.
+ * keeps its published value and the snapshot says the source is unavailable.
+ * Nothing here throws out of loadLiveSnapshot.
+ *
+ * The whole read shares one deadline. A source that is still pending when
+ * the deadline fires is marked unavailable and the published number stays.
+ * Every outbound fetch receives that signal, so a hung socket is aborted
+ * rather than held until the Worker is killed.
  *
  * The result holds aggregates and public transaction hashes only. Address
  * sets are counted and dropped; they never leave this module.
@@ -32,20 +38,33 @@ export const STELLAR_EXPERT_API = 'https://api.stellar.expert/explorer/testnet';
 export const HORIZON = 'https://horizon-testnet.stellar.org';
 export const GITHUB_SEARCH = 'https://api.github.com/search/issues';
 
-const TIMEOUT_MS = 8_000;
-const SOLANA_SIG_PAGES = 5;
-const SOLANA_TX_CAP = 400;
-const SOLANA_CONCURRENCY = 3;
-const SOLANA_RETRIES = 3;
-const EXPERT_PAGES = 10;
-const HORIZON_PAGES = 5;
-const OP_LOOKUP_CAP = 50;
+/**
+ * Bound for one snapshot, including Postgres. Five and a half seconds leaves
+ * a little room under a six second page budget after the cache probe.
+ */
+export const SNAPSHOT_DEADLINE_MS = 5_500;
+/** Per-request fetch cap. Combined with the snapshot signal via AbortSignal.any. */
+export const FETCH_TIMEOUT_MS = 4_000;
+/** One signature page on the request path. Full history is not scanned per hit. */
+export const SOLANA_SIG_PAGES = 1;
+export const SOLANA_SIG_LIMIT = 80;
+/**
+ * Transaction bodies fetched per request. The signature list still supplies
+ * the transaction count; instruction totals cover this many bodies only.
+ */
+export const SOLANA_TX_CAP = 16;
+const SOLANA_CONCURRENCY = 4;
+/** One retry, then stop. An abort is not retried. */
+export const SOLANA_RETRIES = 1;
+const EXPERT_PAGES = 2;
+const HORIZON_PAGES = 2;
+const OP_LOOKUP_CAP = 8;
 const RECENT_PER_CHAIN = 4;
 const DAY_MS = 86_400_000;
 /** Stellar testnet contracts went live this day; older history on reused accounts is not Changuito's. */
 export const STELLAR_LIVE_SINCE = '2026-09-21T00:00:00Z';
 
-export type QueryFn = (url: string, text: string) => Promise<number | null>;
+export type QueryFn = (url: string, text: string, signal?: AbortSignal) => Promise<number | null>;
 
 export interface LiveDeps {
   fetch: typeof fetch;
@@ -53,18 +72,77 @@ export interface LiveDeps {
   now: () => Date;
   /** Runs one read-only count query. Injected so tests never touch a database. */
   count?: QueryFn;
+  /** Cancels the read. loadLiveSnapshot sets this to the deadline signal. */
+  signal?: AbortSignal;
+  /** Test override. Production uses SNAPSHOT_DEADLINE_MS. */
+  deadlineMs?: number;
 }
 
 // ------------------------------------------------------------- helpers --
 
+function safeError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : 'unknown';
+  return raw.replace(/postgres(?:ql)?:\/\/\S+/gi, '[redacted]').slice(0, 80);
+}
+
+function abortError(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error) return signal.reason;
+  return new DOMException('The operation was aborted', 'AbortError');
+}
+
+/** Rejects when `signal` aborts. The inner promise is left running. */
+export function raceSignal<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return work;
+  if (signal.aborted) return Promise.reject(abortError(signal));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(abortError(signal));
+    signal.addEventListener('abort', onAbort, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function requestSignal(deps: LiveDeps, extra?: AbortSignal | null): AbortSignal {
+  const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+  const parts = [timeout, deps.signal, extra ?? undefined].filter((part): part is AbortSignal => Boolean(part));
+  return parts.length === 1 ? (parts[0] as AbortSignal) : AbortSignal.any(parts);
+}
+
 async function getJson(deps: LiveDeps, url: string, init?: RequestInit): Promise<unknown> {
+  const signal = requestSignal(deps, init?.signal ?? undefined);
   const res = await deps.fetch(url, {
     ...init,
     headers: { accept: 'application/json', ...(init?.headers ?? {}) },
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+    signal,
   });
   if (!res.ok) throw new Error(`upstream ${res.status}`);
-  return res.json();
+  return raceSignal(res.json() as Promise<unknown>, signal);
 }
 
 function isoDay(ms: number): string {
@@ -81,11 +159,17 @@ function sorted(map: Map<string, Point>): Point[] {
   return [...map.values()].sort((a, b) => a.iso.localeCompare(b.iso));
 }
 
-async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+async function mapLimit<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+  signal?: AbortSignal,
+): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let next = 0;
   async function worker() {
     while (next < items.length) {
+      if (signal?.aborted) return;
       const index = next++;
       out[index] = await fn(items[index] as T);
     }
@@ -110,6 +194,8 @@ export interface ChainRead {
   buyers: Set<string>;
   recent: TxRef[];
   settledUsdc: number;
+  /** Bodies whose program logs were read. Zero means instruction totals were not scanned. */
+  parsed: number;
 }
 
 interface SolSig {
@@ -180,14 +266,37 @@ export async function readSolana(deps: LiveDeps): Promise<ChainRead> {
   const url = deps.env.STATS_SOLANA_RPC_URL?.trim() || SOLANA_RPC;
   const sigs: SolSig[] = [];
   let before: string | undefined;
-  for (let page = 0; page < SOLANA_SIG_PAGES; page++) {
-    const opts: Record<string, unknown> = { limit: 1000 };
-    if (before) opts.before = before;
-    const batch = (await solanaRpc(deps, url, 'getSignaturesForAddress', [SOLANA_PROGRAM_ID, opts])) as SolSig[];
-    if (!Array.isArray(batch)) throw new Error('bad signatures');
-    sigs.push(...batch);
-    if (batch.length < 1000) break;
-    before = batch[batch.length - 1]?.signature;
+  try {
+    for (let page = 0; page < SOLANA_SIG_PAGES; page++) {
+      if (deps.signal?.aborted) break;
+      const opts: Record<string, unknown> = { limit: SOLANA_SIG_LIMIT };
+      if (before) opts.before = before;
+      const batch = (await solanaRpc(deps, url, 'getSignaturesForAddress', [SOLANA_PROGRAM_ID, opts])) as SolSig[];
+      if (!Array.isArray(batch)) throw new Error('bad signatures');
+      sigs.push(...batch);
+      if (batch.length < SOLANA_SIG_LIMIT) break;
+      before = batch[batch.length - 1]?.signature;
+    }
+  } catch (error) {
+    if (sigs.length === 0) throw error;
+  }
+  if (sigs.length === 0) {
+    // A finished call with no rows is zero. An abort with nothing is an outage.
+    if (deps.signal?.aborted) throw new Error('solana aborted');
+    return {
+      txs: 0,
+      txDays: [],
+      cartDays: [],
+      opened: 0,
+      settled: 0,
+      refunded: 0,
+      mintInit: 0,
+      wallets: new Set(),
+      buyers: new Set(),
+      recent: [],
+      settledUsdc: 0,
+      parsed: 0,
+    };
   }
   const ok = sigs.filter((s) => s.err === null || s.err === undefined);
   const read: ChainRead = {
@@ -202,23 +311,40 @@ export async function readSolana(deps: LiveDeps): Promise<ChainRead> {
     buyers: new Set(),
     recent: ok.slice(0, RECENT_PER_CHAIN).map((s) => ({ network: 'solana', hash: s.signature })),
     settledUsdc: 0,
+    parsed: 0,
   };
-  const details = await mapLimit(ok.slice(0, SOLANA_TX_CAP), SOLANA_CONCURRENCY, async (s) => {
-    // Public devnet RPC rate-limits bursts; back off and retry before giving up on one transaction.
-    for (let attempt = 0; attempt <= SOLANA_RETRIES; attempt++) {
-      try {
-        return (await solanaRpc(deps, url, 'getTransaction', [
-          s.signature,
-          { encoding: 'json', maxSupportedTransactionVersion: 0, commitment: 'confirmed' },
-        ])) as SolTx | null;
-      } catch {
-        if (attempt < SOLANA_RETRIES) await new Promise((r) => setTimeout(r, 400 * 2 ** attempt));
-      }
-    }
-    return null;
-  });
+  let details: (SolTx | null)[] = [];
+  try {
+    // No extra race here: mapLimit stops taking work when the signal aborts,
+    // and each fetch carries that signal, so the bodies already in hand are kept.
+    details = await mapLimit(
+      ok.slice(0, SOLANA_TX_CAP),
+      SOLANA_CONCURRENCY,
+      async (s) => {
+        if (deps.signal?.aborted) return null;
+        // One retry for a rate limit. An abort stops the loop; the backoff does not outlive the signal.
+        for (let attempt = 0; attempt <= SOLANA_RETRIES; attempt++) {
+          if (deps.signal?.aborted) return null;
+          try {
+            return (await solanaRpc(deps, url, 'getTransaction', [
+              s.signature,
+              { encoding: 'json', maxSupportedTransactionVersion: 0, commitment: 'confirmed' },
+            ])) as SolTx | null;
+          } catch {
+            if (deps.signal?.aborted || attempt >= SOLANA_RETRIES) return null;
+            await delay(200, deps.signal);
+          }
+        }
+        return null;
+      },
+      deps.signal,
+    );
+  } catch {
+    details = [];
+  }
   details.forEach((tx, index) => {
     if (!tx?.meta) return;
+    read.parsed += 1;
     const keys = (tx.transaction?.message?.accountKeys ?? []).map((k) => (typeof k === 'string' ? k : k.pubkey));
     const signers = keys.slice(0, tx.transaction?.message?.header?.numRequiredSignatures ?? 1);
     for (const signer of signers) read.wallets.add(signer);
@@ -254,16 +380,22 @@ async function expertEvents(deps: LiveDeps, contract: string): Promise<ExpertEve
   const all: ExpertEvent[] = [];
   let cursor = '';
   for (let page = 0; page < EXPERT_PAGES; page++) {
+    if (deps.signal?.aborted) break;
     const q = `order=asc&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
-    const body = (await getJson(deps, `${STELLAR_EXPERT_API}/contract/${contract}/events?${q}`)) as {
-      _embedded?: { records?: (ExpertEvent & { paging_token?: string })[] };
-    };
+    let body: { _embedded?: { records?: (ExpertEvent & { paging_token?: string })[] } };
+    try {
+      body = (await getJson(deps, `${STELLAR_EXPERT_API}/contract/${contract}/events?${q}`)) as typeof body;
+    } catch (error) {
+      if (all.length > 0) break;
+      throw error;
+    }
     const records = body._embedded?.records ?? [];
     all.push(...records);
     if (records.length < 200) break;
     cursor = records[records.length - 1]?.paging_token ?? records[records.length - 1]?.id ?? '';
     if (!cursor) break;
   }
+  if (deps.signal?.aborted && all.length === 0) throw new Error('stellar events aborted');
   return all;
 }
 
@@ -278,6 +410,7 @@ async function horizonTxs(deps: LiveDeps, account: string): Promise<HorizonTx[]>
   const all: HorizonTx[] = [];
   let cursor = '';
   for (let page = 0; page < HORIZON_PAGES; page++) {
+    if (deps.signal?.aborted) break;
     const q = `order=desc&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
     let body: { _embedded?: { records?: HorizonTx[] } };
     try {
@@ -285,6 +418,7 @@ async function horizonTxs(deps: LiveDeps, account: string): Promise<HorizonTx[]>
     } catch (error) {
       // An unfunded account has no history; that is zero, not an outage.
       if (error instanceof Error && error.message === 'upstream 404') return all;
+      if (all.length > 0) break;
       throw error;
     }
     const records = body._embedded?.records ?? [];
@@ -294,6 +428,7 @@ async function horizonTxs(deps: LiveDeps, account: string): Promise<HorizonTx[]>
     cursor = records[records.length - 1]?.paging_token ?? '';
     if (!cursor) break;
   }
+  if (deps.signal?.aborted && all.length === 0) throw new Error('horizon aborted');
   return all;
 }
 
@@ -305,10 +440,13 @@ export async function readStellar(deps: LiveDeps): Promise<ChainRead> {
   if (deposit && G_ADDRESS.test(deposit)) tracked.push(deposit);
 
   const [escrow, usdc, ...histories] = await Promise.all([
-    expertEvents(deps, STELLAR_CONTRACT_ID),
-    expertEvents(deps, STELLAR_USDC_ID),
-    ...tracked.map((account) => horizonTxs(deps, account)),
+    expertEvents(deps, STELLAR_CONTRACT_ID).catch(() => null),
+    expertEvents(deps, STELLAR_USDC_ID).catch(() => null),
+    ...tracked.map((account) => horizonTxs(deps, account).catch(() => null)),
   ]);
+  if (escrow === null && usdc === null && histories.every((list) => list === null)) {
+    throw new Error('stellar unavailable');
+  }
 
   const txs = new Map<string, string>();
   for (const list of histories) {
@@ -327,10 +465,11 @@ export async function readStellar(deps: LiveDeps): Promise<ChainRead> {
     buyers: new Set(),
     recent: [],
     settledUsdc: 0,
+    parsed: 0,
   };
 
   const outside: string[] = [];
-  for (const event of [...escrow, ...usdc]) {
+  for (const event of [...(escrow ?? []), ...(usdc ?? [])]) {
     const [kind, ...rest] = event.topics ?? [];
     for (const value of [event.initiator, ...rest]) if (value && G_ADDRESS.test(value)) read.wallets.add(value);
     if (event.initiator && !tracked.includes(event.initiator)) outside.push(event.id);
@@ -347,25 +486,42 @@ export async function readStellar(deps: LiveDeps): Promise<ChainRead> {
   // Contract calls signed by a shopper's own wallet are not in the tracked
   // accounts' history. Their operation id leads to the transaction.
   const ops = [...new Set(outside.map((id) => id.split('-')[0]?.replace(/^0+/, '') ?? ''))].filter(Boolean);
-  await mapLimit(ops.slice(0, OP_LOOKUP_CAP), 4, async (op) => {
+  if (!deps.signal?.aborted) {
     try {
-      const body = (await getJson(deps, `${HORIZON}/operations/${op}`)) as {
-        transaction_hash?: string;
-        created_at?: string;
-        transaction_successful?: boolean;
-      };
-      if (body.transaction_hash && body.created_at && body.created_at >= STELLAR_LIVE_SINCE && body.transaction_successful !== false) {
-        txs.set(body.transaction_hash, body.created_at);
-      }
+      await raceSignal(
+        mapLimit(
+          ops.slice(0, OP_LOOKUP_CAP),
+          4,
+          async (op) => {
+            if (deps.signal?.aborted) return;
+            try {
+              const body = (await getJson(deps, `${HORIZON}/operations/${op}`)) as {
+                transaction_hash?: string;
+                created_at?: string;
+                transaction_successful?: boolean;
+              };
+              if (body.transaction_hash && body.created_at && body.created_at >= STELLAR_LIVE_SINCE && body.transaction_successful !== false) {
+                txs.set(body.transaction_hash, body.created_at);
+              }
+            } catch {
+              // One missing lookup undercounts by one; it does not sink the chain.
+            }
+          },
+          deps.signal,
+        ),
+        deps.signal,
+      );
     } catch {
-      // One missing lookup undercounts by one; it does not sink the chain.
+      // The lookups that finished are already on `txs`.
     }
-  });
+  }
 
   const ordered = [...txs.entries()].sort((a, b) => b[1].localeCompare(a[1]));
   read.txs = ordered.length;
   read.txDays = ordered.map(([, at]) => at.slice(0, 10));
   read.recent = ordered.slice(0, RECENT_PER_CHAIN).map(([hash]) => ({ network: 'stellar', hash }));
+  // Event totals are the instruction scan. Solana uses `parsed` for transaction bodies.
+  read.parsed = 1;
   return read;
 }
 
@@ -394,7 +550,7 @@ export async function readAppDb(deps: LiveDeps): Promise<AppDbRead | null> {
   const safe = async (url: string | undefined, sql: string) => {
     if (!url) return null;
     try {
-      return await count(url, sql);
+      return await raceSignal(count(url, sql, deps.signal), deps.signal);
     } catch {
       return null;
     }
@@ -404,7 +560,8 @@ export async function readAppDb(deps: LiveDeps): Promise<AppDbRead | null> {
     safe(stellarUrl, STELLAR_DELIVERED_SQL),
     safe(solanaUrl, SOLANA_ACCOUNTS_SQL),
   ]);
-  if (stellarAccounts === null && solanaAccounts === null) return null;
+  // Configured, and every count failed or was aborted. Distinct from "no URL".
+  if (stellarAccounts === null && solanaAccounts === null) throw new Error('app db unavailable');
   return { accounts: (stellarAccounts ?? 0) + (solanaAccounts ?? 0), delivered };
 }
 
@@ -418,55 +575,173 @@ export async function readMergedPrs(deps: LiveDeps): Promise<number | null> {
 
 // ------------------------------------------------------------- assembly --
 
-async function settle<T>(work: Promise<T>): Promise<T | null> {
-  try {
-    return await work;
-  } catch (error) {
-    console.error('[stats] source unavailable:', error instanceof Error ? error.message.slice(0, 80) : 'unknown');
-    return null;
-  }
-}
-
 function countSince(days: readonly string[], start: string, end: string): number {
   return days.filter((d) => d >= start && d <= end).length;
 }
 
-export async function loadLiveSnapshot(deps: LiveDeps): Promise<StatsSnapshot> {
-  const [sol, stl, waitlist, db, prs] = await Promise.all([
-    settle(readSolana(deps)),
-    settle(readStellar(deps)),
-    settle(readWaitlist(deps)),
-    settle(readAppDb(deps)),
-    settle(readMergedPrs(deps)),
-  ]);
-  const base = FALLBACK_SNAPSHOT;
-  if (!sol && !stl && waitlist === null && !db && prs === null) return base;
+function dbConfigured(deps: LiveDeps): boolean {
+  return Boolean(
+    deps.count && (deps.env.STATS_STELLAR_DATABASE_URL?.trim() || deps.env.STATS_SOLANA_DATABASE_URL?.trim()),
+  );
+}
 
+/** A snapshot worth caching: at least one upstream answered. */
+export function isGoodSnapshot(snapshot: StatsSnapshot): boolean {
+  const sources = snapshot.sources;
+  return (
+    sources.solana === 'live' ||
+    sources.stellar === 'live' ||
+    sources.github === 'live' ||
+    sources.appDb === 'live'
+  );
+}
+
+interface ReadBox {
+  sol: ChainRead | null;
+  stl: ChainRead | null;
+  waitlist: number | null | undefined;
+  db: AppDbRead | null | undefined;
+  prs: number | null | undefined;
+  solFailed: boolean;
+  stlFailed: boolean;
+  dbFailed: boolean;
+  prsFailed: boolean;
+}
+
+async function runSource(label: string, work: () => Promise<void>): Promise<void> {
+  try {
+    await work();
+  } catch (error) {
+    console.error(`[stats] ${label} unavailable:`, safeError(error));
+  }
+}
+
+export async function loadLiveSnapshot(deps: LiveDeps): Promise<StatsSnapshot> {
+  const deadlineMs = deps.deadlineMs ?? SNAPSHOT_DEADLINE_MS;
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort(new DOMException('stats deadline', 'TimeoutError'));
+  }, deadlineMs);
+  const parent = deps.signal;
+  const onParent = () => controller.abort(parent?.reason);
+  if (parent?.aborted) controller.abort(parent.reason);
+  else parent?.addEventListener('abort', onParent);
+
+  const scoped: LiveDeps = { ...deps, signal: controller.signal };
+  const box: ReadBox = {
+    sol: null,
+    stl: null,
+    waitlist: undefined,
+    db: undefined,
+    prs: undefined,
+    solFailed: false,
+    stlFailed: false,
+    dbFailed: false,
+    prsFailed: false,
+  };
+
+  const all = Promise.all([
+    runSource('solana', async () => {
+      try {
+        box.sol = await readSolana(scoped);
+      } catch (error) {
+        box.solFailed = true;
+        throw error;
+      }
+    }),
+    runSource('stellar', async () => {
+      try {
+        box.stl = await readStellar(scoped);
+      } catch (error) {
+        box.stlFailed = true;
+        throw error;
+      }
+    }),
+    runSource('waitlist', async () => {
+      box.waitlist = await readWaitlist(scoped);
+    }),
+    runSource('app-db', async () => {
+      try {
+        box.db = await readAppDb(scoped);
+      } catch (error) {
+        box.dbFailed = true;
+        throw error;
+      }
+    }),
+    runSource('github', async () => {
+      try {
+        const prs = await readMergedPrs(scoped);
+        if (prs === null) box.prsFailed = true;
+        else box.prs = prs;
+      } catch (error) {
+        box.prsFailed = true;
+        throw error;
+      }
+    }),
+  ]);
+
+  try {
+    const deadline = new Promise<void>((resolve) => {
+      if (controller.signal.aborted) resolve();
+      else controller.signal.addEventListener('abort', () => resolve(), { once: true });
+    });
+    const winner = await Promise.race([all.then(() => 'done' as const), deadline.then(() => 'deadline' as const)]);
+    // Sources that honor the signal settle on the next microtasks. Give them
+    // a short beat so a partial chain read can land before we assemble.
+    if (winner === 'deadline') {
+      await Promise.race([all.then(() => undefined, () => undefined), delay(50)]);
+    }
+  } finally {
+    clearTimeout(timer);
+    parent?.removeEventListener('abort', onParent);
+  }
+
+  if (!box.sol && !box.solFailed) box.solFailed = true;
+  if (!box.stl && !box.stlFailed) box.stlFailed = true;
+  if (box.db === undefined && dbConfigured(deps)) box.dbFailed = true;
+  if (box.prs === undefined) box.prsFailed = true;
+
+  return assembleSnapshot(deps, box);
+}
+
+function assembleSnapshot(deps: LiveDeps, box: ReadBox): StatsSnapshot {
+  const sol = box.sol;
+  const stl = box.stl;
+  const waitlist = box.waitlist ?? null;
+  const db = box.db ?? null;
+  const prs = typeof box.prs === 'number' ? box.prs : null;
+  const base = FALLBACK_SNAPSHOT;
   const now = deps.now();
   const asOf = isoDay(now.getTime());
   const start30 = isoDay(now.getTime() - 29 * DAY_MS);
+  // Instruction totals need parsed bodies. A signature list alone must not zero the carts.
+  const solIx = sol && sol.parsed > 0 ? sol : null;
+  const stlIx = stl && stl.parsed > 0 ? stl : null;
 
   // A chain that failed keeps its published day buckets so the chart does not lie by omission.
   const txMap = new Map<string, Point>();
   const cartMap = new Map<string, Point>();
-  for (const [chain, read] of [['solana', sol], ['stellar', stl]] as const) {
-    if (read) {
-      for (const day of read.txDays) bump(txMap, day, chain);
-      for (const day of read.cartDays) bump(cartMap, day, chain);
-    } else {
-      for (const [source, target] of [[base.txDay, txMap], [base.cartDay, cartMap]] as const) {
-        for (const p of source) {
-          for (let i = 0; i < p[chain]; i++) bump(target, p.iso, chain);
-        }
-      }
+  const fillPublished = (chain: 'solana' | 'stellar', kind: 'tx' | 'cart', target: Map<string, Point>) => {
+    const source = kind === 'tx' ? base.txDay : base.cartDay;
+    for (const point of source) {
+      for (let i = 0; i < point[chain]; i++) bump(target, point.iso, chain);
     }
+  };
+  for (const [chain, read, ix] of [
+    ['solana', sol, solIx],
+    ['stellar', stl, stlIx],
+  ] as const) {
+    if (read) for (const day of read.txDays) bump(txMap, day, chain);
+    else fillPublished(chain, 'tx', txMap);
+    if (ix) for (const day of ix.cartDays) bump(cartMap, day, chain);
+    else fillPublished(chain, 'cart', cartMap);
   }
 
   const b = base.totals;
-  const infraSol = sol ? [...sol.wallets].filter((w) => !sol.buyers.has(w)).length : null;
-  const infraStl = stl ? [...stl.wallets].filter((w) => !stl.buyers.has(w)).length : null;
-  const walletsSolana = sol ? sol.wallets.size : b.walletsSolana;
-  const walletsStellar = stl ? stl.wallets.size : b.walletsStellar;
+  const infraSol = solIx ? [...solIx.wallets].filter((w) => !solIx.buyers.has(w)).length : null;
+  const infraStl = stlIx ? [...stlIx.wallets].filter((w) => !stlIx.buyers.has(w)).length : null;
+  const walletsSolana = solIx ? solIx.wallets.size : b.walletsSolana;
+  const walletsStellar = stlIx ? stlIx.wallets.size : b.walletsStellar;
   const infra = infraSol !== null && infraStl !== null ? infraSol + infraStl : b.infra;
 
   const totals: Totals = {
@@ -478,28 +753,28 @@ export async function loadLiveSnapshot(deps: LiveDeps): Promise<StatsSnapshot> {
     txStellar: stl ? stl.txs : b.txStellar,
     txDelta30d:
       (sol ? countSince(sol.txDays, start30, asOf) : 0) + (stl ? countSince(stl.txDays, start30, asOf) : 0),
-    cartsSolana: sol ? sol.opened : b.cartsSolana,
-    cartsStellar: stl ? stl.opened : b.cartsStellar,
-    settled: sol || stl ? (sol?.settled ?? 0) + (stl?.settled ?? 0) : b.settled,
-    settledUsdc: sol ? sol.settledUsdc.toFixed(2) : b.settledUsdc,
-    stellarMints: stl ? stl.mintInit : b.stellarMints,
+    cartsSolana: solIx ? solIx.opened : b.cartsSolana,
+    cartsStellar: stlIx ? stlIx.opened : b.cartsStellar,
+    settled: solIx || stlIx ? (solIx?.settled ?? 0) + (stlIx?.settled ?? 0) : b.settled,
+    settledUsdc: solIx ? solIx.settledUsdc.toFixed(2) : b.settledUsdc,
+    stellarMints: stlIx ? stlIx.mintInit : b.stellarMints,
     walletsSolana,
     walletsStellar,
     buyers: Math.max(0, walletsSolana + walletsStellar - infra),
     infra,
-    escrowOpen: (sol ? sol.opened : b.cartsSolana) + (stl ? stl.opened : b.cartsStellar),
-    escrowRefund: (sol ? sol.refunded : 0) + (stl ? stl.refunded : 0),
-    tokenMintInit: (sol ? sol.mintInit : 0) + (stl ? stl.mintInit : 0),
+    escrowOpen: (solIx ? solIx.opened : b.cartsSolana) + (stlIx ? stlIx.opened : b.cartsStellar),
+    escrowRefund: (solIx ? solIx.refunded : 0) + (stlIx ? stlIx.refunded : 0),
+    tokenMintInit: (solIx ? solIx.mintInit : 0) + (stlIx ? stlIx.mintInit : 0),
     mergedPrs: prs ?? b.mergedPrs,
     appAccounts: db?.accounts ?? null,
   };
-  if (!sol && !stl) {
+  if (!solIx && !stlIx) {
     totals.escrowOpen = b.escrowOpen;
     totals.settled = b.settled;
     totals.escrowRefund = b.escrowRefund;
     totals.tokenMintInit = b.tokenMintInit;
-    totals.txDelta30d = b.txDelta30d;
   }
+  if (!sol && !stl) totals.txDelta30d = b.txDelta30d;
 
   const recent: TxRef[] = [
     ...(sol ? sol.recent : base.recentTxs.filter((t) => t.network === 'solana')),
@@ -514,11 +789,11 @@ export async function loadLiveSnapshot(deps: LiveDeps): Promise<StatsSnapshot> {
     cartDay: sorted(cartMap),
     recentTxs: recent,
     sources: {
-      solana: sol ? 'live' : 'snapshot',
-      stellar: stl ? 'live' : 'snapshot',
+      solana: sol ? 'live' : 'unavailable',
+      stellar: stl ? 'live' : 'unavailable',
       waitlist: waitlist === null ? 'snapshot' : 'live',
-      appDb: db ? 'live' : 'snapshot',
-      github: prs === null ? 'snapshot' : 'live',
+      appDb: !dbConfigured(deps) ? 'snapshot' : db ? 'live' : 'unavailable',
+      github: prs === null ? 'unavailable' : 'live',
     },
   };
 }

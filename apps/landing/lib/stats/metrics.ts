@@ -83,8 +83,13 @@ export interface Totals {
   appAccounts: number | null;
 }
 
-/** Which source each number came from. 'snapshot' means the last published value. */
-export type SourceState = 'live' | 'snapshot';
+/**
+ * Which source each number came from.
+ * 'snapshot' is the last published value (the source was not read).
+ * 'unavailable' is a read that failed or hit the deadline; the number on
+ * screen is still the last published one, and the page says so.
+ */
+export type SourceState = 'live' | 'snapshot' | 'unavailable';
 
 export interface Sources {
   solana: SourceState;

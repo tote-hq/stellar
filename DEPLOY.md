@@ -667,15 +667,19 @@ Turnstile and the waitlist sink fail closed. Do not set a second copy.
 
 ### Public stats
 
-`/stats` reads public chain data on the request and keeps the result for five
-minutes in the isolate. No secret is required:
+`/stats` reads public chain data on the request. The read has a 5.5s deadline
+and the last good snapshot is reused for five minutes (edge
+`stale-while-revalidate` for ten more). A source that misses the deadline is
+marked unavailable and keeps its published number. No secret is required:
 
 - Solana devnet escrow program `BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d` (public RPC)
 - Stellar testnet escrow `CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX` and mock USDC `CAOPLEE4NVOVEBYRO7NHG5K4FEML5O5C5AATYBK4FCDLYRAJFZWBNN3E` (Stellar Expert and Horizon)
 - merged PRs, from the public GitHub search
 
-A source that fails keeps its last published value, and the page says so.
-The waitlist figure stays on that published value either way.
+A source that fails or misses the deadline keeps its last published value,
+and the page says the source is unavailable. The waitlist figure stays on
+that published value either way. Postgres, when configured, is under the
+same deadline.
 
 Optional, server-only, and only if you want app accounts and delivered orders.
 Set them as Secrets, never in the repo and never as `NEXT_PUBLIC_`:

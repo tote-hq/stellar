@@ -1,5 +1,7 @@
 import handler from 'vinext/server/fetch-handler';
 
+import { withStatsCacheHeaders } from './lib/stats/cache.ts';
+import { runWithStatsContext } from './lib/stats/context.ts';
 import { rewriteStatsHost } from './lib/stats/host.ts';
 
 /**
@@ -31,6 +33,12 @@ function applyStatsBindings(cfEnv: unknown): void {
 export default {
   fetch(request: Request, cfEnv: unknown, ctx: unknown) {
     applyStatsBindings(cfEnv);
-    return fetchHandler.fetch(rewriteStatsHost(request), cfEnv, ctx);
+    const rewritten = rewriteStatsHost(request);
+    return runWithStatsContext(ctx, async () => {
+      const response = await fetchHandler.fetch(rewritten, cfEnv, ctx);
+      // Cache against the URL the browser asked for. The stats host root is
+      // rewritten to /stats only for the handler.
+      return withStatsCacheHeaders(request, response);
+    });
   },
 };

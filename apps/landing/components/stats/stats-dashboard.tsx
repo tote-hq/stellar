@@ -178,27 +178,31 @@ function chainLabel(chain: Chain, t: ReturnType<typeof messages>): string {
   return t.legendSeeker;
 }
 
-/** A chain figure is stale only when a live read fell back for a chain on screen. */
+/** Live only when every chain on screen was read. Unavailable wins over the published fallback. */
 function chainState(filter: NetworkFilter, snapshot: StatsSnapshot): SourceState | null {
   if (snapshot.updatedAt === null || filter === 'seeker') return null;
-  if (filter === 'solana') return snapshot.sources.solana;
-  if (filter === 'stellar') return snapshot.sources.stellar;
-  return snapshot.sources.solana === 'live' && snapshot.sources.stellar === 'live' ? 'live' : 'snapshot';
+  const states: SourceState[] =
+    filter === 'solana'
+      ? [snapshot.sources.solana]
+      : filter === 'stellar'
+        ? [snapshot.sources.stellar]
+        : [snapshot.sources.solana, snapshot.sources.stellar];
+  if (states.every((state) => state === 'live')) return 'live';
+  if (states.some((state) => state === 'unavailable')) return 'unavailable';
+  return 'snapshot';
 }
 
-function cardStale(id: Kpi['id'], filter: NetworkFilter, snapshot: StatsSnapshot): boolean {
-  if (id === 'endUsers') return false;
-  return chainState(filter, snapshot) === 'snapshot';
+function sourceLabel(state: SourceState | null, lastKnown: string, unavailable: string): string | null {
+  if (state === 'unavailable') return unavailable;
+  if (state === 'snapshot') return lastKnown;
+  return null;
 }
 
 function StaleMark({ label }: { label: string }) {
   return (
     <span className={styles.stale}>
       <span className={styles.staleDot} aria-hidden="true" />
-      <span className={styles.srOnly}>{label}</span>
-      <span className={styles.tooltip} role="tooltip" aria-hidden="true">
-        {label}
-      </span>
+      <span className={styles.staleText}>{label}</span>
     </span>
   );
 }
@@ -228,7 +232,8 @@ function ChartCard({
   const total = sumSeries(pointsInRange(pointsFor(kind, 'day', snapshot), range, snapshot.asOf), filter);
   const [active, setActive] = useState<number | null>(null);
   const ticks = [top, Math.round(top / 2), 0];
-  const stale = chainState(filter, snapshot) === 'snapshot';
+  const staleLabelForChain = sourceLabel(chainState(filter, snapshot), staleLabel, t.unavailable);
+  const stale = staleLabelForChain !== null;
 
   function tipFor(index: number): string {
     const bar = bars[index];
@@ -254,7 +259,7 @@ function ChartCard({
     <article className={styles.card} data-testid={`stats-chart-${kind}`} aria-labelledby={titleId}>
       <h3 id={titleId} className={styles.chartTitle}>
         {title}
-        {stale ? <StaleMark label={staleLabel} /> : null}
+        {stale && staleLabelForChain ? <StaleMark label={staleLabelForChain} /> : null}
       </h3>
       <p className={styles.chartTotal}>{formatInt(total, lang)}</p>
       {bars.length === 0 ? (
@@ -436,7 +441,8 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
   const rangeLabel =
     range === '7d' ? t.range7d : range === '30d' ? t.range30d : range === '90d' ? t.range90d : t.rangeAll;
   const pristine = filter === 'all' && range === 'all' && panel === 'overview' && mode === 'daily';
-  const prsStale = snapshot.updatedAt !== null && snapshot.sources.github !== 'live';
+  const chainMark = sourceLabel(chainState(filter, snapshot), t.lastKnown, t.unavailable);
+  const prsLabel = snapshot.updatedAt === null ? null : sourceLabel(snapshot.sources.github, t.lastKnown, t.unavailable);
 
   return (
     <div className={styles.shell} data-theme={theme} data-testid="stats-screen" lang={lang}>
@@ -535,7 +541,7 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
             <article key={card.id} className={styles.card} data-testid={`stats-kpi-${card.id}`}>
               <h2 className={styles.kpiLabel}>
                 {t[kpiTitleKey(card.id)]}
-                {cardStale(card.id, filter, snapshot) ? <StaleMark label={t.lastKnown} /> : null}
+                {card.id === 'endUsers' || !chainMark ? null : <StaleMark label={chainMark} />}
               </h2>
               <p className={styles.kpiValue}>{formatInt(card.value, lang)}</p>
               <p className={styles.kpiDetail}>{phraseLine(card.parts, lang)}</p>
@@ -617,7 +623,7 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
                   <div className={styles.mini}>
                     <p className={styles.miniLabel}>
                       {t.mergedPrs}
-                      {prsStale ? <StaleMark label={t.lastKnown} /> : null}
+                      {prsLabel ? <StaleMark label={prsLabel} /> : null}
                     </p>
                     <p className={styles.miniValue}>{formatInt(snapshot.totals.mergedPrs, lang)}</p>
                     <p className={styles.miniScope}>{t.prsScope}</p>
