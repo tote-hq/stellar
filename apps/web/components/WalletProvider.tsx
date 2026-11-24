@@ -7,6 +7,7 @@ import { useCallback, useState } from 'react';
 
 import { gatedFreighter } from '../lib/freighter-gate.ts';
 import { LOGIN_NETWORK, pollarApiKey, pollarEnabled, pollarNetwork } from '../lib/pollar.ts';
+import { E2eCheckoutWallet } from './E2eCheckoutWallet';
 import { ModeSync } from './ModeSync';
 import { PollarSpanish } from './PollarSpanish';
 import { WalletBridge } from './WalletBridge';
@@ -46,6 +47,12 @@ void WalletType.FREIGHTER;
  * and client and buy a hydration mismatch instead.
  */
 export function WalletProvider({ children }: { children: React.ReactNode }) {
+  // Literal member reads so Next inlines both. A helper-only read would ship
+  // the production value (unset) into the dev bundle and the harness would
+  // never mount. The helper in lib/e2e-checkout.ts is the same condition.
+  const harness =
+    process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_E2E_CHECKOUT === '1';
+  if (harness) return <E2eCheckoutWallet>{children}</E2eCheckoutWallet>;
   if (!pollarEnabled || LOGIN_NETWORK === null) return <>{children}</>;
 
   return <PollarMount network={LOGIN_NETWORK}>{children}</PollarMount>;
