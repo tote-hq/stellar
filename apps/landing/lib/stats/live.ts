@@ -80,9 +80,31 @@ export interface LiveDeps {
 
 // ------------------------------------------------------------- helpers --
 
-function safeError(error: unknown): string {
-  const raw = error instanceof Error ? error.message : 'unknown';
-  return raw.replace(/postgres(?:ql)?:\/\/\S+/gi, '[redacted]').slice(0, 80);
+/** Log-safe error: name and code stay, URLs and credentials do not. */
+export function safeError(error: unknown): string {
+  const err = error instanceof Error ? error : null;
+  const record = error as { code?: unknown; cause?: unknown } | null;
+  const name = err && err.name && err.name !== 'Error' ? err.name : '';
+  const code = typeof record?.code === 'string' && record.code.trim() ? record.code.trim() : '';
+  const raw = err?.message ?? (typeof error === 'string' ? error : 'unknown');
+  const cause =
+    record?.cause !== undefined && record.cause !== error
+      ? safeError(record.cause)
+      : '';
+  const message = redactSecret(raw);
+  const parts: string[] = [];
+  if (name) parts.push(name);
+  if (code && code !== name && !message.includes(code)) parts.push(code);
+  if (message && message !== name && message !== code) parts.push(message);
+  if (cause && !parts.join(' ').includes(cause)) parts.push(cause);
+  return (parts.join(': ') || 'unknown').slice(0, 160);
+}
+
+function redactSecret(raw: string): string {
+  return raw
+    .replace(/[a-z][a-z0-9+.-]*:\/\/[^\s'"]+/gi, '[redacted]')
+    .replace(/\b(password|secret|token|api[_-]?key)\s*[=:]\s*\S+/gi, '$1=[redacted]')
+    .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '[redacted]');
 }
 
 function abortError(signal: AbortSignal): Error {
@@ -547,18 +569,19 @@ export async function readAppDb(deps: LiveDeps): Promise<AppDbRead | null> {
   const solanaUrl = deps.env.STATS_SOLANA_DATABASE_URL?.trim();
   if (!deps.count || (!stellarUrl && !solanaUrl)) return null;
   const count = deps.count;
-  const safe = async (url: string | undefined, sql: string) => {
+  const safe = async (label: string, url: string | undefined, sql: string) => {
     if (!url) return null;
     try {
       return await raceSignal(count(url, sql, deps.signal), deps.signal);
-    } catch {
+    } catch (error) {
+      console.error(`[stats] app-db ${label} failed:`, safeError(error));
       return null;
     }
   };
   const [stellarAccounts, delivered, solanaAccounts] = await Promise.all([
-    safe(stellarUrl, STELLAR_ACCOUNTS_SQL),
-    safe(stellarUrl, STELLAR_DELIVERED_SQL),
-    safe(solanaUrl, SOLANA_ACCOUNTS_SQL),
+    safe('stellar-accounts', stellarUrl, STELLAR_ACCOUNTS_SQL),
+    safe('stellar-delivered', stellarUrl, STELLAR_DELIVERED_SQL),
+    safe('solana-accounts', solanaUrl, SOLANA_ACCOUNTS_SQL),
   ]);
   // Configured, and every count failed or was aborted. Distinct from "no URL".
   if (stellarAccounts === null && solanaAccounts === null) throw new Error('app db unavailable');
@@ -567,9 +590,15 @@ export async function readAppDb(deps: LiveDeps): Promise<AppDbRead | null> {
 
 export async function readMergedPrs(deps: LiveDeps): Promise<number | null> {
   const q = encodeURIComponent('is:pr is:merged repo:tote-hq/stellar repo:tote-hq/solana');
-  const body = (await getJson(deps, `${GITHUB_SEARCH}?q=${q}&per_page=1`, {
-    headers: { 'user-agent': 'changuito-stats', accept: 'application/vnd.github+json' },
-  })) as { total_count?: unknown };
+  const headers: Record<string, string> = {
+    'user-agent': 'changuito-stats',
+    accept: 'application/vnd.github+json',
+  };
+  const token = deps.env.STATS_GITHUB_TOKEN?.trim();
+  if (token) headers.authorization = `Bearer ${token}`;
+  const body = (await getJson(deps, `${GITHUB_SEARCH}?q=${q}&per_page=1`, { headers })) as {
+    total_count?: unknown;
+  };
   return typeof body.total_count === 'number' ? body.total_count : null;
 }
 

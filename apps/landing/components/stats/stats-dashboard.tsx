@@ -18,11 +18,11 @@ import {
   contractId,
   shortId,
   txHref,
-  type SourceState,
   type StatsSnapshot,
 } from '../../lib/stats/metrics';
 import {
   barRatio,
+  chainSourceLabel,
   chartBars,
   engineeringMeters,
   engineeringTests,
@@ -39,6 +39,7 @@ import {
   pointsInRange,
   recentTxs,
   seriesPeak,
+  sourceLabel,
   sumSeries,
   visibleChains,
   type Chain,
@@ -178,26 +179,6 @@ function chainLabel(chain: Chain, t: ReturnType<typeof messages>): string {
   return t.legendSeeker;
 }
 
-/** Live only when every chain on screen was read. Unavailable wins over the published fallback. */
-function chainState(filter: NetworkFilter, snapshot: StatsSnapshot): SourceState | null {
-  if (snapshot.updatedAt === null || filter === 'seeker') return null;
-  const states: SourceState[] =
-    filter === 'solana'
-      ? [snapshot.sources.solana]
-      : filter === 'stellar'
-        ? [snapshot.sources.stellar]
-        : [snapshot.sources.solana, snapshot.sources.stellar];
-  if (states.every((state) => state === 'live')) return 'live';
-  if (states.some((state) => state === 'unavailable')) return 'unavailable';
-  return 'snapshot';
-}
-
-function sourceLabel(state: SourceState | null, lastKnown: string, unavailable: string): string | null {
-  if (state === 'unavailable') return unavailable;
-  if (state === 'snapshot') return lastKnown;
-  return null;
-}
-
 function StaleMark({ label }: { label: string }) {
   return (
     <span className={styles.stale}>
@@ -214,7 +195,6 @@ function ChartCard({
   mode,
   filter,
   snapshot,
-  staleLabel,
 }: {
   kind: SeriesKind;
   title: string;
@@ -222,7 +202,6 @@ function ChartCard({
   mode: ChartMode;
   filter: NetworkFilter;
   snapshot: StatsSnapshot;
-  staleLabel: string;
 }) {
   const t = messages(lang);
   const titleId = useId();
@@ -232,7 +211,7 @@ function ChartCard({
   const total = sumSeries(pointsInRange(pointsFor(kind, 'day', snapshot), range, snapshot.asOf), filter);
   const [active, setActive] = useState<number | null>(null);
   const ticks = [top, Math.round(top / 2), 0];
-  const staleLabelForChain = sourceLabel(chainState(filter, snapshot), staleLabel, t.unavailable);
+  const staleLabelForChain = chainSourceLabel(filter, snapshot, t);
   const stale = staleLabelForChain !== null;
 
   function tipFor(index: number): string {
@@ -441,7 +420,7 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
   const rangeLabel =
     range === '7d' ? t.range7d : range === '30d' ? t.range30d : range === '90d' ? t.range90d : t.rangeAll;
   const pristine = filter === 'all' && range === 'all' && panel === 'overview' && mode === 'daily';
-  const chainMark = sourceLabel(chainState(filter, snapshot), t.lastKnown, t.unavailable);
+  const chainMark = chainSourceLabel(filter, snapshot, t);
   const prsLabel = snapshot.updatedAt === null ? null : sourceLabel(snapshot.sources.github, t.lastKnown, t.unavailable);
 
   return (
@@ -597,7 +576,6 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
                 mode={mode}
                 filter={filter}
                 snapshot={snapshot}
-                staleLabel={t.lastKnown}
               />
               <ChartCard
                 kind="carts"
@@ -606,7 +584,6 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
                 mode={mode}
                 filter={filter}
                 snapshot={snapshot}
-                staleLabel={t.lastKnown}
               />
               <article className={styles.card} data-testid="stats-by-network">
                 <h3 className={styles.cardTitle}>{t.byNetwork}</h3>
