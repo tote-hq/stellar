@@ -23,7 +23,7 @@ export function ToolTrail({ tools }: { tools: ToolRun[] }) {
   const anyPending = tools.some((t) => t.ok === undefined);
 
   return (
-    <ul className="trail">
+    <ul className="trail" data-testid="tool-trail">
       {tools.map((t, i) => {
         const isLast = i === lastIdx;
         const showCart = isLast && anyPending;
@@ -32,6 +32,9 @@ export function ToolTrail({ tools }: { tools: ToolRun[] }) {
             key={t.id}
             className={t.ok === false ? 'trail-item is-bad' : 'trail-item'}
             title={t.name}
+            data-testid={`tool-trail-${t.id}`}
+            data-tool={t.name}
+            data-ok={t.ok === undefined ? 'pending' : t.ok ? 'ok' : 'fail'}
           >
             {showCart ? (
               <img

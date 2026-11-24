@@ -16,11 +16,11 @@ export function ProductGrid({ items, note }: { items: Product[]; note?: string }
   const copy = uiCopy(useLang()).grid;
   if (items.length === 0) return null;
   return (
-    <section className="grid-wrap" aria-label={copy.aria}>
-      {note ? <p className="grid-note">{note}</p> : null}
+    <section className="grid-wrap" aria-label={copy.aria} data-testid="product-grid">
+      {note ? <p className="grid-note" data-testid="product-grid-note">{note}</p> : null}
       <ul className="grid">
         {items.map((p) => (
-          <li key={`${p.skuId}-${p.sellerId}`} className="card">
+          <li key={`${p.skuId}-${p.sellerId}`} className="card" data-testid={`product-card-${p.skuId}`}>
             <div className="card-img">
               {p.imageUrl ? (
                 // Plain <img>: these are the supermarket's own CDN URLs, which

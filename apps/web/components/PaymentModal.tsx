@@ -214,6 +214,7 @@ function PayWithPollar({ cart, handoffUrl, onClose, onOpened }: Props) {
         role="dialog"
         aria-modal="true"
         aria-label={copy.aria}
+        data-testid="payment-modal"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="modal-head">
@@ -224,6 +225,7 @@ function PayWithPollar({ cart, handoffUrl, onClose, onOpened }: Props) {
             onClick={onClose}
             disabled={phase === 'signing'}
             aria-label={copy.close}
+            data-testid="payment-close"
           >
             ×
           </button>
@@ -284,7 +286,7 @@ function PayWithPollar({ cart, handoffUrl, onClose, onOpened }: Props) {
 
         <div className="modal-actions">
           {!address ? (
-            <button type="button" className="btn" onClick={() => trackLoginStart(openLoginModal)}>
+            <button type="button" className="btn" data-testid="payment-login" onClick={() => trackLoginStart(openLoginModal)}>
               {copy.startCta}
             </button>
           ) : needsTrustline ? (
@@ -303,6 +305,7 @@ function PayWithPollar({ cart, handoffUrl, onClose, onOpened }: Props) {
               ref={confirm}
               type="button"
               className="btn"
+              data-testid="payment-confirm"
               onClick={() => void pay()}
               disabled={!quote || !escrowId || !verified || short || phase === 'signing'}
             >
@@ -326,6 +329,7 @@ function PayWithPollar({ cart, handoffUrl, onClose, onOpened }: Props) {
           <button
             type="button"
             className="btn btn-ghost"
+            data-testid="payment-cancel"
             onClick={onClose}
             disabled={phase === 'signing'}
           >
