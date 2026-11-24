@@ -38,11 +38,10 @@ export const TRUST_LINE = `${COPYRIGHT_LINE}${TRUST_SEPARATOR}${FOUNDER_SENTENCE
 export const NEW_TAB_HINT = 'se abre en una pestaña nueva';
 
 /**
- * Temporary support address until a Changuito workspace mailbox exists.
- * Legal pages, the account-deletion page and the landing footer all read
- * this one constant.
+ * Public support address. Legal pages, the account-deletion page and the
+ * landing footer all read this one constant.
  */
-export const SUPPORT_EMAIL = 'contact@simonethg.com';
+export const SUPPORT_EMAIL = 'simonethg@changuito.me';
 
 /** Marketing site. The public legal and account-deletion pages live here. */
 export const PUBLIC_SITE_URL = 'https://www.changuito.me';

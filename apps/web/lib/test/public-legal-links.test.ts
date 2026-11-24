@@ -20,7 +20,7 @@ test('the shopper footer and the in-app privacy page link out to the public lega
   assert.equal(PUBLIC_LEGAL.deletion.es, 'https://www.changuito.me/eliminar-cuenta');
   assert.equal(PUBLIC_LEGAL.terms.en, 'https://www.changuito.me/terms');
   assert.equal(PUBLIC_LEGAL.privacy.es, 'https://www.changuito.me/privacidad');
-  assert.equal(SUPPORT_EMAIL, 'contact@simonethg.com');
+  assert.equal(SUPPORT_EMAIL, 'simonethg@changuito.me');
 
   const privacy = readFileSync(join(root, 'app/privacidad/page.tsx'), 'utf8');
   assert.match(privacy, /mailto:\$\{SUPPORT_EMAIL\}/);
