@@ -59,7 +59,9 @@ test.describe('test-mode checkout', () => {
           createdAt: now,
           updatedAt: now,
           orderState: 'open',
-          sessionId: null,
+          // A null session is a closed record: the pay control stays off.
+          // A fresh id keeps the basket resumable, which is what the button requires.
+          sessionId: '11111111-1111-4111-8111-111111111111',
           blocks: [
             { kind: 'user', id: 'b-user', text: 'Leche' },
             { kind: 'cart', id: 'b-cart', cart, handoffUrl: 'https://example.test/cart' },
