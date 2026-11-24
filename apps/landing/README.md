@@ -1,14 +1,22 @@
 # @changuito/landing
 
-Marketing landing for **www.changuito.me**. It is a Next.js project separate from `apps/web` (the Stellar shopper, at app.changuito.me / ste.changuito.me).
+Marketing landing for **www.changuito.me**, and the public stats dashboard at **/stats** (also the root of **stats.changuito.me**). It is a Next.js project separate from `apps/web` (the Stellar shopper, at app.changuito.me / ste.changuito.me).
 
 It does not share routes with the shopper. During the controlled beta, the «Probar Changuito» buttons go to `/whitelist`. `APP_URL` (`https://app.changuito.me`) stays for SEO and docs, with no navigation from the landing.
 
 ## What the landing needs
 
-Root directory `apps/landing`, Node 22 (the repo's `.nvmrc`), build `npm run build -w @changuito/landing`. The site builds without variables. In production, `/whitelist` signs nobody up if Turnstile or a destination is missing. `/reportarbug` works with no variables (see below). There is no Workers config for the landing in this repo.
+The Worker is **`changuito-landing`**. It already serves `changuito.me`, `www.changuito.me` and `stats.changuito.me`. The deploy config is `cloudflare.config.ts`, `worker.ts` and `vite.config.ts`. Exact commands, and which names are build variables versus Worker secrets, are in [DEPLOY.md](../../DEPLOY.md) part 4. From the repo root, Node 22.18 or newer (`.nvmrc`):
 
-Production domain: `www.changuito.me`. The Stellar shopper (`app.changuito.me` / `ste.changuito.me`) stays on the `apps/web` deployment.
+```bash
+npm run build:vinext -w @changuito/landing
+npm run deploy:vinext -w @changuito/landing
+npm run preview:vinext -w @changuito/landing   # http://127.0.0.1:3125 after the build
+```
+
+The site builds without variables. In production, `/whitelist` signs nobody up if Turnstile or a destination is missing. `/reportarbug` works with no variables (see below). `/stats` works with no variables: on-chain numbers come from public endpoints.
+
+Production domains stay on `changuito-landing`. The Stellar shopper (`app.changuito.me` / `ste.changuito.me`) stays on the `apps/web` deployment. Do not point one at the other.
 
 The waitlist lives at `/whitelist`. The next deploy picks up the route. With no destination configured, production answers that it could not sign the person up (it does not pretend the signup worked). In local `next dev` / `next start`, with no variables, the signup is appended to `apps/landing/.data/waitlist.jsonl` (gitignored).
 
@@ -29,7 +37,7 @@ Analytics is optional and free. If these variables stay empty, the landing loads
 - `NEXT_PUBLIC_META_PIXEL_ID` (numeric)
 - `NEXT_PUBLIC_CLARITY_PROJECT_ID`
 
-`NEXT_PUBLIC_TURNSTILE_SITE_KEY` is inlined into the client bundle: an empty value leaves the form with no widget. `TURNSTILE_SECRET_KEY`, `WAITLIST_WEBHOOK_URL` and `WAITLIST_WEBHOOK_SECRET` are server-only. The three analytics ids are public too, and when empty they load no scripts. An env change applies on the next deploy.
+`NEXT_PUBLIC_TURNSTILE_SITE_KEY` is inlined into the client bundle: an empty value leaves the form with no widget. `TURNSTILE_SECRET_KEY`, `WAITLIST_WEBHOOK_URL` and `WAITLIST_WEBHOOK_SECRET` are server-only. On `changuito-landing` they are Secrets, not plain text variables and not entries in `cloudflare.config.ts`. The three analytics ids are public too, and when empty they load no scripts. An env change applies on the next deploy.
 
 The live signup goes to Apps Script, so both webhook variables are required.
 
@@ -135,8 +143,8 @@ The shopper (`app.changuito.me`) has its own `robots.txt` and is not touched fro
 
 ## Public stats (`/stats`, stats.changuito.me)
 
-The dashboard reads live data on the server and regenerates at most every 5 minutes (ISR); the page and `/stats/export` share one cached read.
+`worker.ts` serves this page at the root of `stats.changuito.me`. `/stats` is the same document on every host. The page renders on the request. The live read is cached for five minutes in the isolate, and the page and `/stats/export` share that read.
 
 - **No secrets needed:** Solana devnet escrow program `BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d` (public RPC), Stellar testnet escrow `CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX` and mock USDC `CAOPLEE4NVOVEBYRO7NHG5K4FEML5O5C5AATYBK4FCDLYRAJFZWBNN3E` (Stellar Expert events + Horizon), merged PRs (GitHub public search).
-- **Optional, server-only:** `STATS_STELLAR_DATABASE_URL` and `STATS_SOLANA_DATABASE_URL` (read-only roles) for app accounts and delivered orders. The waitlist figure stays on the last published value.
-- Any source that is missing or down keeps its last published value, and the page says so next to the "Updated" time. Only aggregates and public transaction hashes reach the browser.
+- **Optional Worker secrets, server-only:** `STATS_STELLAR_DATABASE_URL` and `STATS_SOLANA_DATABASE_URL` (read-only roles) for app accounts and delivered orders. Set them on `changuito-landing` as Secrets. Do not commit them, and do not declare them in `cloudflare.config.ts`. The waitlist figure stays on the last published value.
+- Any source that is missing or down keeps its last published value, and the page says so. Only aggregates and public transaction hashes reach the browser.

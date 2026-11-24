@@ -341,7 +341,7 @@ node --experimental-strip-types --experimental-test-module-mocks --no-warnings -
 
 ```
 apps/web/            the shopper — chat, checkout, card, API routes (app.changuito.me / ste.changuito.me)
-apps/landing/        marketing site only (www.changuito.me)
+apps/landing/        marketing site and public stats (Worker changuito-landing: www, apex, stats.changuito.me)
 apps/branding/       brand kit (not an npm package): logo, mascot, manuals, social
 packages/mcp/        the supermarket MCP server (vendored, 304 tests)
 packages/trust/      footer trust copy shared by both apps, so they cannot drift

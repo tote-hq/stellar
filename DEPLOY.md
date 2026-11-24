@@ -554,23 +554,138 @@ the latency on a long basket.
 `AGENT_USAGE=1` logs `cache_read` and `cache_write` per hop to the server
 console, which is how you check the second one is working rather than assuming.
 
-## Part 4 — www.changuito.me
+## Part 4 — www.changuito.me and stats.changuito.me
 
-The marketing site is `apps/landing` (`@changuito/landing`), not a route
-inside `apps/web`. Do not point `www.changuito.me` at the shopper app, and do
-not point `app.changuito.me` at the landing. The landing has no Workers
-config in this repo.
+The marketing site and the public stats dashboard are `apps/landing`
+(`@changuito/landing`), not routes inside `apps/web`. Do not point
+`www.changuito.me` at the shopper app, and do not point `app.changuito.me`
+at the landing.
 
-| | |
-|---|---|
-| Root directory | `apps/landing` |
-| Node.js | **22** (the repo's `.nvmrc`) |
-| Build | `npm run build -w @changuito/landing` |
-| Variables | Turnstile and the waitlist webhook for `/whitelist`; analytics ids are optional. Names are in [apps/landing/README.md](apps/landing/README.md) |
+Both hosts, and the apex `changuito.me`, are custom domains on the Worker
+**`changuito-landing`**. The reproducible deploy is vinext on Vite
+(`apps/landing/vite.config.ts`, `worker.ts`, `cloudflare.config.ts`), the
+same shape as the shopper. It needs **Node 22.18 or newer**. `.nvmrc` pins
+it, and the config loader refuses anything older. `next build` still works
+for a local check; production is the vinext build.
 
-Locally:
+`cloudflare.config.ts` names the Worker `changuito-landing` and declares the
+three hostnames it already serves (`changuito.me`, `www.changuito.me`,
+`stats.changuito.me`), production only. A deploy applies that list. Do not
+add a hostname, and do not drop one: a hostname left out is no longer on
+this Worker. Preview URLs stay off, and `workers.dev` stays on. Nothing in
+the config creates a KV namespace, a Hyperdrive, or any other resource.
+
+`stats.changuito.me` `/` is this app's `/stats` document. `worker.ts` rewrites
+that host's root before the handler. `next.config.ts` has the same rewrite
+for `next dev` and `next start`. `/stats` itself is the dashboard on every
+host, including `www`.
+
+### Deploy
+
+From the repository root, with a token that can deploy the existing Worker
+`changuito-landing` (set `CLOUDFLARE_ACCOUNT_ID` as well when the token can
+see more than one account). Do not put the token in the repo.
+
+```bash
+npm ci
+npm run build:vinext -w @changuito/landing
+npm run deploy:vinext -w @changuito/landing
+```
+
+The build command is `vite build`. The deploy command uploads that build
+(`vinext-cloudflare deploy --skip-build`) and does not build again, so run
+them in that order. The deploy is what publishes. This repository does not
+run it.
+
+Workers Builds, if you connect it later, uses the same commands. Root
+directory `/` (the build is an npm workspace). Build command
+`npm run build:vinext -w @changuito/landing`. Deploy command
+`npm run deploy:vinext -w @changuito/landing`. Non-production branch builds
+off. The API token is the one Workers Builds creates; the deploy reads
+`CLOUDFLARE_API_TOKEN`.
+
+### Local Workers preview
+
+```bash
+npm run build:vinext -w @changuito/landing
+npm run preview:vinext -w @changuito/landing    # http://127.0.0.1:3125
+```
+
+`/` is the marketing home. `/stats` is the dashboard. The stats host is the
+same server with a `Host` header:
+
+```bash
+curl -sD - -o /dev/null -H 'Host: stats.changuito.me' http://127.0.0.1:3125/
+curl -sD - -o /dev/null -H 'Host: www.changuito.me' http://127.0.0.1:3125/whitelist
+```
+
+The preview is HTTP. The production CSP includes `upgrade-insecure-requests`,
+so a browser on that HTTP origin rewrites script URLs to HTTPS and the page
+does not hydrate. `curl` still shows the server-rendered document. On
+`https://stats.changuito.me` the directive does not change the origin, and
+the client runs.
+
+`next dev` is unchanged:
 
 ```bash
 npm run dev -w @changuito/landing     # http://localhost:3125
-npm run build -w @changuito/landing
 ```
+
+### Variables
+
+Names and what each one does are in
+[apps/landing/README.md](apps/landing/README.md). The shopper's deployment
+does not share them.
+
+**Build variables.** `NEXT_PUBLIC_*` is inlined into the client bundle, so it
+is set in the environment of the build command, not typed into
+`cloudflare.config.ts`. When the build environment has a value,
+`cloudflare.config.ts` also publishes it as a Worker variable. When it does
+not, the config omits that name. Do not commit the values.
+
+| Name | Required |
+|---|---|
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | in production, or `/whitelist` has no widget |
+| `NEXT_PUBLIC_GA_MEASUREMENT_ID`, `NEXT_PUBLIC_META_PIXEL_ID`, `NEXT_PUBLIC_CLARITY_PROJECT_ID` | no |
+
+**Worker secrets** (`changuito-landing` → Settings → Variables and Secrets,
+type *Secret*). They are not in `cloudflare.config.ts`: a declared secret
+with no value fails the deploy, and these are either optional or already set
+on the Worker. A secret stays across deploys. Do not keep the same names as
+plain text variables; a plain text variable the config does not declare can
+be dropped, or the strict deploy can refuse.
+
+| Name | Required |
+|---|---|
+| `TURNSTILE_SECRET_KEY` | in production, with the site key. Missing either one, `/whitelist` refuses the signup |
+| `WAITLIST_WEBHOOK_URL` | in production, or the signup is refused |
+| `WAITLIST_WEBHOOK_SECRET` | together with the webhook |
+| `BUG_REPORT_WEBHOOK_URL`, `BUG_REPORT_WEBHOOK_SECRET` | no. Unset, `/reportarbug` still accepts the report and logs it |
+
+`NODE_ENV=production` is set by `cloudflare.config.ts`. It is what makes
+Turnstile and the waitlist sink fail closed. Do not set a second copy.
+
+### Public stats
+
+`/stats` reads public chain data on the request and keeps the result for five
+minutes in the isolate. No secret is required:
+
+- Solana devnet escrow program `BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d` (public RPC)
+- Stellar testnet escrow `CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX` and mock USDC `CAOPLEE4NVOVEBYRO7NHG5K4FEML5O5C5AATYBK4FCDLYRAJFZWBNN3E` (Stellar Expert and Horizon)
+- merged PRs, from the public GitHub search
+
+A source that fails keeps its last published value, and the page says so.
+The waitlist figure stays on that published value either way.
+
+Optional, server-only, and only if you want app accounts and delivered orders.
+Set them as Secrets, never in the repo and never as `NEXT_PUBLIC_`:
+
+| Name | For |
+|---|---|
+| `STATS_STELLAR_DATABASE_URL` | read-only Postgres: `chat` accounts and `orders` with status `done` |
+| `STATS_SOLANA_DATABASE_URL` | read-only Postgres: `profile` rows on devnet |
+
+`STATS_SOLANA_RPC_URL` and `STATS_STELLAR_DEPOSIT_ADDRESS` are optional
+overrides of the public defaults in `lib/stats/live.ts`. Leave them unset.
+If you set one, set it as a Secret too. A URL the Worker cannot reach does
+not fail the page; that part keeps the published number.

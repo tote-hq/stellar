@@ -14,6 +14,8 @@ const config: NextConfig = {
     return [{ source: '/:path*', headers: landingSecurityHeaders() }];
   },
   // stats.changuito.me serves this app's /stats document at the host root.
+  // `next dev` / `next start` apply this. The Worker entry applies the same
+  // rule in worker.ts before the vinext handler, which is what production runs.
   async rewrites() {
     return {
       beforeFiles: [
