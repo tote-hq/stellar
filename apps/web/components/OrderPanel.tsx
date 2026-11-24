@@ -74,7 +74,7 @@ export function OrderPanel({
   if (outcome) {
     const settled = outcome.action === 'settle';
     return (
-      <section className={settled ? 'order-panel is-done' : 'order-panel'} aria-live="polite">
+      <section className={settled ? 'order-panel is-done' : 'order-panel'} aria-live="polite" data-testid="order-panel" data-outcome={settled ? 'settled' : 'refunded'}>
         <header className="order-head">
           <strong>{settled ? copy.settled : copy.refunded}</strong>
           {onDismiss ? (
@@ -121,7 +121,7 @@ export function OrderPanel({
   }
 
   return (
-    <section className="order-panel" aria-live="polite">
+    <section className="order-panel" aria-live="polite" data-testid="order-panel" data-outcome="open">
       <header className="order-head">
         <strong>{copy.held(amount, mode.balanceUnit)}</strong>
         <a href={explorer.tx(order.hash, net)} target="_blank" rel="noopener noreferrer">
@@ -132,7 +132,7 @@ export function OrderPanel({
         {mode.holdNote ? <strong>{mode.holdNote} </strong> : null}
         {copy.lead(order.totalDisplay)}
       </p>
-      {error ? <p className="pay-error">{error}</p> : null}
+      {error ? <p className="pay-error" role="alert" data-testid="order-error">{error}</p> : null}
       <div className="modal-actions">
         {order.handoffUrl ? (
           <a
@@ -147,6 +147,7 @@ export function OrderPanel({
         <button
           type="button"
           className="btn"
+          data-testid="order-settle"
           onClick={() => void close('settle')}
           disabled={closing !== null}
         >
@@ -155,6 +156,7 @@ export function OrderPanel({
         <button
           type="button"
           className="btn btn-ghost"
+          data-testid="order-refund"
           onClick={() => void close('refund')}
           disabled={closing !== null}
         >

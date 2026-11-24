@@ -27,7 +27,7 @@ export function CartCard({
   const unavailable = cart.lines.filter((l) => !l.available);
   const store = RETAILER_NAMES[cart.retailer] ?? cart.retailer;
   return (
-    <section className="cart" aria-label={copy.aria}>
+    <section className="cart" aria-label={copy.aria} data-testid="cart-card">
       <header className="cart-head">
         <span className="cart-title">{copy.title}</span>
         <span className="cart-retailer">{store}</span>
@@ -35,7 +35,7 @@ export function CartCard({
 
       <ul className="cart-lines">
         {cart.lines.map((l) => (
-          <li key={l.index} className={l.available ? 'cart-line' : 'cart-line is-oos'}>
+          <li key={l.index} className={l.available ? 'cart-line' : 'cart-line is-oos'} data-testid={`cart-line-${l.index}`}>
             <span className="cart-qty">{l.quantity}×</span>
             <span className="cart-name">{l.name}</span>
             <span className="cart-amount">{l.lineTotal.display}</span>
@@ -54,7 +54,7 @@ export function CartCard({
       <footer className="cart-foot">
         <div className="cart-total">
           <span>{copy.total}</span>
-          <strong>{cart.total.display}</strong>
+          <strong data-testid="cart-card-total">{cart.total.display}</strong>
         </div>
         {unavailable.length > 0 ? (
           <p className="cart-warn">
@@ -63,12 +63,12 @@ export function CartCard({
         ) : null}
         <div className="cart-actions">
           {onPay ? (
-            <button type="button" className="btn btn-pay" onClick={() => onPay(cart)}>
+            <button type="button" className="btn btn-pay" data-testid="cart-card-pay" onClick={() => onPay(cart)}>
               {copy.payCta}
             </button>
           ) : null}
           {handoffUrl ? (
-            <a className="btn btn-ghost" href={handoffUrl} target="_blank" rel="noopener noreferrer">
+            <a className="btn btn-ghost" href={handoffUrl} target="_blank" rel="noopener noreferrer" data-testid="cart-card-handoff">
               {copy.openAt(store)}
             </a>
           ) : null}

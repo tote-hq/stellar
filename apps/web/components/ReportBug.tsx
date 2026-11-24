@@ -8,7 +8,7 @@ export function ReportBug() {
   const lang = useLang();
   return (
     <p className="report-bug">
-      <a href="https://www.changuito.me/reportarbug" target="_blank" rel="noopener noreferrer">
+      <a href="https://www.changuito.me/reportarbug" target="_blank" rel="noopener noreferrer" data-testid="report-bug">
         {/* The Spanish is written out rather than looked up. The URL stays
             Spanish in both languages — it is the landing site's real path. */}
         {lang === 'en' ? uiCopy(lang).reportBug : 'Reportar un bug'}
