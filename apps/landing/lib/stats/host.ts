@@ -15,6 +15,13 @@ function hostnameOf(request: Request): string {
   return (raw.split(':')[0] ?? '').toLowerCase();
 }
 
+/** The dashboard document, including the stats host root and the CSV export. */
+export function isStatsDocumentRequest(request: Request): boolean {
+  const url = new URL(request.url);
+  if (url.pathname === '/stats' || url.pathname === '/stats/export') return true;
+  return hostnameOf(request) === STATS_HOST && url.pathname === '/';
+}
+
 /** Return a request whose path is /stats when the stats host asks for /. */
 export function rewriteStatsHost(request: Request): Request {
   if (hostnameOf(request) !== STATS_HOST) return request;

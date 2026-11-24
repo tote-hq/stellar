@@ -1,7 +1,8 @@
+import { STATS_CACHE_CONTROL } from '../../../lib/stats/cache';
 import { getStatsSnapshot } from '../../../lib/stats/load';
 import { statsCsv, parseMode, parseNetwork, parseRange } from '../../../lib/stats/view';
 
-/** Same reason as the page: the export is a request-time read, not a prerender. */
+/** Same read as the page, including the deadline and the shared snapshot cache. */
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
@@ -17,7 +18,7 @@ export async function GET(request: Request) {
     headers: {
       'content-type': 'text/csv; charset=utf-8',
       'content-disposition': 'attachment; filename="changuito-stats.csv"',
-      'cache-control': 'public, max-age=300',
+      'cache-control': STATS_CACHE_CONTROL,
       'x-content-type-options': 'nosniff',
       'x-stats-updated-at': snapshot.updatedAt ?? snapshot.asOf,
     },

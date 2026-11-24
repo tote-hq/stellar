@@ -10,10 +10,11 @@ const page = publicPage('/stats');
 export const metadata: Metadata = pageMetadata(page);
 
 /**
- * Render on the request. The live read is cached for five minutes inside
- * getStatsSnapshot. The Worker that is live today answers 404 for /stats
- * and 200 for the force-static pages, so this document is not a prerender
- * the build can omit, and the build does not call the public RPCs.
+ * Render on the request. getStatsSnapshot returns a cached snapshot or a
+ * live read that always finishes inside its deadline, so this document is
+ * not a prerender the build can omit and the build does not call the RPCs.
+ * The Worker sets Cache-Control on the way out (s-maxage and
+ * stale-while-revalidate) for the HTML. Flight requests are left uncached.
  */
 export const dynamic = 'force-dynamic';
 
