@@ -55,7 +55,7 @@ The Apps Script (`appendWaitlist_`) is not in this repo. The `POST` sends this J
 | `kind` | string | Always `"waitlist"`. |
 | `name` | string | Cleaned name. The script also accepts `nombre`. |
 | `email` | string | Lowercased. |
-| `source` | string | One option from the list (the visible value). The script also accepts `fuente`. |
+| `source` | string | One option from the list (the stored Spanish value, for example `Por Fabio` or `Instagram`). The script also accepts `fuente`. English aliases such as `Through Fabio` are accepted and stored as the Spanish value. |
 | `otherDetail` | string or `null` | Only when `source` is `Otros`. The script also accepts `detalle_otros`. |
 | `whatsapp` | string | Required. E.164 with `+`. A local Argentine number is stored as `+549…` (the `15` is dropped and the `9` is added). |
 | `whatsappGroup` | boolean | `true` if they want the beta-tester group. On the sheet it goes to `grupo_whatsapp`. |
