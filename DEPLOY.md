@@ -673,7 +673,7 @@ and the last good snapshot is reused for five minutes (edge
 marked unavailable and keeps its published number. No secret is required:
 
 - Solana devnet escrow program `BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d` (public RPC)
-- Stellar testnet escrow `CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX` and mock USDC `CAOPLEE4NVOVEBYRO7NHG5K4FEML5O5C5AATYBK4FCDLYRAJFZWBNN3E` (Stellar Expert and Horizon)
+- Stellar testnet escrow `CA4BDF4U65OHCO6AB4KRJWBRZ4BJBZURDFNFKJDEZAKQRCUNJZFLN72S` (from `deployments.json`) and mock USDC `CAOPLEE4NVOVEBYRO7NHG5K4FEML5O5C5AATYBK4FCDLYRAJFZWBNN3E` (Stellar Expert and Horizon)
 - merged PRs, from the public GitHub search
 
 A source that fails or misses the deadline keeps its last published value,

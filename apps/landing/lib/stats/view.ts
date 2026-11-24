@@ -5,13 +5,14 @@
  * that filter is zeros rather than a split we do not have.
  */
 
-import type { MessageKey } from './i18n.ts';
+import { format, type MessageKey } from './i18n.ts';
 import {
   ENGINEERING,
   FALLBACK_SNAPSHOT,
   monthBuckets,
   type EngineeringRow,
   type Point,
+  type SourceState,
   type StatsSnapshot,
   type TxRef,
 } from './metrics.ts';
@@ -372,4 +373,57 @@ export function statsCsv(
     });
   }
   return `${lines.join('\n')}\n`;
+}
+
+
+/** Combined chain badge for a filter. 'partial' is All when only one chain failed. */
+export type ChainViewState = SourceState | 'partial';
+
+/** Live only when every chain on screen was read. Both failed is unavailable; one failed is partial. */
+export function chainState(filter: NetworkFilter, snapshot: StatsSnapshot): ChainViewState | null {
+  if (snapshot.updatedAt === null || filter === 'seeker') return null;
+  const states: SourceState[] =
+    filter === 'solana'
+      ? [snapshot.sources.solana]
+      : filter === 'stellar'
+        ? [snapshot.sources.stellar]
+        : [snapshot.sources.solana, snapshot.sources.stellar];
+  if (states.every((state) => state === 'live')) return 'live';
+  const failed = states.filter((state) => state === 'unavailable');
+  if (failed.length === states.length && failed.length > 0) return 'unavailable';
+  if (failed.length > 0) return 'partial';
+  return 'snapshot';
+}
+
+export function sourceLabel(state: SourceState | null, lastKnown: string, unavailable: string): string | null {
+  if (state === 'unavailable') return unavailable;
+  if (state === 'snapshot') return lastKnown;
+  return null;
+}
+
+/** Text badge for a chain card. Color is never the only signal. */
+export function chainSourceLabel(
+  filter: NetworkFilter,
+  snapshot: StatsSnapshot,
+  copy: {
+    lastKnown: string;
+    unavailable: string;
+    partialUnavailable: string;
+    chainShortSolana: string;
+    chainShortStellar: string;
+  },
+): string | null {
+  const state = chainState(filter, snapshot);
+  if (state === 'unavailable') return copy.unavailable;
+  if (state === 'snapshot') return copy.lastKnown;
+  if (state === 'partial') {
+    const chain =
+      snapshot.sources.solana === 'unavailable'
+        ? copy.chainShortSolana
+        : snapshot.sources.stellar === 'unavailable'
+          ? copy.chainShortStellar
+          : '';
+    return format(copy.partialUnavailable, { chain });
+  }
+  return null;
 }

@@ -7,6 +7,8 @@
  * pin that so a hand edit cannot leave the two charts disagreeing.
  */
 
+import deployments from '../../../../deployments.json' with { type: 'json' };
+
 export const STATS_TITLE = 'Public Stats & On-Chain Metrics';
 
 export const STATS_DESCRIPTION =
@@ -27,8 +29,15 @@ export const BADGE_INK = '#2A1A14';
 export const STELLAR_TEXT = '#B5482B';
 
 export const SOLANA_PROGRAM_ID = 'BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d';
-/** Escrow and demo USDC on Stellar testnet. Source of truth: deployments.json at the repo root. */
-export const STELLAR_CONTRACT_ID = 'CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX';
+/**
+ * Escrow and demo USDC on Stellar testnet. The escrow id comes from
+ * deployments.json so this page tracks the current testnet deploy.
+ */
+const TESTNET_ESCROW = deployments.networks.testnet.contracts.escrow.id;
+if (!TESTNET_ESCROW) {
+  throw new Error('deployments.json is missing the testnet escrow id');
+}
+export const STELLAR_CONTRACT_ID = TESTNET_ESCROW;
 export const STELLAR_USDC_ID = 'CAOPLEE4NVOVEBYRO7NHG5K4FEML5O5C5AATYBK4FCDLYRAJFZWBNN3E';
 /** Public Stellar testnet accounts that sign or receive the app's on-chain actions. */
 export const STELLAR_RESOLVER = 'GBXBAOFWG4Y4ZQEDXH73BACYYCE7ODSKXHLXYVRPLJOYFRDCPWHGYGN5';
