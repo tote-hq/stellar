@@ -137,8 +137,11 @@ It has three parts:
 - Project `checkout`: a local `next dev` on port 3124, Cloudflare's published
   Turnstile dummy keys, and route mocks. It does not call the model, the
   database, or mainnet. Traces, video, and screenshots are off.
-- Projects `landing` and `shell`: a read-only look at the public sites. The
-  shell does not send a chat message.
+- Project `shell`: a read-only look at the public shopper. It does not send
+  a chat message. `landing` is not in this workflow. Cloudflare's interactive
+  challenge blocks the GitHub runner on www.changuito.me, so a weekly landing
+  smoke cannot see the page. `e2e/landing.spec.ts` stays in the repo and still
+  runs when you ask for that project locally.
 
 `@quarantine` tests are excluded (`grepInvert` in `playwright.config.ts` and
 `--grep-invert` in the workflow). HTML and JUnit land as artifacts for 7 days.
