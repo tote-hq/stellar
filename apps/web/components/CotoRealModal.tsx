@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { Cart } from '@changuito/mcp/types';
 
@@ -40,7 +40,12 @@ export function CotoRealModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [quote, setQuote] = useState<QuoteView | null>(null);
-  const dropQuote = () => setQuote(null);
+  const quoteEpoch = useRef(0);
+  const dropQuote = () => {
+    quoteEpoch.current += 1;
+    setQuote(null);
+    setBusy(false);
+  };
   const [note, setNote] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<StatusView['prompt']>(null);
@@ -79,6 +84,8 @@ export function CotoRealModal({
   }, [lang, orderId, wallet.accessToken, wallet.address]);
 
   async function usePostal() {
+    const mine = ++quoteEpoch.current;
+    setQuote(null);
     setBusy(true);
     setError(null);
     try {
@@ -98,6 +105,7 @@ export function CotoRealModal({
         }),
       });
       const body = (await res.json()) as QuoteView & { error?: string };
+      if (mine !== quoteEpoch.current) return;
       if (!res.ok) {
         setQuote(null);
         setError(body.error ?? copy.failed);
@@ -105,10 +113,11 @@ export function CotoRealModal({
       }
       setQuote(body);
     } catch {
+      if (mine !== quoteEpoch.current) return;
       setQuote(null);
       setError(copy.failed);
     } finally {
-      setBusy(false);
+      if (mine === quoteEpoch.current) setBusy(false);
     }
   }
 
@@ -171,6 +180,7 @@ export function CotoRealModal({
               name="fulfillment"
               value="home"
               data-testid="checkout-fulfillment-home"
+              disabled={busy}
               checked={fulfillment === 'home'}
               onChange={() => {
                 setFulfillment('home');
@@ -185,6 +195,7 @@ export function CotoRealModal({
               name="fulfillment"
               value="pickup"
               data-testid="checkout-fulfillment-pickup"
+              disabled={busy}
               checked={fulfillment === 'pickup'}
               onChange={() => {
                 setFulfillment('pickup');
@@ -197,13 +208,13 @@ export function CotoRealModal({
         {fulfillment === 'home' ? (
           <div data-testid="checkout-address">
             <label htmlFor="coto-real-street">{copy.street}</label>
-            <input id="coto-real-street" value={street} onChange={(event) => { setStreet(event.target.value); dropQuote(); }} autoComplete="address-line1" style={{ minHeight: 44 }} />
+            <input id="coto-real-street" value={street} disabled={busy} onChange={(event) => { setStreet(event.target.value); dropQuote(); }} autoComplete="address-line1" style={{ minHeight: 44 }} />
             <label htmlFor="coto-real-number">{copy.number}</label>
-            <input id="coto-real-number" value={number} onChange={(event) => { setNumber(event.target.value); dropQuote(); }} style={{ minHeight: 44 }} />
+            <input id="coto-real-number" value={number} disabled={busy} onChange={(event) => { setNumber(event.target.value); dropQuote(); }} style={{ minHeight: 44 }} />
             <label htmlFor="coto-real-complement">{copy.complement}</label>
-            <input id="coto-real-complement" value={complement} onChange={(event) => { setComplement(event.target.value); dropQuote(); }} style={{ minHeight: 44 }} />
+            <input id="coto-real-complement" value={complement} disabled={busy} onChange={(event) => { setComplement(event.target.value); dropQuote(); }} style={{ minHeight: 44 }} />
             <label htmlFor="coto-real-city">{copy.city}</label>
-            <input id="coto-real-city" value={city} onChange={(event) => { setCity(event.target.value); dropQuote(); }} autoComplete="address-level2" style={{ minHeight: 44 }} />
+            <input id="coto-real-city" value={city} disabled={busy} onChange={(event) => { setCity(event.target.value); dropQuote(); }} autoComplete="address-level2" style={{ minHeight: 44 }} />
           </div>
         ) : null}
         <label htmlFor="coto-real-postal">{copy.postal}</label>
@@ -211,6 +222,7 @@ export function CotoRealModal({
           id="coto-real-postal"
           data-testid="coto-real-postal"
           value={postal}
+          disabled={busy}
           onChange={(event) => { setPostal(event.target.value); dropQuote(); }}
           autoComplete="postal-code"
           inputMode="text"
