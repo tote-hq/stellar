@@ -1,7 +1,7 @@
 import type { MetadataRoute } from 'next';
 
 /**
- * Web app manifest for https://sol.changuito.me.
+ * Web app manifest for https://app.changuito.me.
  *
  * Next serves this at /manifest.webmanifest and links it from the document.
  * next.config.ts also rewrites /manifest.json to that URL. Icons are the

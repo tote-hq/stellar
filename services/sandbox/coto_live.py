@@ -7,9 +7,11 @@ Nothing here logs the ops password, the street, or the card.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import time
 
+from coto_fields import plan_delivery
 from coto_real import run_coto_real
 
 
@@ -41,15 +43,72 @@ class LiveCotoDriver:
 
     async def delivery(self, address: dict) -> dict:
         await self.page.goto("https://www.coto.com.ar/agregar-domicilio", wait_until="domcontentloaded")
-        box = self.page.get_by_placeholder(re.compile(r"calle", re.I))
-        if await box.count() == 0:
+        screen = await self._delivery_screen()
+        plan = plan_delivery(screen, address)
+        if plan.get("needs_human") and screen.get("kind") == "unknown":
+            jev = self._jev()
+            if jev is not None:
+                await jev.system_one(model="jev-1.13.0", screen={"kind": "unknown"})
+        if plan.get("needs_shopper") or plan.get("needs_human") or plan.get("fail"):
+            return plan
+        if plan.get("choose_new_address"):
+            fresh = self.page.get_by_role("button", name=re.compile(r"nueva direcci[oó]n|agregar direcci[oó]n", re.I))
+            if await fresh.count():
+                await fresh.first.click()
+        for fill in plan.get("fills") or []:
+            if fill.get("field") in ("meat", "pickup_branch"):
+                choice = self.page.get_by_text(fill["value"], exact=True)
+                if await choice.count() == 0:
+                    return {"needs_shopper": {"label": str(fill["value"]), "field_ref": fill["field"], "options": None}}
+                await choice.first.click()
+                continue
+            box = self.page.get_by_label(re.compile(re.escape(str(fill["field"])), re.I))
+            if await box.count() == 0:
+                return {"needs_shopper": {"label": str(fill["field"]), "field_ref": fill["field"], "options": None}}
+            await box.first.fill(str(fill["value"]))
+        save = self.page.get_by_role("button", name=re.compile(r"^Guardar$", re.I))
+        if await save.count() == 0:
             return {"needs_human": True}
-        text = " ".join(
-            part for part in (address.get("street"), address.get("number"), address.get("city")) if part
-        )
-        await box.first.fill(text)
-        # The map confirmation is a human step. Poll resumes once it is gone.
-        return {"needs_human": True}
+        await save.first.click()
+        return {"ok": True}
+
+    async def apply_answer(self, field_ref: str, value: str) -> dict:
+        box = self.page.get_by_label(re.compile(re.escape(field_ref), re.I))
+        if await box.count() == 0:
+            choice = self.page.get_by_text(value, exact=True)
+            if await choice.count() == 0:
+                return {"fail": "needs_shopper_timeout"}
+            await choice.first.click()
+            return {"ok": True}
+        await box.first.fill(value)
+        return {"ok": True}
+
+    async def _delivery_screen(self) -> dict:
+        try:
+            meat = self.page.get_by_text("Quiero recibir un producto similar", exact=True)
+            if await meat.count():
+                return {"kind": "meat", "meat_options": ["Quiero recibir un producto similar"]}
+            fresh = self.page.get_by_role("button", name=re.compile(r"nueva direcci[oó]n|agregar direcci[oó]n", re.I))
+            if await fresh.count():
+                return {"kind": "new_address", "new_address": True, "fields": {}}
+        except Exception:
+            return {"kind": "unknown"}
+        return {"kind": "unknown"}
+
+    def _jev(self):
+        if not os.environ.get("TYPESAFE_API_KEY"):
+            return None
+        try:
+            from typesafe_sdk import AsyncTypeSafeClient
+        except Exception:
+            return None
+        client = AsyncTypeSafeClient()
+
+        class Pinned:
+            async def system_one(self, *, model, screen):
+                return await client.system_one(state=screen, questions=[], model=model)
+
+        return Pinned()
 
     async def empty_cart(self) -> dict:
         await self.page.goto("https://www.coto.com.ar/carrito", wait_until="domcontentloaded")

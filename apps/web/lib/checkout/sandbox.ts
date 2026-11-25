@@ -37,6 +37,7 @@ export type SandboxPhase =
   | 'checkout'
   | 'payment'
   | 'needs_human'
+  | 'needs_shopper'
   | 'placed';
 
 /** What the store answered to the card. Only `placed` settles the escrow. */
@@ -69,6 +70,11 @@ export interface SandboxJob {
     timings?: Record<string, number>;
   };
   error?: string;
+  prompt?: {
+    label: string;
+    fieldRef?: string | null;
+    options?: { label: string; value: string; suggested?: boolean }[] | null;
+  };
 }
 
 export interface SandboxItem {
@@ -157,31 +163,38 @@ export interface CotoRealDelivery {
   street: string;
   number?: string;
   city: string;
+  complement?: string;
 }
 
-/** Sandbox body for a real Coto job. No Día login and no card: the worker reads the ops card itself. */
+/** Sandbox body for a real Coto job. No Día login. The ops card rides the existing Card channel. */
 export function cotoRealJobBody(
   orderId: string,
   items: SandboxItem[],
-  delivery: CotoRealDelivery,
+  input: { fulfillment: 'home' | 'pickup'; city: string; delivery?: CotoRealDelivery; card?: SandboxCard },
 ): {
   mode: 'coto_real';
   order_id: string;
+  fulfillment: 'home' | 'pickup';
+  city: string;
   items: { name: string; quantity: number; sku: string }[];
-  delivery: CotoRealDelivery;
+  delivery?: CotoRealDelivery;
+  card?: SandboxCard;
 } {
   return {
     mode: 'coto_real',
     order_id: orderId,
+    fulfillment: input.fulfillment,
+    city: input.city,
     items: items.map((item) => ({ name: item.name, quantity: item.quantity, sku: item.sku })),
-    delivery,
+    ...(input.delivery ? { delivery: input.delivery } : {}),
+    ...(input.card ? { card: input.card } : {}),
   };
 }
 
 export async function startCotoRealJob(
   orderId: string,
   items: SandboxItem[],
-  delivery: CotoRealDelivery,
+  input: { fulfillment: 'home' | 'pickup'; city: string; delivery?: CotoRealDelivery; card?: SandboxCard },
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string> {
   if (!env.SANDBOX_URL) throw new Error('checkout is off: no SANDBOX_URL');
@@ -189,7 +202,7 @@ export async function startCotoRealJob(
   const res = await fetch(`${base}/jobs`, {
     method: 'POST',
     headers,
-    body: JSON.stringify(cotoRealJobBody(orderId, items, delivery)),
+    body: JSON.stringify(cotoRealJobBody(orderId, items, input)),
   });
   if (!res.ok) throw new Error(`sandbox answered ${res.status}`);
   const body = (await res.json()) as { job_id?: string };
@@ -261,4 +274,30 @@ export async function readJob(jobId: string, env: NodeJS.ProcessEnv = process.en
   if (res.status === 404) return { job_id: jobId, status: 'failed', phase: 'queued', error: 'job lost (sandbox restarted)' };
   if (!res.ok) throw new Error(`sandbox answered ${res.status}`);
   return (await res.json()) as SandboxJob;
+}
+
+export async function postCotoShopperAnswer(
+  jobId: string,
+  fieldRef: string,
+  value: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<boolean> {
+  if (!env.SANDBOX_URL) return false;
+  const { base, headers } = remote(env);
+  const res = await fetch(`${base}/jobs/${encodeURIComponent(jobId)}/answer`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ field_ref: fieldRef, value }),
+  });
+  return res.ok;
+}
+
+/** Recomputed by the sandbox while the signature is inside 60s. Not stored. */
+export async function readCotoViewer(jobId: string, env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
+  if (!env.SANDBOX_URL) return null;
+  const { base, headers } = remote(env);
+  const res = await fetch(`${base}/jobs/${encodeURIComponent(jobId)}/viewer`, { headers, cache: 'no-store' });
+  if (!res.ok) return null;
+  const body = (await res.json()) as { url?: unknown };
+  return typeof body.url === 'string' ? body.url : null;
 }

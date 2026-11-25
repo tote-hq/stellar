@@ -54,3 +54,67 @@ export function earlyLocationAsk(args: {
   if (mentionsPostalCode(args.text)) return null;
   return args.lang === 'en' ? EARLY_LOCATION_ASK_EN : EARLY_LOCATION_ASK;
 }
+
+export const CITY_ASK = '¿En qué ciudad o localidad está ese código postal?';
+
+export const CITY_ASK_EN = 'Which city or locality is that postcode in?';
+
+export function isCityQuestion(text: string | null | undefined): boolean {
+  const trimmed = text?.trim();
+  return trimmed === CITY_ASK || trimmed === CITY_ASK_EN;
+}
+
+const LIST_WORD = /\b(leche|pan|yerba|arroz|fideos|carne|queso|huevos|aceite|azúcar|azucar)\b/i;
+
+/** The whole trimmed reply, or null when it reads as a shopping list. */
+export function cityFromAnswer(text: string): string | null {
+  const city = text.trim().replace(/\s+/g, ' ');
+  if (!city || city.length > 80) return null;
+  if (/[,;\n]/.test(city)) return null;
+  if (city.split(' ').length > 6) return null;
+  if (LIST_WORD.test(city)) return null;
+  if (/https?:/i.test(city)) return null;
+  return city;
+}
+
+export function earlyCityAsk(args: {
+  hasLocation: boolean;
+  hasCity: boolean;
+  knownPostal: boolean;
+}): string | null {
+  if (args.hasLocation || args.hasCity || !args.knownPostal) return null;
+  return CITY_ASK;
+}
+
+function messageText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((block) => (block && typeof block === 'object' && 'text' in block ? String((block as { text: unknown }).text ?? '') : ''))
+    .join('\n');
+}
+
+export function lastAssistantText(messages: readonly { role?: string; content?: unknown }[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role === 'assistant') return messageText(message.content);
+  }
+  return '';
+}
+
+export function transcriptHasPostal(messages: readonly { role?: string; content?: unknown }[], text: string): boolean {
+  if (mentionsPostalCode(text)) return true;
+  return messages.some((message) => message.role === 'user' && mentionsPostalCode(messageText(message.content)));
+}
+
+/** Stores the city only when the previous assistant message was the question. */
+export function rememberCity(
+  state: { getCity?: () => string | undefined; setCity?: (city: string) => void },
+  messages: readonly { role?: string; content?: unknown }[],
+  text: string,
+): void {
+  if (state.getCity?.()) return;
+  if (!isCityQuestion(lastAssistantText(messages))) return;
+  const city = cityFromAnswer(text);
+  if (city) state.setCity?.(city);
+}

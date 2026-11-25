@@ -9,16 +9,16 @@ import type { StatusResponse } from './types.ts';
 /**
  * Whether this wallet may open a manual checkout.
  *
- * The allowlist is `shared_card_member` for the default network. The table
- * name is historical: this read never touches `shared_card` and never sees a
+ * The allowlist table is `allowlist` for the default network. Día manual is
+ * `dia_manual_enabled`. This read never touches `shared_card` and never sees a
  * PAN, an expiry or a CVV. No database, or a query that fails, is not a member.
  */
 export async function manualMember(buyer: string, env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
   if (!hasDatabase(env)) return false;
   try {
     const rows = await db(env)`
-      select 1 from shared_card_member
-       where network = ${DEFAULT_NETWORK} and address = ${buyer}`;
+      select 1 from allowlist
+       where network = ${DEFAULT_NETWORK} and user_id = ${buyer} and dia_manual_enabled`;
     return rows.length > 0;
   } catch (err) {
     console.error(

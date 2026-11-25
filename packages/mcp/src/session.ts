@@ -38,12 +38,22 @@ export interface SessionSnapshot {
   order?: OrderRetailer;
   /** Coto lines. Absent when the basket is empty. */
   coto?: CotoLineSnap[];
+  /**
+   * City asked after the postal code, before set_location. Omitted when unset
+   * so a snapshot from before this field restores as it did.
+   */
+  city?: string;
 }
 
 export interface SessionState {
   setLocation(ctx: LocationContext): void;
   requireLocation(): LocationContext;
   getLocation(): LocationContext | undefined;
+  getCity(): string | undefined;
+  setCity(city: string): void;
+  /** Postal code seen before the city answer. Not part of the snapshot. */
+  notePostal(code: string): void;
+  getPendingPostal(): string | undefined;
   ensureCart(): Promise<{ cart: Cart; ctx: LocationContext }>;
   rememberCart(retailer: string, cartId: string): void;
   getOrder(): OrderRetailer | undefined;
@@ -72,6 +82,8 @@ function copyCoto(lines: readonly CotoLineSnap[]): CotoLineSnap[] {
 
 export function createSessionState(): SessionState {
   let location: LocationContext | undefined;
+  let city: string | undefined;
+  let pendingPostal: string | undefined;
   let order: OrderRetailer | undefined;
   let cotoLines: CotoLineSnap[] = [];
   const carts = new Map<string, string>();
@@ -108,6 +120,16 @@ export function createSessionState(): SessionState {
 
     requireLocation,
     getLocation: () => location,
+    getCity: () => city,
+    setCity(next) {
+      const trimmed = next.trim();
+      if (trimmed) city = trimmed;
+    },
+    notePostal(code) {
+      const trimmed = code.trim();
+      if (trimmed) pendingPostal = trimmed;
+    },
+    getPendingPostal: () => pendingPostal,
 
     /** Returns the current cart for the active retailer, creating one on first use. */
     async ensureCart() {
@@ -169,10 +191,13 @@ export function createSessionState(): SessionState {
       carts: Object.fromEntries(carts),
       ...(order ? { order } : {}),
       ...(cotoLines.length ? { coto: copyCoto(cotoLines) } : {}),
+      ...(city ? { city } : {}),
     }),
 
     restore(snap) {
       location = snap.location;
+      city = typeof snap.city === 'string' && snap.city.trim() ? snap.city.trim() : undefined;
+      pendingPostal = undefined;
       carts.clear();
       for (const [retailer, cartId] of Object.entries(snap.carts ?? {})) {
         carts.set(retailer, cartId);

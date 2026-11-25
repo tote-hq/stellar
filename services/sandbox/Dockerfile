@@ -22,4 +22,5 @@ COPY --from=viewer /viewer/dist ./viewer/dist
 
 ENV PORT=8080
 ENV MANUAL_CHROMIUM_WRAPPER=/app/browser.sh
-CMD ["sh", "start.sh"]
+# Replace any base entrypoint that also starts Xvfb. This script is the one start.
+ENTRYPOINT ["sh", "/app/start.sh"]

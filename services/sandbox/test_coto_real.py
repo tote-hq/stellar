@@ -4,7 +4,15 @@ import asyncio
 import json
 import unittest
 
-from coto_real import NEEDS_HUMAN_MS, load_ops_card, phase_order_ok, public_job, run_coto_real, viewer_url
+from coto_real import (
+    NEEDS_HUMAN_MS,
+    NEEDS_SHOPPER_MS,
+    load_ops_card,
+    phase_order_ok,
+    public_job,
+    run_coto_real,
+    viewer_url,
+)
 
 
 class Scripted:
@@ -22,6 +30,9 @@ class Scripted:
 
     async def delivery(self, address):
         self.address = address
+        self.delivery_calls = getattr(self, "delivery_calls", 0) + 1
+        if self.delivery_calls > 1 and getattr(self, "answer", None):
+            return {"ok": True}
         return await self._step("delivery")
 
     async def empty_cart(self):
@@ -42,6 +53,10 @@ class Scripted:
         if self.polls:
             return self.polls.pop(0)
         return {"waiting": True}
+
+    async def apply_answer(self, field_ref, value):
+        self.answer = (field_ref, value)
+        return {"ok": True}
 
 
 def run(driver, card, logs, clock):
@@ -113,12 +128,101 @@ class CotoRealTest(unittest.TestCase):
         self.assertEqual(out["result"]["code"], "ops_unavailable")
         self.assertIsNone(out["result"]["store_order_id"])
 
-    def test_viewer_url_is_signed_and_card_json_without_a_pan_is_ignored(self):
+    def test_viewer_url_is_signed_and_env_card_json_is_ignored(self):
         url = viewer_url("abc", "tok", "https://sandbox.example", 10)
         self.assertIn("sig=", url)
         self.assertIsNone(load_ops_card({}))
-        self.assertIsNone(load_ops_card({"COTO_SHARED_CARD_JSON": "{"}))
-        self.assertEqual(load_ops_card({"COTO_SHARED_CARD_JSON": '{"pan":"4242424242424242"}'})["pan"], "4242424242424242")
+        self.assertIsNone(load_ops_card({"COTO_SHARED_CARD_JSON": '{"pan":"4242424242424242"}'}))
+        self.assertEqual(load_ops_card({"card": {"pan": "4242424242424242"}})["pan"], "4242424242424242")
+        shown = public_job({
+            "job_id": "job1",
+            "status": "running",
+            "phase": "needs_shopper",
+            "card": {"pan": "4242424242424242"},
+            "prompt": {"label": "¿Celular?", "fieldRef": "phone", "options": None},
+        })
+        blob = json.dumps(shown)
+        self.assertNotIn("4242", blob)
+        self.assertEqual(shown["prompt"]["label"], "¿Celular?")
+        self.assertNotIn("card", shown)
+
+    def test_needs_shopper_timeout_refunds_and_a_matching_answer_resumes(self):
+        driver = Scripted({"checkout": {"needs_shopper": {
+            "label": "Notas para la carnicería",
+            "field_ref": "butcher_notes",
+            "options": None,
+        }}})
+        clock = {"t": 0}
+
+        async def jump(_seconds):
+            clock["t"] += NEEDS_SHOPPER_MS + 1
+
+        job = {"job_id": "job1", "items": [{"sku": "1"}], "delivery": {"street": "Calle", "city": "CABA"}}
+        out = asyncio.run(run_coto_real(
+            job, driver, now_ms=lambda: clock["t"], sleep=jump, log=lambda _line: None,
+            card={"pan": "4242424242424242"}, token="tok", origin="https://sandbox.example",
+        ))
+        self.assertEqual(out["result"]["code"], "needs_shopper_timeout")
+        self.assertNotIn("4242", json.dumps(out))
+
+        answered = Scripted({"checkout": {"needs_shopper": {
+            "label": "Notas para la carnicería",
+            "field_ref": "butcher_notes",
+            "options": None,
+        }}, "payment": {"placed": "C-9"}})
+        clock2 = {"t": 0}
+        job2 = {"job_id": "job2", "items": [{"sku": "1"}], "delivery": {"city": "CABA"}}
+
+        async def reply(_seconds):
+            job2["shopper_answer"] = {"field_ref": "butcher_notes", "value": "picada"}
+            clock2["t"] += 1_000
+
+        out2 = asyncio.run(run_coto_real(
+            job2, answered, now_ms=lambda: clock2["t"], sleep=reply, log=lambda _line: None,
+            card={"pan": "4242424242424242"}, token="", origin="https://sandbox.example",
+        ))
+        self.assertEqual(answered.answer, ("butcher_notes", "picada"))
+        self.assertEqual(out2["result"]["store_order_id"], "C-9")
+
+    def test_pickup_sends_the_city_without_a_street(self):
+        driver = Scripted()
+        clock = {"t": 0}
+        job = {"job_id": "job4", "fulfillment": "pickup", "city": "CABA", "items": [{"sku": "1"}]}
+
+        async def pause(_seconds):
+            clock["t"] += 1_000
+
+        asyncio.run(run_coto_real(
+            job, driver, now_ms=lambda: clock["t"], sleep=pause, log=lambda _line: None,
+            card={"pan": "4242424242424242"}, token="", origin="https://sandbox.example",
+        ))
+        self.assertEqual(driver.address.get("city"), "CABA")
+        self.assertEqual(driver.address.get("fulfillment"), "pickup")
+        self.assertNotIn("street", driver.address)
+        self.assertNotIn("city", public_job(job))
+
+    def test_a_delivery_answer_runs_delivery_again_before_shop(self):
+        driver = Scripted({"delivery": {"needs_shopper": {
+            "label": "¿En qué sucursal retirás?",
+            "field_ref": "pickup_branch",
+            "options": [{"label": "ABASTO", "value": "ABASTO"}],
+        }}, "payment": {"placed": "C-3"}})
+        clock = {"t": 0}
+        job = {"job_id": "job3", "fulfillment": "pickup", "items": [{"sku": "1"}], "delivery": {"city": "CABA"}}
+
+        async def reply(_seconds):
+            job["shopper_answer"] = {"field_ref": "pickup_branch", "value": "ABASTO"}
+            clock["t"] += 1_000
+
+        out = asyncio.run(run_coto_real(
+            job, driver, now_ms=lambda: clock["t"], sleep=reply, log=lambda _line: None,
+            card={"pan": "4242424242424242"}, token="", origin="https://sandbox.example",
+        ))
+        self.assertEqual(driver.address.get("city"), "CABA")
+        self.assertGreaterEqual(driver.delivery_calls, 2)
+        self.assertEqual(driver.address.get("pickup_branch"), "ABASTO")
+        self.assertLess(driver.calls.index("delivery"), driver.calls.index("shop"))
+        self.assertEqual(out["result"]["store_order_id"], "C-3")
 
 
 if __name__ == "__main__":

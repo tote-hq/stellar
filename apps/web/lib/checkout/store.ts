@@ -41,7 +41,11 @@ export interface CheckoutRecord {
    * Server-side Coto delivery address for checkoutKind coto_real_v1.
    * Never copied onto a shopper response.
    */
-  resolvedAddress?: { postalCode: string; street: string; number?: string; city: string };
+  resolvedAddress?: { postalCode: string; street: string; number?: string; city: string; complement?: string };
+  fulfillment?: 'home' | 'pickup';
+  /** City asked in chat. The delivery city, if edited, is on resolvedAddress. */
+  city?: string;
+  shippingProvisionCentavos?: number;
   /** Pesos as the shopper saw them. */
   totalDisplay: string;
   retailer: string;

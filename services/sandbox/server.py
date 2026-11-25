@@ -122,6 +122,8 @@ class JobIn(BaseModel):
     delivery: Delivery | None = None
     card: Card | None = None
     mode: Literal['legacy', 'manual', 'coto_real'] = 'legacy'
+    fulfillment: Literal['home', 'pickup'] = 'home'
+    city: str | None = Field(default=None, max_length=80, repr=False)
     buyer: str | None = Field(default=None, pattern=r'^[1-9A-HJ-NP-Za-km-z]{32,44}$')
     escrow_deadline: int | None = None
     flow: Literal['viewer', 'guided', 'headless'] = 'viewer'
@@ -230,7 +232,9 @@ async def health() -> dict:
 @app.post("/jobs", dependencies=[Depends(auth)])
 async def create(body: JobIn) -> dict:
     if body.mode == 'coto_real':
-        if body.shopper is not None or body.card is not None or body.delivery is None:
+        home = body.fulfillment != 'pickup'
+        city = (body.city or '').strip() or (body.delivery.city.strip() if body.delivery else '')
+        if body.shopper is not None or body.card is None or (home and body.delivery is None) or not city:
             print("POST /jobs rejected coto_real field=delivery", flush=True)
             raise HTTPException(422, 'invalid coto job')
         for existing in jobs.values():
@@ -240,7 +244,10 @@ async def create(body: JobIn) -> dict:
         jobs[job_id] = {
             "job_id": job_id, "order_id": body.order_id, "status": "queued", "phase": "queued",
             "mode": "coto_real", "items": [i.model_dump() for i in body.items], "created": time.time(),
-            "delivery": body.delivery.model_dump(),
+            "fulfillment": body.fulfillment,
+            "city": city,
+            "delivery": body.delivery.model_dump() if body.delivery else None,
+            "card": body.card.model_dump(),
         }
         await queue.put(job_id)
         return {"job_id": job_id}
@@ -273,6 +280,35 @@ async def create(body: JobIn) -> dict:
                     "card": body.card.model_dump() if body.card else None}
     await queue.put(job_id)
     return {"job_id": job_id}
+
+
+class ShopperAnswer(BaseModel):
+    field_ref: str = Field(min_length=1, max_length=80)
+    value: str = Field(min_length=1, max_length=200)
+
+
+@app.post("/jobs/{job_id}/answer", dependencies=[Depends(auth)])
+async def answer(job_id: str, body: ShopperAnswer) -> dict:
+    job = jobs.get(job_id)
+    prompt = (job or {}).get("prompt") if isinstance(job, dict) else None
+    expected = None if not isinstance(prompt, dict) else (prompt.get("fieldRef") or prompt.get("field_ref"))
+    if not job or job.get("phase") != "needs_shopper" or body.field_ref != expected:
+        raise HTTPException(409, "no pending question")
+    job["shopper_answer"] = {"field_ref": body.field_ref, "value": body.value}
+    return {"ok": True}
+
+
+@app.get("/jobs/{job_id}/viewer", dependencies=[Depends(auth)])
+async def job_viewer(job_id: str) -> dict:
+    from coto_real import viewer_url
+
+    job = jobs.get(job_id)
+    exp = job.get("viewer_exp") if isinstance(job, dict) else None
+    now = int(time.time() * 1000)
+    if not isinstance(exp, int) or not (now < exp <= now + 60_000):
+        raise HTTPException(404, "viewer closed")
+    origin = os.environ.get("SANDBOX_PUBLIC_URL") or "https://sandbox.local"
+    return {"url": viewer_url(job_id, TOKEN, origin, exp)}
 
 
 @app.get("/jobs/{job_id}", dependencies=[Depends(auth)])

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { decideAdmin } from './lib/admin/gate';
 import {
   AI_BOT_UA,
   hasBrowserFetchHints,
@@ -18,6 +19,17 @@ function humansOnly(message: string) {
 }
 
 export async function middleware(req: NextRequest) {
+  const admin = await decideAdmin(req);
+  if (admin?.handled) {
+    if (admin.rewrite) {
+      const url = req.nextUrl.clone();
+      url.pathname = admin.rewrite;
+      return NextResponse.rewrite(url);
+    }
+    if (admin.status === 200 && admin.body === undefined) return NextResponse.next();
+    return new NextResponse(admin.body ?? null, { status: admin.status, headers: admin.headers });
+  }
+
   const path = req.nextUrl.pathname;
   // The probe authenticates with its own bearer and answers 404 without it.
   // The smoke script has no Turnstile cookie and no browser hints.

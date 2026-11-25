@@ -9,7 +9,7 @@ import type { Product } from '@changuito/mcp/types';
 
 import type { UiEvent } from '../protocol';
 import { autoCompare } from './auto-compare';
-import { earlyLocationAsk } from './early-ask';
+import { earlyCityAsk, earlyLocationAsk, transcriptHasPostal } from './early-ask';
 import { changuitoPrompt, stateBanner } from './prompt';
 import { classifyTopic, offTopicRefusal } from './topic-guard.ts';
 import { anthropicProvider } from './providers/anthropic';
@@ -252,6 +252,7 @@ export async function runTurn(
           stateBanner({
             retailer: location?.retailer,
             postalCode: location?.postalCode,
+            city: session.state.getCity(),
             cartLines: cart?.lines.length,
             cartTotal: cart?.total.display,
             searchOrder: search.order,
@@ -282,6 +283,21 @@ export async function runTurn(
     return { brain: 'early-ask' };
   }
 
+  const cityAsk = earlyCityAsk({
+    hasLocation: Boolean(session.state.getLocation()),
+    hasCity: Boolean(session.state.getCity()),
+    knownPostal:
+      Boolean(session.state.getPendingPostal()) || transcriptHasPostal(turn.messages, userText),
+  });
+  if (cityAsk) {
+    turn.messages.push(
+      { role: 'user', content: shopperTurn(userText, stateBanner({}), image) },
+      { role: 'assistant', content: [{ type: 'text', text: cityAsk }] },
+    );
+    emit({ t: 'text', delta: cityAsk });
+    return { brain: 'early-ask' };
+  }
+
   const brain = process.env.OPENAI_API_KEY?.trim() ? openaiProvider() : anthropicProvider();
 
   const mcpTools = await mcpToolsToAnthropic(session.client);
@@ -297,6 +313,7 @@ export async function runTurn(
       stateBanner({
         retailer: location?.retailer,
         postalCode: location?.postalCode,
+        city: session.state.getCity(),
         cartLines: cart?.lines.length,
         cartTotal: cart?.total.display,
         searchOrder: search.order,

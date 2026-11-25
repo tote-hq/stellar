@@ -131,8 +131,9 @@ export async function POST(req: Request): Promise<Response> {
     } catch (err) { if ((err as { code?: string }).code !== '42P01') throw err; }
   }
 
-  // An admitted manual checkout is a wallet on shared_card_member (the
-  // historical allowlist; the table is not a card) while manual checkout is
+  // An admitted manual checkout is a wallet on allowlist with
+  // dia_manual_enabled (the historical name was shared_card_member; the table
+  // is not a card) while manual checkout is
   // enabled. Everyone else gets the demo run: same lock, the mock stops at
   // payment, refund, and the cart link to finish in Día. Mock mode wins, the
   // way it always did, so a rehearsal never opens the manual path. Asked here
