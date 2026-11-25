@@ -149,6 +149,8 @@ describe('over a real MCP transport', () => {
     const c = await connected();
     const picked = await c.client.callTool({ name: 'choose_retailer', arguments: { retailer: 'coto' } });
     assert.notEqual(picked.isError, true);
+    assert.match((picked.content as { text?: string }[])[0]?.text ?? '', /add_to_cart/);
+    assert.match((picked.content as { text?: string }[])[0]?.text ?? '', /get_cart_link/);
     assert.equal(c.state.getOrder(), 'coto');
     assert.match(c.state.cotoCartId(), /^coto-/);
     c.state.setCotoLines([{ id: 'coto-1', quantity: 1 }]);

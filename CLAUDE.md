@@ -358,6 +358,15 @@ not an MCP call and gets no trail row (§3). The shopper picks the chain with
 cannot pick the cheaper chain: the chosen store has to be named in the
 shopper's message or in the assistant question just before it.
 
+`choose_retailer` only records the chain. It does not put lines in the basket,
+and `autoRenderCart` draws nothing until there are lines (a Día card also
+needs `get_cart_link`). The click "Pedir en Día" is the sentence "Quiero pedir
+en Día." The prompt, the tool description and the tool result all tell the
+model to `add_to_cart` and `get_cart_link` in that same turn. Stopping after
+`choose_retailer` is how a turn ended with the compare card still on screen
+and no cart. The compared item is `pairDia` / `pairCoto` on the
+`search_compare` line, not every row on the card.
+
 A Coto basket is lines held on the session snapshot (`order`, `coto`) and
 priced from `CotoCatalog.getProduct` on every read. The id is a stable
 `coto-<uuid>`. Oracle ATG, the store link and payment are not implemented.
@@ -394,7 +403,7 @@ searched this turn on that store and came back with no available hit.
 ## Before you commit
 
 ```
-npm test                        # 718: mcp 209 · trust 1 · web 508
+npm test                        # 719: mcp 209 · trust 1 · web 509
 npm run typecheck -w @changuito/web
 npm run build
 ```

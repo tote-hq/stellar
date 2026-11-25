@@ -34,10 +34,13 @@ export function searchCompareNote(args: {
   coto: number;
   matched: number;
   gapCentavos?: number;
+  /** The one pair the fee was computed on. The model adds that id, not every row. */
+  pair?: { diaSkuId: string; cotoId: string };
   hits: ReadonlyArray<{ id: string; name: string; shelfCentavos: number; available: boolean }>;
 }): string {
   const gap = args.gapCentavos === undefined ? 'gap=unknown' : `gapCentavos=${args.gapCentavos}`;
-  const head = `[search_compare: id=${args.id} dia=${args.dia} coto=${args.coto} matched=${args.matched} ${gap}]`;
+  const pair = args.pair ? ` pairDia=${args.pair.diaSkuId} pairCoto=${args.pair.cotoId}` : '';
+  const head = `[search_compare: id=${args.id} dia=${args.dia} coto=${args.coto} matched=${args.matched} ${gap}${pair}]`;
   const lines = args.hits
     .filter((hit) => hit.available && hit.shelfCentavos > 0)
     .map((hit) => `${hit.id} · ${hit.name} · ${ars.format(hit.shelfCentavos / 100)}`);
@@ -172,6 +175,7 @@ export function beginDualSearch(args: {
         coto: cotoView.length,
         matched: folded.pair ? 1 : 0,
         gapCentavos: folded.gapCentavos,
+        ...(folded.pair ? { pair: folded.pair } : {}),
         hits: cotoView,
       });
     },
