@@ -13,17 +13,16 @@ import { basketHash, DEFAULT_TIMEOUT_SECS, newOrderId, toHex } from '../order.ts
 import { centsToUnits } from '../stellar.ts';
 import { checkoutStore } from './store.ts';
 import { quoteRate } from './rate.ts';
+import { adminStore } from '../admin/store.ts';
+import { admitCotoRequest, sharedCardPresent } from './coto-admit.ts';
 import {
-  admitCotoReal,
   COTO_REAL_KIND,
-  coverageAddress,
+  MISSING_CARD_COPY,
+  MISSING_CITY_COPY,
   normalizePostal,
-  parseAllowlist,
-  parseCpTable,
-  parseOpsAddress,
   quoteBuyerError,
   quoteFromPriced,
-  resolveCoverage,
+  type Fulfillment,
   type PricedLine,
 } from './coto-real.ts';
 
@@ -48,14 +47,17 @@ export async function postCotoRealQuote(
     payRetailer?: unknown;
     acceptedAlternatives?: unknown;
     checkoutPath?: unknown;
+    fulfillment?: unknown;
+    city?: unknown;
+    street?: unknown;
+    number?: unknown;
+    complement?: unknown;
   },
 ): Promise<Response> {
   if (body.payRetailer !== undefined || body.acceptedAlternatives !== undefined || body.checkoutPath !== undefined) {
     return Response.json({ error: BLOCKED }, { status: 400 });
   }
-  const enabled = process.env.COTO_REAL_ENABLED === '1';
-  const allowlist = parseAllowlist(process.env.COTO_REAL_ALLOWLIST);
-  if (!admitCotoReal({ address, enabled, allowlist })) {
+  if (!(await admitCotoRequest(address))) {
     return Response.json({ error: BLOCKED }, { status: 400 });
   }
 
@@ -80,14 +82,15 @@ export async function postCotoRealQuote(
   }
   const postalCode = normalizePostal(rawPostal);
   if (!postalCode) return Response.json({ error: 'Ese código postal no es válido.' }, { status: 400 });
-
-  const coverageOpts = {
-    ops: parseOpsAddress(process.env.COTO_REAL_OPS_ADDRESS),
-    table: parseCpTable(process.env.COTO_REAL_CP_TABLE),
-  };
-  const resolved = coverageAddress(postalCode, coverageOpts);
-  const coverage = resolveCoverage(postalCode, coverageOpts);
-  if (!resolved || !coverage.ok) return Response.json({ error: 'No tenemos cobertura para ese CP' }, { status: 400 });
+  const city = typeof body.city === 'string' ? body.city.trim() : '';
+  if (!city) return Response.json({ error: MISSING_CITY_COPY }, { status: 400 });
+  const fulfillment: Fulfillment = body.fulfillment === 'pickup' ? 'pickup' : 'home';
+  const street = typeof body.street === 'string' ? body.street.trim() : '';
+  const number = typeof body.number === 'string' ? body.number.trim() : '';
+  const complement = typeof body.complement === 'string' ? body.complement.trim() : '';
+  if (fulfillment === 'home' && (!street || !number)) {
+    return Response.json({ error: 'Falta la calle o el número de esta compra.' }, { status: 400 });
+  }
 
   let lines: PricedLine[];
   try {
@@ -112,9 +115,18 @@ export async function postCotoRealQuote(
     clientTotalCentavos: cart.total.centavos,
     pairs: snapshot.pairs,
     postalCode,
-    coverage: coverage.coverage,
+    coverage: 'shopper',
+    fulfillment,
   });
   if (!quoted.ok) return Response.json({ error: quoted.error }, { status: 400 });
+  if (!(await sharedCardPresent())) {
+    try {
+      await adminStore().notifyOnce('missing_card', null, 'Falta la tarjeta de la cuenta.');
+    } catch (err) {
+      console.error('[checkout/coto] missing-card notice', err instanceof Error ? err.name : 'insert');
+    }
+    return Response.json({ error: MISSING_CARD_COPY }, { status: 409 });
+  }
 
   let rate;
   try {
@@ -138,7 +150,20 @@ export async function postCotoRealQuote(
     arsPerUsd: rate.arsPerUsd,
     rateSource: rate.source,
     postalCode,
-    resolvedAddress: resolved,
+    city,
+    fulfillment,
+    shippingProvisionCentavos: quoted.quote.shippingProvisionCentavos,
+    ...(fulfillment === 'home'
+      ? {
+          resolvedAddress: {
+            postalCode,
+            street,
+            number,
+            city,
+            ...(complement ? { complement } : {}),
+          },
+        }
+      : {}),
     totalDisplay: quoted.quote.lockCentavos.toString(),
     retailer: 'coto',
     lines: lines.map((line) => ({

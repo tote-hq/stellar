@@ -135,6 +135,11 @@ export function registerCatalogTools(
       },
     },
     async ({ retailer, postal_code }) => {
+      if (!session.getCity()) {
+        return fail(
+          'Ask which city or locality that postal code is in before set_location. Do not guess the city.',
+        );
+      }
       try {
         const ctx = await getAdapter(retailer).resolveLocation(postal_code);
         session.setLocation(ctx);

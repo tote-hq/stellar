@@ -44,6 +44,7 @@ import { useLang } from './LangProvider';
 import { useNetwork } from './NetworkProvider';
 import { CameraIcon, ImageIcon, MicIcon, RetryIcon } from './icons';
 import { CheckoutModal } from './CheckoutModal';
+import { CITY_ASK } from '../lib/agent/early-ask';
 import { CotoRealModal } from './CotoRealModal';
 import { PayCard, type PayCardLine } from './PayCard';
 import { ProductGrid } from './ProductGrid';
@@ -519,7 +520,11 @@ function ChatCore({
               );
             case 'say':
               return (
-                <div key={b.id} className="bubble is-agent">
+                <div
+                  key={b.id}
+                  className="bubble is-agent"
+                  data-testid={(b.text ?? '').trim() === CITY_ASK ? 'chat-ask-city' : undefined}
+                >
                   <ToolTrail tools={b.tools} />
                   {b.thinking && !b.text ? <p className="thinking">{b.thinking}</p> : null}
                   {b.text ? <MarkdownText text={b.text} /> : null}
@@ -916,6 +921,7 @@ function ChatCore({
           cart={cotoModal}
           sessionId={currentSessionId() as string}
           postalCode={state.snapshot?.location?.postalCode}
+          city={state.snapshot?.city}
           onClose={() => setCotoModal(null)}
         />
       ) : null}

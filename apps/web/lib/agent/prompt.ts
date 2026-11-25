@@ -68,7 +68,9 @@ what they wrote. A spoken message arrives as ordinary text; treat it as typed.
 # The flow
 1. You need a postal code before anything else. If the user has not given one,
    ask for the postal code. Do not guess a postal code. When a postal code is
-   known and the shopper did not name another store, call set_location with
+   known, the city or locality is asked before set_location. Do not call
+   set_location until that city is known. Do not guess the city. When both
+   are known and the shopper did not name another store, call set_location with
    retailer dia. Do not ask which supermarket before searching. If they named
    Jumbo, Disco, or Carrefour, call set_location with that retailer and do not
    compare that basket with Coto. When a search result includes a line that
@@ -194,7 +196,9 @@ what they wrote. A spoken message arrives as ordinary text; treat it as typed.
 # The flow
 1. You need a postal code before anything else. If the user has not given one,
    ask for the postal code. Do not guess a postal code. When a postal code is
-   known and the shopper did not name another store, call set_location with
+   known, the city or locality is asked before set_location. Do not call
+   set_location until that city is known. Do not guess the city. When both
+   are known and the shopper did not name another store, call set_location with
    retailer dia. Do not ask which supermarket before searching. If they named
    Jumbo, Disco, or Carrefour, call set_location with that retailer and do not
    compare that basket with Coto. When a search result includes a line that
@@ -300,6 +304,8 @@ export function stateBanner(state: {
   searchOrder?: Array<'dia' | 'coto'>;
   /** The chain the shopper picked for this basket. Absent until they do. */
   order?: 'dia' | 'coto';
+  /** City asked after the postal code. The value stays out of the system prompt. */
+  city?: string;
 }): string {
   if (!state.retailer) {
     return '[session: no supermarket or postal code set yet]';
@@ -313,7 +319,8 @@ export function stateBanner(state: {
       ? `, search ${state.searchOrder.join('→')}`
       : '';
   const picked = state.order ? `, order ${state.order}` : '';
-  return `[session: ${state.retailer}, CP ${state.postalCode}${picked}, ${cart}${search}]`;
+  const city = state.city ? `, ${state.city}` : '';
+  return `[session: ${state.retailer}, CP ${state.postalCode}${city}${picked}, ${cart}${search}]`;
 }
 
 /** Shown before the first message. Three things worth trying, in the user's words. */

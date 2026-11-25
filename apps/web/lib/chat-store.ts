@@ -295,6 +295,7 @@ function packSearchCompare(
 function packSnapshot(s: SessionSnapshot): SessionSnapshot {
   const out: SessionSnapshot = { carts: { ...s.carts } };
   if (s.order === 'dia' || s.order === 'coto') out.order = s.order;
+  if (s.city) out.city = s.city;
   if (s.coto && s.coto.length) {
     out.coto = s.coto.map((line) => ({ id: line.id, quantity: line.quantity }));
   }
@@ -622,6 +623,8 @@ function asSnapshot(v: unknown): SessionSnapshot | null {
     }
   }
   if (v.order === 'dia' || v.order === 'coto') out.order = v.order;
+  const city = str(v.city);
+  if (city) out.city = city;
   const coto = arr(v.coto).flatMap((line) => {
     if (!isObj(line)) return [];
     const id = str(line.id);

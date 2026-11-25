@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import os
 from typing import Awaitable, Callable
 
 POLL_S = 1.0
 NEEDS_HUMAN_MS = 60_000
+NEEDS_SHOPPER_MS = 600_000
 HIDDEN_RESULT = {"admin_viewer_url", "viewerUrl", "adminViewerUrl", "ticket", "street", "pan", "password", "cvv"}
 
 
@@ -23,6 +23,13 @@ def public_job(job: dict) -> dict:
     result = out.get("result")
     if isinstance(result, dict):
         out["result"] = {k: v for k, v in result.items() if k not in HIDDEN_RESULT}
+    prompt = job.get("prompt")
+    if isinstance(prompt, dict) and isinstance(prompt.get("label"), str):
+        out["prompt"] = {
+            "label": prompt.get("label"),
+            "fieldRef": prompt.get("fieldRef") or prompt.get("field_ref"),
+            "options": prompt.get("options"),
+        }
     return out
 
 Log = Callable[[str], None]
@@ -43,14 +50,9 @@ def viewer_url(job_id: str, token: str, origin: str, exp: int) -> str:
     return f"{origin.rstrip('/')}/viewer/?job={job_id}&exp={exp}&sig={sig}"
 
 
-def load_ops_card(env: dict) -> dict | None:
-    raw = env.get("COTO_SHARED_CARD_JSON")
-    if not raw:
-        return None
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
+def load_ops_card(job: dict) -> dict | None:
+    """The card stored on this job. COTO_SHARED_CARD_JSON is not read."""
+    data = job.get("card") if isinstance(job, dict) else None
     if not isinstance(data, dict):
         return None
     pan = data.get("pan")
@@ -94,6 +96,7 @@ async def _human(job, driver, where: str, phases, now_ms, sleep, log, token, ori
     job["phase"] = "needs_human"
     start = now_ms()
     deadline = start + NEEDS_HUMAN_MS
+    job["viewer_exp"] = deadline
     if token:
         url = viewer_url(str(job.get("job_id") or ""), token, origin, deadline)
         log(f"phase={where} code=needs_human admin_viewer_url={url}")
@@ -112,6 +115,38 @@ async def _human(job, driver, where: str, phases, now_ms, sleep, log, token, ori
             return {"cleared": True}
     log(f"phase={where} code=needs_human_timeout")
     return _fail(where, "needs_human_timeout", phases)
+
+
+async def _shopper(job, driver, where, phases, now_ms, sleep, log, ask: dict) -> dict:
+    job["status"] = "running"
+    job["phase"] = "needs_shopper"
+    field = ask.get("field_ref") or ask.get("fieldRef")
+    job["prompt"] = {
+        "label": ask.get("label") or "Falta un dato del pedido.",
+        "fieldRef": field,
+        "options": ask.get("options"),
+    }
+    log(f"phase={where} code=needs_shopper")
+    deadline = now_ms() + NEEDS_SHOPPER_MS
+    while now_ms() < deadline:
+        await sleep(POLL_S)
+        answer = job.get("shopper_answer")
+        if (
+            isinstance(answer, dict)
+            and answer.get("field_ref") == field
+            and isinstance(answer.get("value"), str)
+            and answer["value"].strip()
+        ):
+            job.pop("shopper_answer", None)
+            job.pop("prompt", None)
+            resumed = await driver.apply_answer(field, answer["value"].strip())
+            if resumed.get("needs_shopper"):
+                return await _shopper(job, driver, where, phases, now_ms, sleep, log, resumed["needs_shopper"])
+            if resumed.get("fail"):
+                return _fail(where, str(resumed["fail"]), phases)
+            return {"cleared": True}
+    log(f"phase={where} code=needs_shopper_timeout")
+    return _fail(where, "needs_shopper_timeout", phases)
 
 
 async def run_coto_real(job, driver, *, now_ms: Now, sleep: Sleep, log: Log, card: dict | None,
@@ -134,6 +169,11 @@ async def run_coto_real(job, driver, *, now_ms: Now, sleep: Sleep, log: Log, car
             if resumed.get("cleared"):
                 return None
             return resumed
+        if result.get("needs_shopper"):
+            resumed = await _shopper(job, driver, name, phases, now_ms, sleep, log, result["needs_shopper"])
+            if resumed.get("cleared"):
+                return None
+            return resumed
         if result.get("placed"):
             return _placed(str(result["placed"]), phases)
         if result.get("declined"):
@@ -143,7 +183,9 @@ async def run_coto_real(job, driver, *, now_ms: Now, sleep: Sleep, log: Log, car
     login = await one("login", await driver.login())
     if login:
         return emit(login)
-    delivery = await one("delivery", await driver.delivery(job.get("delivery") or {}))
+    delivery_input = dict(job.get("delivery") or {})
+    delivery_input["fulfillment"] = job.get("fulfillment") or delivery_input.get("fulfillment") or "home"
+    delivery = await one("delivery", await driver.delivery(delivery_input))
     if delivery:
         return emit(delivery)
     emptied = await one("empty_cart", await driver.empty_cart())
@@ -175,7 +217,7 @@ async def coto_real_worker(job: dict) -> None:
             print("phase=login code=ops_unavailable", flush=True)
             job.update(**_fail("login", "ops_unavailable", []))
             return
-        card = load_ops_card(env)
+        card = load_ops_card(job)
         user = env.get("COTO_OPS_USER") or ""
         password = env.get("COTO_OPS_PASSWORD") or ""
         if card is None or not user or not password:
@@ -198,4 +240,5 @@ async def coto_real_worker(job: dict) -> None:
         job.update(**_fail(job.get("phase") or "login", "ops_unavailable", []))
     finally:
         job.pop("delivery", None)
+        job.pop("card", None)
         card = None

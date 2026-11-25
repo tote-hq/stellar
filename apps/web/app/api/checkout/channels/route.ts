@@ -1,6 +1,6 @@
 import { channelsClient, channelsKey, noteLanded, prepareOpen, stellarSimulator, submitOpen, type OpenFields } from '../../../../lib/server/channels.ts';
 import { checkoutStore } from '../../../../lib/checkout/store.ts';
-import { admitCotoReal, parseAllowlist } from '../../../../lib/checkout/coto-real.ts';
+import { admitCotoRequest } from '../../../../lib/checkout/coto-admit.ts';
 import { cotoCheckoutBlocked, cotoDemoPayRecord, cotoRealRecord } from '../../../../lib/checkout/coto-guard.ts';
 import { readSessionUser, sessionMismatchResponse } from '../../../../lib/session-match.ts';
 
@@ -21,11 +21,7 @@ export async function POST(req: Request): Promise<Response> {
   if (!input) return Response.json({ error: 'bad request' }, { status: 400 });
   try {
     const rec = await checkoutStore().get(input.orderId);
-    if (rec && cotoRealRecord(rec) && !admitCotoReal({
-      address: session.address,
-      enabled: process.env.COTO_REAL_ENABLED === '1',
-      allowlist: parseAllowlist(process.env.COTO_REAL_ALLOWLIST),
-    })) {
+    if (rec && cotoRealRecord(rec) && !(await admitCotoRequest(session.address))) {
       return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
     }
     if (rec && cotoCheckoutBlocked(rec.retailer) && !cotoDemoPayRecord(rec)) {

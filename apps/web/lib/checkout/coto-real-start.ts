@@ -3,13 +3,14 @@
  * No Día login, no card, no demo job.
  */
 import { readOrder } from './escrow-server.ts';
-import { cotoShopperBody } from './coto-real.ts';
+import { loadSharedCard } from './coto-admit.ts';
+import { MISSING_CARD_COPY, cotoShopperBody } from './coto-real.ts';
 import { startCotoRealJob } from './sandbox.ts';
 import { checkoutStore, type CheckoutRecord } from './store.ts';
 
 export async function startCotoRealCheckout(rec: CheckoutRecord, openSig: string | undefined): Promise<Response> {
-  if (!rec.resolvedAddress) {
-    return Response.json({ error: 'No tenemos cobertura para ese CP' }, { status: 400 });
+  if (rec.fulfillment !== 'pickup' && !rec.resolvedAddress) {
+    return Response.json({ error: 'Falta la dirección de esta compra.' }, { status: 400 });
   }
   if (!rec.jobId) {
     let order = await readOrder(rec.orderId);
@@ -27,8 +28,21 @@ export async function startCotoRealCheckout(rec: CheckoutRecord, openSig: string
     rec.openSig = openSig ?? rec.openSig;
     rec.mode = 'live';
     const items = rec.lines.map((line) => ({ name: line.name, quantity: line.quantity, sku: line.skuId }));
+    const opsCard = await loadSharedCard();
+    if (!opsCard) {
+      rec.error = MISSING_CARD_COPY;
+      rec.jobId = 'none';
+      rec.phase = 'queued';
+      rec.startedAt = Date.now();
+      await checkoutStore().set(rec);
+      return Response.json(cotoShopperBody(rec, 'shopping', null), { headers: { 'cache-control': 'no-store' } });
+    }
     try {
-      rec.jobId = await startCotoRealJob(rec.orderId, items, rec.resolvedAddress);
+      rec.jobId = await startCotoRealJob(rec.orderId, items, {
+        fulfillment: rec.fulfillment ?? 'home',
+        ...(rec.resolvedAddress ? { delivery: rec.resolvedAddress } : {}),
+        card: opsCard,
+      });
     } catch (err) {
       console.error('[checkout/start] coto', err instanceof Error ? err.message : 'start failed');
       rec.error = 'No pudimos arrancar la compra.';

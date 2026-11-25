@@ -262,15 +262,11 @@ describe('POST /api/checkout/quote compare + Coto accept', () => {
 
   it('an admitted quote uses the catalog price, and a foreign or guest snapshot is refused', async () => {
     const { __setCotoRealTurnReaderForTests } = await import('../checkout/coto-real-http.ts');
+    const { __setCotoAdmitForTests } = await import('../checkout/coto-admit.ts');
     const sessionId = '00000000-0000-4000-8000-0000000000aa';
-    const previous = {
-      enabled: process.env.COTO_REAL_ENABLED,
-      list: process.env.COTO_REAL_ALLOWLIST,
-      table: process.env.COTO_REAL_CP_TABLE,
-    };
+    const previous = process.env.COTO_REAL_ENABLED;
     process.env.COTO_REAL_ENABLED = '1';
-    process.env.COTO_REAL_ALLOWLIST = BUYER;
-    process.env.COTO_REAL_CP_TABLE = JSON.stringify([{ postalCode: '1425', street: 'Calle', city: 'CABA' }]);
+    __setCotoAdmitForTests({ flags: async () => true, present: async () => true });
     const cotoCart = {
       ...cart,
       retailer: 'coto',
@@ -326,12 +322,36 @@ describe('POST /api/checkout/quote compare + Coto accept', () => {
       assert.equal((await guest.json()).error, 'Confirmá Coto de nuevo con la sesión iniciada.');
 
       turns.set(sessionId, snapshot(BUYER));
-      const ok = await ask({ cart: cotoCart, checkoutKind: 'coto_real_v1', sessionId, postalCode: '1425' });
+      const home = await ask({
+        cart: cotoCart,
+        checkoutKind: 'coto_real_v1',
+        sessionId,
+        postalCode: '1425',
+        city: 'CABA',
+        fulfillment: 'home',
+        street: 'Calle Privada',
+        number: '10',
+      });
+      assert.equal(home.status, 400);
+      const homeBody = await home.json();
+      assert.equal(homeBody.error, 'El envío a domicilio arranca en $ 30.000. Podés sumar productos o retirar en una sucursal.');
+      assert.equal(JSON.stringify(homeBody).includes('Calle Privada'), false);
+      assert.equal((await checkoutStore().listByBuyer(BUYER)).length, before);
+
+      const ok = await ask({
+        cart: cotoCart,
+        checkoutKind: 'coto_real_v1',
+        sessionId,
+        postalCode: '1425',
+        city: 'CABA',
+        fulfillment: 'pickup',
+      });
       assert.equal(ok.status, 200);
       const body = await ok.json();
       assert.equal(body.checkoutKind, 'coto_real_v1');
       assert.equal(body.cotoTicketCentavos, 247400);
       assert.equal(body.feeCentavos, 20);
+      assert.equal(body.shippingProvisionCentavos, 0);
       assert.equal(body.lockCentavos, 247420);
       assert.match(body.orderId, /^[0-9a-f]{64}$/);
       assert.match(body.basketHash, /^[0-9a-f]{64}$/);
@@ -340,21 +360,19 @@ describe('POST /api/checkout/quote compare + Coto accept', () => {
       const stored = await checkoutStore().get(body.orderId);
       assert.equal(stored?.checkoutKind, 'coto_real_v1');
       assert.equal(stored?.mode, 'live');
-      assert.equal(stored?.resolvedAddress?.street, 'Calle');
+      assert.equal(stored?.fulfillment, 'pickup');
+      assert.equal(stored?.resolvedAddress, undefined);
       assert.equal(stored?.buyer, BUYER);
       assert.ok(stored && BigInt(stored.amount) > 0n);
       assert.equal((await checkoutStore().listByBuyer(BUYER)).length, before + 1);
     } finally {
       __setCotoRealTurnReaderForTests(null);
+      __setCotoAdmitForTests({ flags: null, present: null });
       priceImpl = async () => {
         throw new Error('coto real reprice is not this test');
       };
-      if (previous.enabled === undefined) delete process.env.COTO_REAL_ENABLED;
-      else process.env.COTO_REAL_ENABLED = previous.enabled;
-      if (previous.list === undefined) delete process.env.COTO_REAL_ALLOWLIST;
-      else process.env.COTO_REAL_ALLOWLIST = previous.list;
-      if (previous.table === undefined) delete process.env.COTO_REAL_CP_TABLE;
-      else process.env.COTO_REAL_CP_TABLE = previous.table;
+      if (previous === undefined) delete process.env.COTO_REAL_ENABLED;
+      else process.env.COTO_REAL_ENABLED = previous;
     }
   });
 

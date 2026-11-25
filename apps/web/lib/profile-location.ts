@@ -24,13 +24,24 @@ import { getProfile } from './profile.ts';
 const POSTCODE = /^[A-Za-z]?\d{4}([A-Za-z]{3})?$/;
 
 export async function presetLocationFromProfile(
-  session: { client: Client; state: { getLocation(): unknown } },
+  session: {
+    client: Client;
+    state: {
+      getLocation(): unknown;
+      getCity?(): string | undefined;
+      notePostal?(code: string): void;
+    };
+  },
   address: string,
 ): Promise<boolean> {
   if (session.state.getLocation()) return false;
   try {
     const postcode = (await getProfile(address))?.postcode?.trim();
     if (!postcode || !POSTCODE.test(postcode)) return false;
+    if (typeof session.state.getCity === 'function' && !session.state.getCity()) {
+      session.state.notePostal?.(postcode);
+      return false;
+    }
     const res = await session.client.callTool(
       { name: 'set_location', arguments: { retailer: 'dia', postal_code: postcode } },
       undefined,

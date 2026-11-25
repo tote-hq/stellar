@@ -18,8 +18,9 @@ import {
   deliveryBeforeShop,
   freezeAllowed,
   freezeCotoReal,
+  HOME_MINIMUM_COPY,
+  HOME_PROVISION_CENTAVOS,
   mergeDiaPair,
-  parseAllowlist,
   quoteBuyerError,
   quoteFromPriced,
   refundAmount,
@@ -83,12 +84,10 @@ const line = (over: Partial<PricedLine> = {}): PricedLine => ({
 });
 
 describe('coto real quote', () => {
-  it('admits only an enabled non-empty allowlist', () => {
-    assert.equal(admitCotoReal({ address: OWNER, enabled: true, allowlist: parseAllowlist('') }), false);
-    assert.equal(admitCotoReal({ address: OWNER, enabled: true, allowlist: parseAllowlist(undefined) }), false);
-    assert.equal(admitCotoReal({ address: OWNER, enabled: false, allowlist: parseAllowlist(OWNER) }), false);
-    assert.equal(admitCotoReal({ address: OTHER, enabled: true, allowlist: parseAllowlist(OWNER) }), false);
-    assert.equal(admitCotoReal({ address: OWNER, enabled: true, allowlist: parseAllowlist(` ${OWNER},`) }), true);
+  it('admits only when the global switch and the row flag are both on', () => {
+    assert.equal(admitCotoReal({ enabled: true, sandboxEnabled: false }), false);
+    assert.equal(admitCotoReal({ enabled: false, sandboxEnabled: true }), false);
+    assert.equal(admitCotoReal({ enabled: true, sandboxEnabled: true }), true);
   });
 
   it('ignores the client total and prices the catalog line plus the matched fee', () => {
@@ -99,6 +98,7 @@ describe('coto real quote', () => {
       pairs,
       postalCode: '1425',
       coverage: 'table',
+      fulfillment: 'pickup',
     });
     assert.equal(quoted.ok, true);
     if (!quoted.ok) return;
@@ -106,6 +106,31 @@ describe('coto real quote', () => {
     assert.equal(quoted.quote.diaMatchedCentavos, 495000);
     assert.equal(quoted.quote.feeCentavos, 40);
     assert.equal(quoted.quote.lockCentavos, 494840);
+    assert.equal(quoted.quote.shippingProvisionCentavos, 0);
+    const home = quoteFromPriced({
+      lines: [line()],
+      clientTotalCentavos: 1,
+      pairs,
+      postalCode: '1425',
+      coverage: 'shopper',
+      fulfillment: 'home',
+    });
+    assert.equal(home.ok, false);
+    if (!home.ok) assert.equal(home.error, HOME_MINIMUM_COPY);
+    const over = quoteFromPriced({
+      lines: [line({ quantity: 1, unitCentavos: 3_000_000 })],
+      clientTotalCentavos: 1,
+      pairs: [{ cotoId: 'c1', diaSkuId: 'd1', diaCentavos: 3_000_000, confidence: 'ean' }],
+      postalCode: '1425',
+      coverage: 'shopper',
+      fulfillment: 'home',
+    });
+    assert.equal(over.ok, true);
+    if (over.ok) {
+      assert.equal(over.quote.shippingProvisionCentavos, HOME_PROVISION_CENTAVOS);
+      assert.equal(over.quote.feeCentavos, 0);
+      assert.equal(over.quote.lockCentavos, 3_000_000 + HOME_PROVISION_CENTAVOS);
+    }
     assert.notEqual(quoted.quote.cotoTicketCentavos, 1);
   });
 
@@ -116,6 +141,7 @@ describe('coto real quote', () => {
       pairs: [],
       postalCode: '1425',
       coverage: 'ops',
+      fulfillment: 'pickup',
     });
     assert.equal(none.ok, true);
     if (none.ok) {
@@ -129,6 +155,7 @@ describe('coto real quote', () => {
       pairs: [],
       postalCode: '1425',
       coverage: 'table',
+      fulfillment: 'pickup',
     });
     assert.equal(huge.ok, false);
     const unavailable = quoteFromPriced({
@@ -137,6 +164,7 @@ describe('coto real quote', () => {
       pairs: [],
       postalCode: '1425',
       coverage: 'table',
+      fulfillment: 'pickup',
     });
     assert.equal(unavailable.ok, false);
   });
@@ -202,6 +230,8 @@ describe('coto real quote', () => {
   it('refunds the full lock, hides viewer fields, and keeps delivery before shop', () => {
     assert.equal(refundAmount(494840, 'cancel'), 494840);
     assert.equal(refundAmount(494840, 'needs_human_timeout'), 494840);
+    assert.equal(refundAmount(494840, 'needs_shopper_timeout'), 494840);
+    assert.equal(shopperCopy('needs_shopper_timeout'), 'No llegamos a completar un dato del pedido. Te devolvemos el saldo.');
     assert.equal(refundAmount(494840, 'placed'), undefined);
     const logged: string[] = [];
     const status = shopperStatus({

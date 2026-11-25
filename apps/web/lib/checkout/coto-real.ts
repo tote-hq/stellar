@@ -14,6 +14,22 @@ import {
 
 export const COTO_REAL_KIND = 'coto_real_v1';
 
+/** Goods ticket, in centavos. Home delivery is refused below this. */
+export const HOME_MINIMUM_CENTAVOS = 3_000_000;
+/** Average shipping reserved on home delivery only. Not part of the fee gap. */
+export const HOME_PROVISION_CENTAVOS = 400_000;
+
+export const HOME_MINIMUM_COPY =
+  'El envío a domicilio arranca en $ 30.000. Podés sumar productos o retirar en una sucursal.';
+export const MISSING_CARD_COPY = 'Falta una tarjeta en la cuenta. Avisamos a quien opera el súper.';
+export const MISSING_CITY_COPY = 'Falta la ciudad. Contale al chat en qué localidad está el código postal.';
+
+export type Fulfillment = 'home' | 'pickup';
+
+export function shippingProvisionCentavos(fulfillment: Fulfillment): number {
+  return fulfillment === 'home' ? HOME_PROVISION_CENTAVOS : 0;
+}
+
 export const COTO_REAL_PHASES = ['login', 'delivery', 'empty_cart', 'shop', 'checkout', 'payment'] as const;
 
 const REFUND_REASONS = new Set([
@@ -23,6 +39,7 @@ const REFUND_REASONS = new Set([
   's6',
   's7',
   'needs_human_timeout',
+  'needs_shopper_timeout',
   'cancel',
 ]);
 
@@ -58,32 +75,20 @@ export interface PricedLine {
 export interface CotoRealQuote {
   checkoutKind: typeof COTO_REAL_KIND;
   postalCode: string;
-  coverage: 'ops' | 'table';
+  coverage: 'ops' | 'table' | 'shopper';
+  fulfillment: Fulfillment;
   cotoTicketCentavos: number;
   diaMatchedCentavos: number;
   gapCentavos: number;
   feeCentavos: number;
   feeBasis: FeeBasis;
+  shippingProvisionCentavos: number;
   lockCentavos: number;
 }
 
-export function parseAllowlist(raw: string | undefined): Set<string> {
-  const out = new Set<string>();
-  if (!raw) return out;
-  for (const part of raw.split(/[\s,]+/)) {
-    const address = part.trim();
-    if (address) out.add(address);
-  }
-  return out;
-}
-
-/** Enabled flag and a non-empty list. An empty list admits nobody. Mock flags are not read. */
-export function admitCotoReal(args: {
-  address: string;
-  enabled: boolean;
-  allowlist: ReadonlySet<string>;
-}): boolean {
-  return args.enabled === true && args.allowlist.size > 0 && args.allowlist.has(args.address);
+/** Global switch plus the allowlist flag. An environment list is not an input. */
+export function admitCotoReal(args: { enabled: boolean; sandboxEnabled: boolean }): boolean {
+  return args.enabled === true && args.sandboxEnabled === true;
 }
 
 export function normalizePostal(raw: string): string | undefined {
@@ -211,7 +216,8 @@ export function quoteFromPriced(args: {
   clientTotalCentavos: number;
   pairs: readonly DiaPair[];
   postalCode: string;
-  coverage: 'ops' | 'table';
+  coverage: 'ops' | 'table' | 'shopper';
+  fulfillment: Fulfillment;
 }): { ok: true; quote: CotoRealQuote } | { ok: false; error: string } {
   void args.clientTotalCentavos;
   if (args.lines.length === 0) return { ok: false, error: 'El changuito está vacío.' };
@@ -257,7 +263,11 @@ export function quoteFromPriced(args: {
   } catch {
     return { ok: false, error: 'No pudimos cotizar un producto de Coto.' };
   }
-  const lock = ticket + totals.feeCentavos;
+  if (args.fulfillment === 'home' && ticket < HOME_MINIMUM_CENTAVOS) {
+    return { ok: false, error: HOME_MINIMUM_COPY };
+  }
+  const provision = shippingProvisionCentavos(args.fulfillment);
+  const lock = ticket + totals.feeCentavos + provision;
   if (!Number.isSafeInteger(lock)) return { ok: false, error: 'No pudimos cotizar un producto de Coto.' };
   const matched = rows.some(countsTowardFee);
   const feeBasis: FeeBasis = totals.feeCentavos === 0 && !matched ? 'no_refs' : 'gap';
@@ -267,11 +277,13 @@ export function quoteFromPriced(args: {
       checkoutKind: COTO_REAL_KIND,
       postalCode: args.postalCode,
       coverage: args.coverage,
+      fulfillment: args.fulfillment,
       cotoTicketCentavos: ticket,
       diaMatchedCentavos: totals.diaSubtotalCentavos,
       gapCentavos: Math.abs(totals.diaSubtotalCentavos - totals.otherSubtotalCentavos),
       feeCentavos: totals.feeCentavos,
       feeBasis,
+      shippingProvisionCentavos: provision,
       lockCentavos: lock,
     },
   };
@@ -304,6 +316,7 @@ export const COTO_REAL_WAIT = 'Esto está tardando un poco más…';
 
 const SHOPPER_COPY: Record<string, string> = {
   needs_human_timeout: 'No pudimos completar el pago a tiempo. Te devolvemos el saldo.',
+  needs_shopper_timeout: 'No llegamos a completar un dato del pedido. Te devolvemos el saldo.',
   payment_declined: 'No se pudo cobrar en Coto. Te devolvemos el saldo.',
   payment_failed: 'No se pudo cobrar en Coto. Te devolvemos el saldo.',
   s5: 'No pudimos completar el pedido. Te devolvemos el saldo.',
@@ -322,6 +335,12 @@ export function shopperCopy(code: string | null | undefined, payment?: string | 
   return 'No pudimos completar el pedido. Te devolvemos el saldo.';
 }
 
+export interface ShopperPrompt {
+  label: string;
+  fieldRef: string | null;
+  options: { label: string; value: string; suggested?: boolean }[] | null;
+}
+
 export function cotoShopperBody(
   rec: {
     orderId: string;
@@ -334,6 +353,7 @@ export function cotoShopperBody(
   },
   stage: string,
   note: string | null,
+  prompt?: ShopperPrompt | null,
 ): Record<string, unknown> {
   return shopperStatus({
     orderId: rec.orderId,
@@ -350,6 +370,7 @@ export function cotoShopperBody(
     note: stage === 'shopping' ? note : null,
     mode: rec.mode ?? 'live',
     alert: null,
+    ...(prompt ? { prompt } : {}),
   });
 }
 
