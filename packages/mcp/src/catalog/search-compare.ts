@@ -28,6 +28,8 @@ export interface SearchPair {
   diaCentavos: number;
   cotoId: string;
   cotoCentavos: number;
+  /** Only `ean` or `brand_size_unit`. `none` never becomes a pair. */
+  confidence: 'ean' | 'brand_size_unit';
 }
 
 export interface SearchCompareResult {
@@ -94,6 +96,7 @@ export function assembleSearchCompare(args: {
       diaCentavos: dia.price.centavos,
       cotoId: matched.match.id,
       cotoCentavos,
+      confidence: matched.confidence === 'ean' ? 'ean' : 'brand_size_unit',
     };
     result.gapCentavos = Math.abs(dia.price.centavos - cotoCentavos);
     break;

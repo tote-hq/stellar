@@ -12,19 +12,36 @@ export function cotoCheckoutBlocked(retailer: string | null | undefined): boolea
   return retailer === 'coto';
 }
 
-/** The quote stored a Coto mock that is not the manual preparation fee. */
+/** The quote stored a Coto mock that is not a manual fee and not a real Coto checkout. */
 export function cotoDemoPayRecord(
   rec: { retailer?: string | null; mode?: string | null; checkoutKind?: string | null } | null | undefined,
 ): boolean {
-  return Boolean(rec && rec.retailer === 'coto' && rec.mode === 'mock' && rec.checkoutKind !== 'manual_fee_v1');
+  return Boolean(
+    rec &&
+      rec.retailer === 'coto' &&
+      rec.mode === 'mock' &&
+      rec.checkoutKind !== 'manual_fee_v1' &&
+      rec.checkoutKind !== 'coto_real_v1',
+  );
+}
+
+/** A real Coto checkout. Open, start, and channels refuse it until a later worker. */
+export function cotoRealRecord(
+  rec: { checkoutKind?: string | null } | null | undefined,
+): boolean {
+  return rec?.checkoutKind === 'coto_real_v1';
 }
 
 /**
  * Receipt basis when a job settles.
- * A placed Coto mock is simulated. A Día mock that placed stays a store order.
+ * A placed Coto mock is simulated. A real Coto record is not that simulation.
+ * A Día mock that placed stays a store order.
  * Plain `demo` stopped at payment on purpose.
  */
-export function settleBasis(rec: { retailer?: string | null; mode?: string | null } | null | undefined): string {
+export function settleBasis(
+  rec: { retailer?: string | null; mode?: string | null; checkoutKind?: string | null } | null | undefined,
+): string {
+  if (rec?.checkoutKind === 'coto_real_v1') return 'basis|coto-real-not-placed';
   if (rec?.retailer === 'coto' && rec.mode === 'mock') return 'basis|demo-coto-simulated';
   if (rec?.mode === 'demo') return 'basis|demo-reached-payment';
   return 'basis|sandbox-order-placed';

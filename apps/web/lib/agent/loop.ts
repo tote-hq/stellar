@@ -15,6 +15,7 @@ import { classifyTopic, offTopicRefusal } from './topic-guard.ts';
 import { anthropicProvider } from './providers/anthropic';
 import { openaiProvider } from './providers/openai';
 import type { HopResult } from './providers/types';
+import { freezeAllowed, freezeCotoReal } from '../checkout/coto-real.ts';
 import { beginDualSearch, dualSearchOn } from './search-compare';
 import {
   autoRenderCart,
@@ -168,6 +169,7 @@ function refusedCartCall(
     userText: string;
     priorAssistant: string;
     cache: RenderCache;
+    owner: string | null;
   },
 ): Anthropic.ToolResultBlockParam | undefined {
   if (use.name === 'choose_retailer') {
@@ -183,6 +185,9 @@ function refusedCartCall(
         use.id,
         'The shopper has not named that store. Ask them, and do not pick the cheaper chain.',
       );
+    }
+    if (retailer === 'coto' && !freezeAllowed(ctx.cache.cotoRealDia, ctx.owner)) {
+      return toolError(use.id, 'The basket belongs to another account. Nothing was changed.');
     }
     return undefined;
   }
@@ -226,6 +231,8 @@ export async function runTurn(
   lang: Lang = DEFAULT_LANG,
   /** A photo of a list, a product or a shelf. Absent when they only typed or spoke. */
   image?: ChatImage,
+  /** Signed-in address, or null for a guest. The chat route already computed it. */
+  owner: string | null = null,
 ): Promise<{ brain: string }> {
   const t0 = Date.now();
 
@@ -403,6 +410,7 @@ export async function runTurn(
         userText,
         priorAssistant,
         cache: turn.cache,
+        owner,
       });
       if (refused) {
         result = refused;
@@ -432,6 +440,15 @@ export async function runTurn(
           });
           result = { ...result, content: appendCompareNote(result.content, note) };
         }
+      }
+
+      if (
+        use.name === 'choose_retailer' &&
+        result.is_error !== true &&
+        (use.input as { retailer?: unknown } | null)?.retailer === 'coto'
+      ) {
+        const frozen = freezeCotoReal(turn.cache.cotoRealDia, turn.cache.diaPairs ?? [], owner);
+        if (frozen.ok) turn.cache.cotoRealDia = frozen.snapshot;
       }
 
       if (traced) emit({ t: 'tool_end', id: use.id, ok: result.is_error !== true, ms: Date.now() - t });

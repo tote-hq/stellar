@@ -1,5 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Cart, Product } from '@changuito/mcp/types';
+
+import { decodeCotoRealDia, decodeDiaPairs, type CotoRealDia, type DiaPair } from '../checkout/coto-real.ts';
 import { Redis } from '@upstash/redis';
 
 // Type-only, deliberately: a store that imported the agent loop would drag the
@@ -71,6 +73,9 @@ interface StoredTurn {
   /** Coto hits and the searches that produced them. Optional on `v: 1`. */
   coto?: Record<string, CotoCacheItem>;
   searches?: SearchRecord[];
+  /** Día pairs and the chain-pick snapshot. Optional arrays, never a Map. */
+  diaPairs?: DiaPair[];
+  cotoRealDia?: CotoRealDia;
 }
 
 export function encodeTurn(turn: Turn): StoredTurn {
@@ -86,6 +91,8 @@ export function encodeTurn(turn: Turn): StoredTurn {
     compareResult: turn.cache.compareResult,
     ...(turn.cache.coto ? { coto: turn.cache.coto } : {}),
     ...(turn.cache.searches ? { searches: turn.cache.searches } : {}),
+    ...(turn.cache.diaPairs ? { diaPairs: turn.cache.diaPairs } : {}),
+    ...(turn.cache.cotoRealDia ? { cotoRealDia: turn.cache.cotoRealDia } : {}),
   };
 }
 
@@ -146,6 +153,8 @@ export function decodeTurn(raw: unknown): Turn | undefined {
   if (s.v !== 1 || !Array.isArray(s.messages) || !Array.isArray(s.products)) return undefined;
   const coto = asCoto(s.coto);
   const searches = asSearches(s.searches);
+  const diaPairs = decodeDiaPairs(s.diaPairs);
+  const cotoRealDia = decodeCotoRealDia(s.cotoRealDia);
 
   return {
     messages: s.messages,
@@ -159,6 +168,8 @@ export function decodeTurn(raw: unknown): Turn | undefined {
       compareResult: asCompareCard(s.compareResult),
       ...(coto ? { coto } : {}),
       ...(searches ? { searches } : {}),
+      ...(diaPairs ? { diaPairs } : {}),
+      ...(cotoRealDia ? { cotoRealDia } : {}),
     },
   };
 }

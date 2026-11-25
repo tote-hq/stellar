@@ -9,7 +9,7 @@
  * the hash the status poll closes against.
  */
 import { checkoutStore } from '../../../../lib/checkout/store.ts';
-import { cotoCheckoutBlocked, cotoDemoPayRecord } from '../../../../lib/checkout/coto-guard.ts';
+import { cotoCheckoutBlocked, cotoDemoPayRecord, cotoRealRecord } from '../../../../lib/checkout/coto-guard.ts';
 import { recoverOpenAttempt } from '../../../../lib/checkout/open-recovery.ts';
 import { serviceOrderId, SERVICE_FEE_UNITS } from '../../../../lib/checkout/manual-policy.ts';
 import { fromHex } from '../../../../lib/order.ts';
@@ -39,6 +39,9 @@ async function load(req: Request) {
 export async function PUT(req: Request): Promise<Response> {
   const got = await load(req);
   if (!got.ok) return got.res;
+  if (cotoRealRecord(got.rec)) {
+    return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
+  }
   if (cotoCheckoutBlocked(got.rec.retailer) && !cotoDemoPayRecord(got.rec)) {
     return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
   }
