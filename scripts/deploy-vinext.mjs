@@ -34,11 +34,17 @@ if (relaxed === source) {
 }
 fs.writeFileSync(inputPath, relaxed);
 
-const vinextPackage = JSON.parse(fs.readFileSync(require.resolve('@vinext/cloudflare/package.json'), 'utf8'));
-const binRel = typeof vinextPackage.bin === 'string' ? vinextPackage.bin : vinextPackage.bin['vinext-cloudflare'];
-const bin = path.resolve(path.dirname(require.resolve('@vinext/cloudflare/package.json')), binRel);
+const nodeModules = path.dirname(path.dirname(cfPackage));
+const bin = [
+  path.join(nodeModules, '.bin', 'vinext-cloudflare'),
+  path.join(process.cwd(), 'node_modules', '.bin', 'vinext-cloudflare'),
+].find((candidate) => fs.existsSync(candidate));
+if (!bin) {
+  console.error('vinext-cloudflare is not installed.');
+  process.exit(1);
+}
 
-const child = spawn(process.execPath, [bin, 'deploy', '--skip-build'], { stdio: 'inherit' });
+const child = spawn(bin, ['deploy', '--skip-build'], { stdio: 'inherit' });
 child.on('exit', (code, signal) => {
   if (signal) process.kill(process.pid, signal);
   process.exit(code ?? 1);
