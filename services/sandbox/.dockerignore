@@ -6,3 +6,4 @@ traces
 viewer/node_modules
 viewer/dist
 *.sqlite3*
+test_*.py
