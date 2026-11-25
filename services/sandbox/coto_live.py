@@ -56,10 +56,11 @@ class LiveCotoDriver:
             if await fresh.count():
                 await fresh.first.click()
         for fill in plan.get("fills") or []:
-            if fill.get("field") == "meat":
+            if fill.get("field") in ("meat", "pickup_branch"):
                 choice = self.page.get_by_text(fill["value"], exact=True)
-                if await choice.count():
-                    await choice.first.click()
+                if await choice.count() == 0:
+                    return {"needs_shopper": {"label": str(fill["value"]), "field_ref": fill["field"], "options": None}}
+                await choice.first.click()
                 continue
             box = self.page.get_by_label(re.compile(re.escape(str(fill["field"])), re.I))
             if await box.count() == 0:

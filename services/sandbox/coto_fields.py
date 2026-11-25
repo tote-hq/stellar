@@ -41,6 +41,9 @@ def plan_delivery(screen: dict, order: dict, client=None) -> dict:
             {"label": option, "value": option} for option in options
         ])
     if fulfillment == "pickup" or kind == "pickup":
+        chosen = order.get("pickup_branch")
+        if isinstance(chosen, str) and chosen.strip():
+            return {"fills": [{"field": "pickup_branch", "value": chosen.strip()}], "save": True}
         branches = screen.get("branches") or []
         return _needs(PICKUP_LABEL, "pickup_branch", _suggested(branches, str(order.get("city") or "")))
     if kind in ("new_address", "saved_addresses", "fields"):
@@ -81,6 +84,11 @@ def _empty_required(screen: dict, order: dict) -> dict | None:
         "city": order.get("city"),
         "postalCode": order.get("postalCode") or order.get("postal_code"),
         "complement": order.get("complement"),
+        "butcher_notes": order.get("butcher_notes"),
+        "area_code": order.get("area_code"),
+        "phone": order.get("phone"),
+        "delivery_window": order.get("delivery_window"),
+        "pickup_branch": order.get("pickup_branch"),
     }
     fields = screen.get("fields") or {}
     for name, meta in fields.items():

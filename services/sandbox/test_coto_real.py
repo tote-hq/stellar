@@ -30,6 +30,9 @@ class Scripted:
 
     async def delivery(self, address):
         self.address = address
+        self.delivery_calls = getattr(self, "delivery_calls", 0) + 1
+        if self.delivery_calls > 1 and getattr(self, "answer", None):
+            return {"ok": True}
         return await self._step("delivery")
 
     async def empty_cart(self):
@@ -180,6 +183,28 @@ class CotoRealTest(unittest.TestCase):
         ))
         self.assertEqual(answered.answer, ("butcher_notes", "picada"))
         self.assertEqual(out2["result"]["store_order_id"], "C-9")
+
+    def test_a_delivery_answer_runs_delivery_again_before_shop(self):
+        driver = Scripted({"delivery": {"needs_shopper": {
+            "label": "¿En qué sucursal retirás?",
+            "field_ref": "pickup_branch",
+            "options": [{"label": "ABASTO", "value": "ABASTO"}],
+        }}, "payment": {"placed": "C-3"}})
+        clock = {"t": 0}
+        job = {"job_id": "job3", "fulfillment": "pickup", "items": [{"sku": "1"}], "delivery": {"city": "CABA"}}
+
+        async def reply(_seconds):
+            job["shopper_answer"] = {"field_ref": "pickup_branch", "value": "ABASTO"}
+            clock["t"] += 1_000
+
+        out = asyncio.run(run_coto_real(
+            job, driver, now_ms=lambda: clock["t"], sleep=reply, log=lambda _line: None,
+            card={"pan": "4242424242424242"}, token="", origin="https://sandbox.example",
+        ))
+        self.assertGreaterEqual(driver.delivery_calls, 2)
+        self.assertEqual(driver.address.get("pickup_branch"), "ABASTO")
+        self.assertLess(driver.calls.index("delivery"), driver.calls.index("shop"))
+        self.assertEqual(out["result"]["store_order_id"], "C-3")
 
 
 if __name__ == "__main__":

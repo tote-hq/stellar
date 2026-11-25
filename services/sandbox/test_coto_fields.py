@@ -47,6 +47,12 @@ class CotoFieldsTest(unittest.TestCase):
         self.assertTrue(options[0]["suggested"])
         self.assertFalse(options[1]["suggested"])
         self.assertNotIn("selected", plan)
+        saved = plan_delivery(
+            {"kind": "pickup", "branches": []},
+            {"fulfillment": "pickup", "city": "CABA", "pickup_branch": "ABASTO"},
+        )
+        self.assertEqual(saved["fills"][0]["value"], "ABASTO")
+        self.assertTrue(saved["save"])
 
     def test_meat_uses_the_exact_stock_line_and_does_not_call_jev(self):
         client = FakeJev()

@@ -137,14 +137,15 @@ async def _shopper(job, driver, where, phases, now_ms, sleep, log, ask: dict) ->
             and isinstance(answer.get("value"), str)
             and answer["value"].strip()
         ):
+            value = answer["value"].strip()
             job.pop("shopper_answer", None)
             job.pop("prompt", None)
-            resumed = await driver.apply_answer(field, answer["value"].strip())
+            resumed = await driver.apply_answer(field, value)
             if resumed.get("needs_shopper"):
                 return await _shopper(job, driver, where, phases, now_ms, sleep, log, resumed["needs_shopper"])
             if resumed.get("fail"):
                 return _fail(where, str(resumed["fail"]), phases)
-            return {"cleared": True}
+            return {"cleared": True, "field_ref": field, "value": value}
     log(f"phase={where} code=needs_shopper_timeout")
     return _fail(where, "needs_shopper_timeout", phases)
 
@@ -171,9 +172,14 @@ async def run_coto_real(job, driver, *, now_ms: Now, sleep: Sleep, log: Log, car
             return resumed
         if result.get("needs_shopper"):
             resumed = await _shopper(job, driver, name, phases, now_ms, sleep, log, result["needs_shopper"])
-            if resumed.get("cleared"):
-                return None
-            return resumed
+            if not resumed.get("cleared"):
+                return resumed
+            if name == "delivery":
+                payload = job.get("_delivery_input")
+                if isinstance(payload, dict) and resumed.get("field_ref"):
+                    payload[str(resumed["field_ref"])] = resumed.get("value")
+                return await one("delivery", await driver.delivery(payload if isinstance(payload, dict) else {}))
+            return None
         if result.get("placed"):
             return _placed(str(result["placed"]), phases)
         if result.get("declined"):
@@ -185,6 +191,7 @@ async def run_coto_real(job, driver, *, now_ms: Now, sleep: Sleep, log: Log, car
         return emit(login)
     delivery_input = dict(job.get("delivery") or {})
     delivery_input["fulfillment"] = job.get("fulfillment") or delivery_input.get("fulfillment") or "home"
+    job["_delivery_input"] = delivery_input
     delivery = await one("delivery", await driver.delivery(delivery_input))
     if delivery:
         return emit(delivery)
@@ -240,5 +247,6 @@ async def coto_real_worker(job: dict) -> None:
         job.update(**_fail(job.get("phase") or "login", "ops_unavailable", []))
     finally:
         job.pop("delivery", None)
+        job.pop("_delivery_input", None)
         job.pop("card", None)
         card = None
