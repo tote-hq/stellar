@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import type { CatalogItem } from '@changuito/mcp/compare';
@@ -11,6 +13,8 @@ import {
   av5LogLine,
   COTO_REAL_PHASES,
   cotoPayTarget,
+  cotoRealOutcome,
+  cotoShopperBody,
   deliveryBeforeShop,
   freezeAllowed,
   freezeCotoReal,
@@ -20,6 +24,7 @@ import {
   quoteFromPriced,
   refundAmount,
   resolveCoverage,
+  shopperCopy,
   shopperStatus,
   type DiaPair,
   type PricedLine,
@@ -224,5 +229,29 @@ describe('coto real quote', () => {
     assert.deepEqual(resolveCoverage('C1425ABC', { ops, table }), { ok: true, coverage: 'ops' });
     assert.deepEqual(resolveCoverage('1425', { ops: null, table }), { ok: true, coverage: 'table' });
     assert.deepEqual(resolveCoverage('9999', { ops: null, table }), { ok: false });
+  });
+
+  it('settles only a placed order id and speaks Spanish without a code', () => {
+    assert.equal(cotoRealOutcome({ status: 'running', payment: null, storeOrderId: null }), 'wait');
+    assert.equal(cotoRealOutcome({ status: 'done', payment: 'placed', storeOrderId: 'C-1' }), 'settle');
+    assert.equal(cotoRealOutcome({ status: 'done', payment: 'placed', storeOrderId: '  ' }), 'refund');
+    assert.equal(cotoRealOutcome({ status: 'failed', payment: 'declined', storeOrderId: null }), 'refund');
+    const copy = shopperCopy('needs_human_timeout');
+    assert.equal(copy.includes('phase='), false);
+    assert.equal(copy.includes('code='), false);
+    assert.equal(copy.includes('http'), false);
+    const body = cotoShopperBody(
+      { orderId: 'a'.repeat(64), amountCents: 100, storeOrderId: 'C-1', error: copy },
+      'refunded',
+      null,
+    );
+    assert.equal(body.phase, null);
+    assert.equal(body.handoffUrl, null);
+    assert.equal(JSON.stringify(body).includes('http'), false);
+    const modal = readFileSync(join(import.meta.dirname, '../../components/CotoRealModal.tsx'), 'utf8');
+    assert.equal(modal.includes('<iframe'), false);
+    assert.equal(modal.includes('openEscrow'), true);
+    assert.equal(modal.includes('PayCard'), false);
+    assert.equal(modal.includes('quoteCotoDemo'), false);
   });
 });

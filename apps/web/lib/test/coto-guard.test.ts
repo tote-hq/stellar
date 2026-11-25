@@ -72,6 +72,14 @@ describe('cotoCheckoutBlocked', () => {
       settleBasis({ retailer: 'coto', mode: 'mock', checkoutKind: 'coto_real_v1' }),
       'basis|coto-real-not-placed',
     );
+    assert.equal(
+      settleBasis({ checkoutKind: 'coto_real_v1', storeOrderId: 'C-100' }),
+      'basis|coto-real-placed',
+    );
+    const realStart = read('lib/checkout/coto-real-start.ts');
+    assert.equal(realStart.includes('startJob'), false);
+    assert.equal(realStart.includes('getProfile'), false);
+    assert.equal(realStart.includes('password'), false);
     const open = read('app/api/checkout/open/route.ts');
     const channels = read('app/api/checkout/channels/route.ts');
     const earlier = (source: string, left: string, right: string) => {

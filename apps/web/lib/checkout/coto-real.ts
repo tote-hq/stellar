@@ -92,20 +92,30 @@ export function normalizePostal(raw: string): string | undefined {
 }
 
 /** Ops address first, then the CP table. The street stays on the server. */
+export function coverageAddress(
+  postalCode: string,
+  opts: { ops?: CoverageAddress | null; table: readonly CoverageAddress[] },
+): CoverageAddress | null {
+  const want = postalCode.toUpperCase();
+  const ops = opts.ops;
+  if (ops && ops.postalCode.toUpperCase() === want && ops.street.trim() && ops.city.trim()) return ops;
+  return (
+    opts.table.find((item) => item.postalCode.toUpperCase() === want && item.street.trim() && item.city.trim()) ??
+    null
+  );
+}
+
 export function resolveCoverage(
   postalCode: string,
   opts: { ops?: CoverageAddress | null; table: readonly CoverageAddress[] },
 ): { ok: true; coverage: 'ops' | 'table' } | { ok: false } {
-  const want = postalCode.toUpperCase();
+  const row = coverageAddress(postalCode, opts);
+  if (!row) return { ok: false };
   const ops = opts.ops;
-  if (ops && ops.postalCode.toUpperCase() === want && ops.street.trim() && ops.city.trim()) {
+  if (ops && ops.postalCode.toUpperCase() === postalCode.toUpperCase() && ops.street.trim() && ops.city.trim()) {
     return { ok: true, coverage: 'ops' };
   }
-  const row = opts.table.find(
-    (item) => item.postalCode.toUpperCase() === want && item.street.trim() && item.city.trim(),
-  );
-  if (row) return { ok: true, coverage: 'table' };
-  return { ok: false };
+  return { ok: true, coverage: 'table' };
 }
 
 export function parseCpTable(raw: string | undefined): CoverageAddress[] {
@@ -276,6 +286,71 @@ export function refundAmount(lockCentavos: number, reason: string): number | und
   if (!refundRequired(reason)) return undefined;
   if (!Number.isSafeInteger(lockCentavos) || lockCentavos < 0) return undefined;
   return lockCentavos;
+}
+
+/** Settle only a placed Coto order that has an id. Anything else still running waits; a finished job refunds. */
+export function cotoRealOutcome(job: {
+  status: string;
+  payment?: string | null;
+  storeOrderId?: string | null;
+}): 'wait' | 'settle' | 'refund' {
+  if (job.status !== 'done' && job.status !== 'failed') return 'wait';
+  const id = job.storeOrderId?.trim();
+  if (job.status === 'done' && job.payment === 'placed' && id) return 'settle';
+  return 'refund';
+}
+
+export const COTO_REAL_WAIT = 'Esto está tardando un poco más…';
+
+const SHOPPER_COPY: Record<string, string> = {
+  needs_human_timeout: 'No pudimos completar el pago a tiempo. Te devolvemos el saldo.',
+  payment_declined: 'No se pudo cobrar en Coto. Te devolvemos el saldo.',
+  payment_failed: 'No se pudo cobrar en Coto. Te devolvemos el saldo.',
+  s5: 'No pudimos completar el pedido. Te devolvemos el saldo.',
+  s6: 'No se pudo cobrar en Coto. Te devolvemos el saldo.',
+  s7: 'No pudimos completar el pedido. Te devolvemos el saldo.',
+  cancel: 'Cancelamos el pedido. Te devolvemos el saldo.',
+  phase_order: 'No pudimos completar el pedido. Te devolvemos el saldo.',
+  ops_unavailable: 'No pudimos completar el pedido. Te devolvemos el saldo.',
+  sku_rejected: 'No pudimos cargar un producto. Te devolvemos el saldo.',
+};
+
+/** Human Spanish. Never a phase, a code, or a URL. */
+export function shopperCopy(code: string | null | undefined, payment?: string | null): string {
+  if (payment === 'declined') return SHOPPER_COPY.payment_declined;
+  if (code && SHOPPER_COPY[code]) return SHOPPER_COPY[code];
+  return 'No pudimos completar el pedido. Te devolvemos el saldo.';
+}
+
+export function cotoShopperBody(
+  rec: {
+    orderId: string;
+    storeOrderId?: string | null;
+    openSig?: string | null;
+    closeSig?: string | null;
+    amountCents: number;
+    error?: string | null;
+    mode?: 'live' | 'demo' | 'mock' | null;
+  },
+  stage: string,
+  note: string | null,
+): Record<string, unknown> {
+  return shopperStatus({
+    orderId: rec.orderId,
+    checkoutKind: COTO_REAL_KIND,
+    stage,
+    phase: null,
+    payment: null,
+    storeOrderId: rec.storeOrderId ?? null,
+    openSig: rec.openSig ?? null,
+    closeSig: rec.closeSig ?? null,
+    handoffUrl: null,
+    amountDisplay: (rec.amountCents / 100).toFixed(2),
+    error: stage === 'refunded' ? (rec.error ?? shopperCopy(null)) : null,
+    note: stage === 'shopping' ? note : null,
+    mode: rec.mode ?? 'live',
+    alert: null,
+  });
 }
 
 const HIDDEN_STATUS = new Set(['viewerUrl', 'adminViewerUrl', 'ticket', 'formUrl', 'formUrls']);

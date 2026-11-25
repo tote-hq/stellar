@@ -39,9 +39,16 @@ export function cotoRealRecord(
  * Plain `demo` stopped at payment on purpose.
  */
 export function settleBasis(
-  rec: { retailer?: string | null; mode?: string | null; checkoutKind?: string | null } | null | undefined,
+  rec: {
+    retailer?: string | null;
+    mode?: string | null;
+    checkoutKind?: string | null;
+    storeOrderId?: string | null;
+  } | null | undefined,
 ): string {
-  if (rec?.checkoutKind === 'coto_real_v1') return 'basis|coto-real-not-placed';
+  if (rec?.checkoutKind === 'coto_real_v1') {
+    return rec.storeOrderId && rec.storeOrderId.trim() ? 'basis|coto-real-placed' : 'basis|coto-real-not-placed';
+  }
   if (rec?.retailer === 'coto' && rec.mode === 'mock') return 'basis|demo-coto-simulated';
   if (rec?.mode === 'demo') return 'basis|demo-reached-payment';
   return 'basis|sandbox-order-placed';

@@ -333,9 +333,17 @@ describe('POST /api/checkout/quote compare + Coto accept', () => {
       assert.equal(body.cotoTicketCentavos, 247400);
       assert.equal(body.feeCentavos, 20);
       assert.equal(body.lockCentavos, 247420);
-      assert.equal(body.orderId, undefined);
+      assert.match(body.orderId, /^[0-9a-f]{64}$/);
+      assert.match(body.basketHash, /^[0-9a-f]{64}$/);
       assert.equal(body.coverage, 'ok');
-      assert.equal((await checkoutStore().listByBuyer(BUYER)).length, before);
+      assert.equal(JSON.stringify(body).includes('Calle'), false);
+      const stored = await checkoutStore().get(body.orderId);
+      assert.equal(stored?.checkoutKind, 'coto_real_v1');
+      assert.equal(stored?.mode, 'live');
+      assert.equal(stored?.resolvedAddress?.street, 'Calle');
+      assert.equal(stored?.buyer, BUYER);
+      assert.ok(stored && BigInt(stored.amount) > 0n);
+      assert.equal((await checkoutStore().listByBuyer(BUYER)).length, before + 1);
     } finally {
       __setCotoRealTurnReaderForTests(null);
       priceImpl = async () => {

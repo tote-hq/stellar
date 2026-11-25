@@ -45,6 +45,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent import run_job
+from coto_real import coto_real_worker
 from manual import sessions, parent_origins
 
 TOKEN = os.environ.get("SANDBOX_TOKEN", "")
@@ -97,15 +98,30 @@ class Card(BaseModel):
     __str__ = __repr__
 
 
+class Delivery(BaseModel):
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    postalCode: str = Field(min_length=4, max_length=12)
+    street: str = Field(min_length=1, max_length=120, repr=False)
+    number: str | None = Field(default=None, max_length=20, repr=False)
+    city: str = Field(min_length=1, max_length=80, repr=False)
+
+    def __repr__(self) -> str:
+        return "Delivery(<redacted>)"
+
+    __str__ = __repr__
+
+
 class JobIn(BaseModel):
     # Errors in the nested shopper or card are raised from here, so the setting has to be here too.
     model_config = ConfigDict(hide_input_in_errors=True)
 
     order_id: str = Field(min_length=8, max_length=128)
     items: list[Item] = Field(min_length=1, max_length=MAX_ITEMS)
-    shopper: Shopper
+    shopper: Shopper | None = None
+    delivery: Delivery | None = None
     card: Card | None = None
-    mode: Literal['legacy', 'manual'] = 'legacy'
+    mode: Literal['legacy', 'manual', 'coto_real'] = 'legacy'
     buyer: str | None = Field(default=None, pattern=r'^[1-9A-HJ-NP-Za-km-z]{32,44}$')
     escrow_deadline: int | None = None
     flow: Literal['viewer', 'guided', 'headless'] = 'viewer'
@@ -141,7 +157,8 @@ def auth(authorization: str = Header(default="")) -> None:
 
 
 def view(job: dict) -> dict:
-    return {k: job.get(k) for k in ("job_id", "order_id", "status", "phase", "result", "error")}
+    from coto_real import public_job
+    return public_job(job)
 
 
 async def worker() -> None:
@@ -154,6 +171,10 @@ async def worker() -> None:
         busy = True
         if job.get('mode') == 'manual':
             await manual_worker(job_id, job)
+            busy = False
+            continue
+        if job.get('mode') == 'coto_real':
+            await coto_real_worker(job)
             busy = False
             continue
         job.update(status="running", phase="login", started=time.time())
@@ -208,6 +229,24 @@ async def health() -> dict:
 
 @app.post("/jobs", dependencies=[Depends(auth)])
 async def create(body: JobIn) -> dict:
+    if body.mode == 'coto_real':
+        if body.shopper is not None or body.card is not None or body.delivery is None:
+            print("POST /jobs rejected coto_real field=delivery", flush=True)
+            raise HTTPException(422, 'invalid coto job')
+        for existing in jobs.values():
+            if existing.get("order_id") == body.order_id:
+                return {"job_id": existing["job_id"]}
+        job_id = uuid.uuid4().hex
+        jobs[job_id] = {
+            "job_id": job_id, "order_id": body.order_id, "status": "queued", "phase": "queued",
+            "mode": "coto_real", "items": [i.model_dump() for i in body.items], "created": time.time(),
+            "delivery": body.delivery.model_dump(),
+        }
+        await queue.put(job_id)
+        return {"job_id": job_id}
+    if body.shopper is None:
+        print("POST /jobs rejected invalid_shopper field=shopper", flush=True)
+        raise HTTPException(422, 'invalid shopper')
     if body.mode == 'manual':
         if (body.card or not body.buyer or not body.shopper.postcode or not body.escrow_deadline
                 or body.escrow_deadline < time.time() + 60 or not await sessions.available()):

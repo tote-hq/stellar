@@ -17,7 +17,7 @@ import type { ManualState } from './manual-policy.ts';
  * and the buyer can refund on chain after the deadline without us.
  */
 export interface CheckoutRecord {
-  checkoutKind?: 'manual_fee_v1';
+  checkoutKind?: 'manual_fee_v1' | 'coto_real_v1';
   orderNonce?: string;
   manual?: ManualState;
   /** Chosen at start and kept for this order. A later config flip does not move it. */
@@ -37,6 +37,11 @@ export interface CheckoutRecord {
   shippingCentavos?: number;
   /** Where the shopper browsed: the sandbox delivers here when their Día account has no saved address. */
   postalCode?: string;
+  /**
+   * Server-side Coto delivery address for checkoutKind coto_real_v1.
+   * Never copied onto a shopper response.
+   */
+  resolvedAddress?: { postalCode: string; street: string; number?: string; city: string };
   /** Pesos as the shopper saw them. */
   totalDisplay: string;
   retailer: string;

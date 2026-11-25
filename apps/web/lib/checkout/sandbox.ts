@@ -28,7 +28,16 @@
  * started, so it survives Next compiling each route into its own bundle.
  */
 
-export type SandboxPhase = 'queued' | 'login' | 'empty_cart' | 'shop' | 'checkout' | 'payment' | 'placed';
+export type SandboxPhase =
+  | 'queued'
+  | 'login'
+  | 'delivery'
+  | 'empty_cart'
+  | 'shop'
+  | 'checkout'
+  | 'payment'
+  | 'needs_human'
+  | 'placed';
 
 /** What the store answered to the card. Only `placed` settles the escrow. */
 export type SandboxPayment = 'placed' | 'declined' | 'not_attempted' | 'error';
@@ -44,8 +53,10 @@ export interface SandboxJob {
     payment?: SandboxPayment;
     /** One line from the store's answer, with known personal values redacted by the sandbox. */
     payment_detail?: string | null;
-    /** Día's order number, when placed. */
+    /** Día's order number, or the Coto order id, when placed. */
     store_order_id?: string | null;
+    /** Sandbox failure code. The shopper response maps it to Spanish and does not forward it. */
+    code?: string | null;
     items_added: number;
     cart?: {
       orderFormId?: string;
@@ -134,6 +145,51 @@ export async function startJob(
     method: 'POST',
     headers,
     body: JSON.stringify({ order_id: orderId, items, shopper, ...(card ? { card } : {}) }),
+  });
+  if (!res.ok) throw new Error(`sandbox answered ${res.status}`);
+  const body = (await res.json()) as { job_id?: string };
+  if (!body.job_id) throw new Error('sandbox returned no job_id');
+  return body.job_id;
+}
+
+export interface CotoRealDelivery {
+  postalCode: string;
+  street: string;
+  number?: string;
+  city: string;
+}
+
+/** Sandbox body for a real Coto job. No Día login and no card: the worker reads the ops card itself. */
+export function cotoRealJobBody(
+  orderId: string,
+  items: SandboxItem[],
+  delivery: CotoRealDelivery,
+): {
+  mode: 'coto_real';
+  order_id: string;
+  items: { name: string; quantity: number; sku: string }[];
+  delivery: CotoRealDelivery;
+} {
+  return {
+    mode: 'coto_real',
+    order_id: orderId,
+    items: items.map((item) => ({ name: item.name, quantity: item.quantity, sku: item.sku })),
+    delivery,
+  };
+}
+
+export async function startCotoRealJob(
+  orderId: string,
+  items: SandboxItem[],
+  delivery: CotoRealDelivery,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
+  if (!env.SANDBOX_URL) throw new Error('checkout is off: no SANDBOX_URL');
+  const { base, headers } = remote(env);
+  const res = await fetch(`${base}/jobs`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(cotoRealJobBody(orderId, items, delivery)),
   });
   if (!res.ok) throw new Error(`sandbox answered ${res.status}`);
   const body = (await res.json()) as { job_id?: string };
