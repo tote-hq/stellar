@@ -1,7 +1,14 @@
 import { DEFAULT_LANG, type Lang } from './lang.ts';
 
-/** Easy to change. Guests may send this many chat turns without logging in. */
-export const FREE_TURNS = 3;
+/**
+ * Guest chat POSTs per session before sign-in.
+ *
+ * A compare takes four: the request, the postal code, the store they pick,
+ * and one confirmed switch. Three stopped that switch with login_required
+ * before the agent ran, so the composer stayed gated and no Coto cart was
+ * drawn. The IP and Turnstile ceilings are multiples of this number.
+ */
+export const FREE_TURNS = 4;
 
 /** Softer IP ceiling: blocks sessionId-rotation abuse without locking a café. */
 export const FREE_TURNS_PER_IP = FREE_TURNS * 10;
