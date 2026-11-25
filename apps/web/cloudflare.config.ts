@@ -38,6 +38,14 @@ const rpcUrls = {
   STELLAR_RPC_URL_MAINNET: bindings.text("https://mainnet.sorobanrpc.com"),
 };
 
+// Coto real checkout is on for this Worker. A plain var the config omits makes
+// the strict deploy abort, the same way an unpinned contract id does. The
+// admin session key is a secret and stays on the dashboard: a plain copy of
+// it is what the deploy refused.
+const cotoReal = {
+  COTO_REAL_ENABLED: bindings.text("1"),
+};
+
 // Which Postgres this Worker reaches is a decision, not a default: the
 // database is a privacy boundary between the two apps. No id, no binding, and
 // the app runs without a database the way a fresh clone does.
@@ -76,6 +84,7 @@ export default defineConfig({
       ...(hyperdriveId ? { HYPERDRIVE: bindings.hyperdrive({ id: hyperdriveId }) } : {}),
       ...contractIds,
       ...rpcUrls,
+      ...cotoReal,
       ...publicEnv,
     },
   }),
