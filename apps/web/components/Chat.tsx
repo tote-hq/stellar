@@ -1,10 +1,21 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { Cart } from '@changuito/mcp/types';
 
 import { starters } from '../lib/agent/prompt';
+import { cotoPayTarget } from '../lib/checkout/coto-real.ts';
+import { composerControls } from '../lib/composer.ts';
+import {
+  choiceMessage,
+  confirmSwitchMessage,
+  dropMessage,
+  needsSwitchConfirm,
+  substituteMessage,
+  type Chain,
+} from '../lib/retailer-choice.ts';
+import { RETAILER_NAMES } from '../lib/retailers.ts';
 import { errorCode, track, trackLoginStart } from '../lib/analytics';
 import type { ChatImage } from '../lib/chat-image.ts';
 import { canRetry, type Block, type ChatState } from '../lib/chat-state';
@@ -26,10 +37,16 @@ import { uiCopy } from '../lib/ui-copy.ts';
 import { useChat } from '../lib/use-chat';
 import { useWallet } from '../lib/use-wallet.ts';
 import { CartCard } from './CartCard';
+import { ComparisonCard } from './ComparisonCard';
+import { Modal } from './Modal';
+import { MissingCard, SearchCompareCard } from './SearchCompareCard';
 import { useLang } from './LangProvider';
 import { useNetwork } from './NetworkProvider';
 import { CameraIcon, ImageIcon, MicIcon, RetryIcon } from './icons';
 import { CheckoutModal } from './CheckoutModal';
+import { CITY_ASK } from '../lib/agent/early-ask';
+import { CotoRealModal } from './CotoRealModal';
+import { PayCard, type PayCardLine } from './PayCard';
 import { ProductGrid } from './ProductGrid';
 import { useShop } from './ShopProvider';
 import { MarkdownText } from './MarkdownText';
@@ -127,6 +144,7 @@ function ChatCore({
   const { state, send, retry, stop, loginRequired, clearLoginRequired, resume, reset, currentSessionId } =
     useChat({ isAuthenticated, address, sign, network, lang });
   const [draft, setDraft] = useState('');
+  const [switchAsk, setSwitchAsk] = useState<{ from: Chain; to: Chain } | null>(null);
   const [photo, setPhoto] = useState<ChatImage | null>(null);
   const [readingPhoto, setReadingPhoto] = useState(false);
   const [photoNote, setPhotoNote] = useState<string | null>(null);
@@ -139,7 +157,22 @@ function ChatCore({
   photoRef.current = photo;
   // The basket the payment modal is open over. A cart, not a block id: the
   // user pays for what a card showed, and that object is the record of it.
-  const [paying, setPaying] = useState<{ cart: Cart; handoffUrl?: string } | null>(null);
+  const [paying, setPaying] = useState<{
+    cart: Cart;
+    handoffUrl?: string;
+    payRetailer?: 'coto';
+    demoTopUp?: boolean;
+    acceptedAlternatives?: { diaSkuId: string; cotoId: string }[];
+    checkoutPath?: 'solo_dia' | 'solo_coto' | 'dual';
+    receiptLines?: { name: string; quantity: number; lineTotal: string }[];
+  } | null>(null);
+  const [cotoModal, setCotoModal] = useState<Cart | null>(null);
+  /** Which pay started. Cleared if the modal closes before escrow open. */
+  const [payLock, setPayLock] = useState<null | 'dia' | 'coto'>(null);
+  const payOpened = useRef(false);
+  const markOpened = useCallback(() => {
+    payOpened.current = true;
+  }, []);
   const thread = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
 
@@ -158,10 +191,31 @@ function ChatCore({
   // basket as it is now. Keyed on the counter so a re-render does not reopen it.
   const payRequest = shop?.payRequest ?? 0;
   const seenPay = useRef(payRequest);
+  const setCotoReal = shop?.setCotoReal;
+  useEffect(() => {
+    if (!setCotoReal) return;
+    let gone = false;
+    fetch('/api/checkout/coto-real')
+      .then((res) => res.json())
+      .then((body: { allowed?: boolean }) => {
+        if (!gone) setCotoReal(body.allowed === true);
+      })
+      .catch(() => {
+        if (!gone) setCotoReal(false);
+      });
+    return () => {
+      gone = true;
+    };
+  }, [address, setCotoReal]);
   useEffect(() => {
     if (payRequest === seenPay.current) return;
     seenPay.current = payRequest;
-    if (!shop?.canOrder || !shop.cart) return;
+    if (!shop?.canOrder || !shop.cart || shop.dualCheckout) return;
+    if (shop.cart.retailer === 'coto') {
+      if (!shop.cotoReal) return;
+      setCotoModal(shop.cart);
+      return;
+    }
     track('payment_start', { flow: 'rail' });
     setPaying({ cart: shop.cart, handoffUrl: shop.handoffUrl ?? undefined });
   }, [payRequest, shop]);
@@ -316,6 +370,13 @@ function ChatCore({
   const voiceNote =
     dictation.error === null ? null : copy[VOICE_NOTE[dictation.error]];
   const composerNote = dictation.listening ? copy.listening : (voiceNote ?? cameraNote ?? photoNote);
+  const controls = composerControls({
+    streaming: state.streaming,
+    gated,
+    readOnly,
+    readingPhoto,
+    hasDraft: Boolean(draft.trim() || photo),
+  });
 
   const closeCamera = () => {
     for (const track of streamRef.current?.getTracks() ?? []) track.stop();
@@ -459,7 +520,11 @@ function ChatCore({
               );
             case 'say':
               return (
-                <div key={b.id} className="bubble is-agent">
+                <div
+                  key={b.id}
+                  className="bubble is-agent"
+                  data-testid={(b.text ?? '').trim() === CITY_ASK ? 'chat-ask-city' : undefined}
+                >
                   <ToolTrail tools={b.tools} />
                   {b.thinking && !b.text ? <p className="thinking">{b.thinking}</p> : null}
                   {b.text ? <MarkdownText text={b.text} /> : null}
@@ -467,12 +532,22 @@ function ChatCore({
               );
             case 'products':
               return <ProductGrid key={b.id} items={b.items} note={b.note} />;
-            case 'cart':
+            case 'cart': {
+              const cotoTarget = cotoPayTarget(
+                state.blocks.map((block) => ({
+                  id: block.id,
+                  kind: block.kind,
+                  retailer: block.kind === 'cart' ? block.cart.retailer : undefined,
+                })),
+                shop?.cotoReal === true,
+              );
+              const thisCoto = b.cart.retailer === 'coto' && b.id === cotoTarget;
               return (
                 <CartCard
                   key={b.id}
                   cart={b.cart}
                   handoffUrl={b.handoffUrl}
+                  cotoPay={thisCoto}
                   // No longer gated on a wallet. The frame-checkout flow asks
                   // for an importe and a code, and the shopper pays the súper
                   // themselves — there is nothing here to sign, so requiring a
@@ -481,13 +556,86 @@ function ChatCore({
                   onPay={
                     // Not just disabled: a paid chat's card is a record of
                     // what was bought, and a Pagar on it invites paying twice.
-                    canOrder
+                    // A dual-checkout basket pays from the cards under the compare.
+                    // Solo Día (demo on, Coto search off): one PayCard, still fees.
+                    // A Coto cart pays only when this block is the current one
+                    // and the wallet is allowlisted. That is not the demo PayCard.
+                    canOrder && !b.dualCheckout && b.orderable !== false && (b.cart.retailer !== 'coto' || thisCoto)
                       ? (cart) => {
+                          if (cart.retailer === 'coto') {
+                            setCotoModal(cart);
+                            return;
+                          }
                           track('payment_start', { flow: 'frame' });
-                          setPaying({ cart, handoffUrl: b.handoffUrl });
+                          setPaying(
+                            b.soloDia
+                              ? {
+                                  cart,
+                                  handoffUrl: b.handoffUrl,
+                                  demoTopUp: true,
+                                  checkoutPath: 'solo_dia',
+                                }
+                              : { cart, handoffUrl: b.handoffUrl },
+                          );
                         }
                       : undefined
                   }
+                />
+              );
+            }
+            case 'search_compare':
+              return (
+                <SearchCompareCard
+                  key={b.id}
+                  block={b}
+                  onChoose={(next) => {
+                    const current = state.cart?.cart;
+                    const lines = current?.lines.length ?? 0;
+                    if (
+                      current &&
+                      needsSwitchConfirm({ retailer: current.retailer, lines }, next) &&
+                      (current.retailer === 'dia' || current.retailer === 'coto')
+                    ) {
+                      setSwitchAsk({ from: current.retailer, to: next });
+                      return;
+                    }
+                    submit(choiceMessage(next));
+                  }}
+                />
+              );
+            case 'missing':
+              return (
+                <MissingCard
+                  key={b.id}
+                  block={b}
+                  onSubstitute={() => submit(substituteMessage(b.item, b.retailer))}
+                  onDrop={() => submit(dropMessage(b.item))}
+                />
+              );
+            case 'compare':
+              return (
+                <DualCheckout
+                  key={b.id}
+                  block={b}
+                  blocks={state.blocks}
+                  canOrder={canOrder}
+                  payLock={payLock}
+                  paying={paying !== null}
+                  address={address}
+                  location={state.snapshot?.location}
+                  onPay={(which, cart, handoffUrl, receiptLines, acceptedAlternatives) => {
+                    setPayLock(which);
+                    payOpened.current = false;
+                    setPaying({
+                      cart,
+                      handoffUrl: which === 'coto' ? undefined : handoffUrl,
+                      payRetailer: which === 'coto' ? 'coto' : undefined,
+                      demoTopUp: true,
+                      acceptedAlternatives,
+                      checkoutPath: 'dual',
+                      receiptLines,
+                    });
+                  }}
                 />
               );
             case 'error':
@@ -603,6 +751,7 @@ function ChatCore({
         {photo ? (
           <div className="composer-preview">
             <img
+              className="ph-no-capture"
               src={`data:${photo.mediaType};base64,${photo.data}`}
               alt={copy.previewAlt}
               data-testid="composer-image-preview"
@@ -623,6 +772,7 @@ function ChatCore({
         <textarea
           ref={composer}
           className="composer-input"
+          data-testid="chat-input"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -634,23 +784,25 @@ function ChatCore({
           placeholder={placeholder}
           rows={2}
           enterKeyHint="send"
-          disabled={state.streaming || gated}
+          disabled={controls.inputDisabled}
           autoFocus
         />
-        {state.streaming ? (
-          <button type="button" className="btn btn-ghost" onClick={stop} aria-label={copy.stopAria}>
-            {copy.stop}
-          </button>
-        ) : (
+        <div className="composer-actions">
+          {controls.showStop ? (
+            <button type="button" className="btn btn-ghost" onClick={stop} aria-label={copy.stopAria}>
+              {copy.stop}
+            </button>
+          ) : null}
           <button
             type="submit"
             className="btn"
             data-testid="composer-send"
-            disabled={(!draft.trim() && !photo) || gated || readingPhoto}
+            disabled={controls.sendDisabled}
+            aria-disabled={controls.sendDisabled ? 'true' : undefined}
           >
             {copy.send}
           </button>
-        )}
+        </div>
         <div className="composer-tools">
           <button
             type="button"
@@ -689,9 +841,14 @@ function ChatCore({
             {composerNote}
           </p>
         ) : null}
+        {controls.hint ? (
+          <p className="composer-hint" role="status" data-testid="composer-send-hint">
+            {copy.sendDisabledHint}
+          </p>
+        ) : null}
         <input
           ref={fileRef}
-          className="composer-file"
+          className="composer-file ph-no-capture"
           type="file"
           accept="image/*"
           tabIndex={-1}
@@ -701,7 +858,7 @@ function ChatCore({
         />
         <input
           ref={cameraRef}
-          className="composer-file"
+          className="composer-file ph-no-capture"
           type="file"
           accept="image/*"
           capture="environment"
@@ -714,7 +871,7 @@ function ChatCore({
       )}
 
       {cameraOpen ? (
-        <div className="camera-sheet" role="dialog" aria-modal="true" aria-label={copy.camera} data-testid="camera-sheet">
+        <div className="camera-sheet ph-no-capture" role="dialog" aria-modal="true" aria-label={copy.camera} data-testid="camera-sheet">
           <video ref={videoRef} className="camera-sheet-video" autoPlay playsInline muted aria-label={copy.camera} />
           <div className="camera-sheet-actions">
             <button type="button" className="btn camera-sheet-btn" data-testid="composer-shutter" onClick={() => void snap()}>
@@ -727,18 +884,69 @@ function ChatCore({
         </div>
       ) : null}
 
+      {switchAsk ? (
+        <Modal
+          title={uiCopy(lang).switch.confirmTitle}
+          onClose={() => setSwitchAsk(null)}
+          testId="switch-confirm"
+        >
+          <p>{uiCopy(lang).switch.confirmBody(RETAILER_NAMES[switchAsk.from], RETAILER_NAMES[switchAsk.to])}</p>
+          <div className="missing-actions">
+            <button
+              type="button"
+              className="btn"
+              data-testid="switch-confirm-yes"
+              onClick={() => {
+                const message = confirmSwitchMessage(switchAsk.from, switchAsk.to);
+                setSwitchAsk(null);
+                submit(message);
+              }}
+            >
+              {uiCopy(lang).switch.confirm}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              data-testid="switch-cancel"
+              onClick={() => setSwitchAsk(null)}
+            >
+              {uiCopy(lang).switch.cancel(RETAILER_NAMES[switchAsk.from])}
+            </button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {cotoModal && currentSessionId() ? (
+        <CotoRealModal
+          cart={cotoModal}
+          sessionId={currentSessionId() as string}
+          postalCode={state.snapshot?.location?.postalCode}
+          city={state.snapshot?.city}
+          onClose={() => setCotoModal(null)}
+        />
+      ) : null}
+
       {paying ? (
         <CheckoutModal
           cart={paying.cart}
           location={state.snapshot?.location}
           handoffUrl={paying.handoffUrl}
+          payRetailer={paying.payRetailer}
+          demoTopUp={paying.demoTopUp}
+          acceptedAlternatives={paying.acceptedAlternatives}
+          checkoutPath={paying.checkoutPath}
+          receiptLines={paying.receiptLines}
+          onOpened={markOpened}
           // The chat the server knows, which is the one `archiveChat` wrote —
           // `publish` files the record under the agent's session id, so this
           // is the same uuid `orders.chat_id` references. Undefined until the
           // first turn lands, and in preview forever, which is correct: there
           // is no row to be one order of.
           chatId={shop?.activeChatId ?? undefined}
-          onClose={() => setPaying(null)}
+          onClose={() => {
+            setPaying(null);
+            if (!payOpened.current) setPayLock(null);
+          }}
           // settle() closes the chat as well as filing the receipt: one chat
           // is one order, and this is the moment that becomes true.
           onPaid={(receipt) => {
@@ -747,6 +955,212 @@ function ChatCore({
           }}
         />
       ) : null}
+    </div>
+  );
+}
+
+const PESOS = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' });
+
+function cartFor(blocks: Block[], cartId: string): Extract<Block, { kind: 'cart' }> | undefined {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i];
+    if (block && block.kind === 'cart' && block.cart.cartId === cartId) return block;
+  }
+  return undefined;
+}
+
+function DualCheckout({
+  block,
+  blocks,
+  canOrder,
+  payLock,
+  paying,
+  address,
+  location,
+  onPay,
+}: {
+  block: Extract<Block, { kind: 'compare' }>;
+  blocks: Block[];
+  canOrder: boolean;
+  payLock: null | 'dia' | 'coto';
+  paying: boolean;
+  address: string | null | undefined;
+  location: unknown;
+  onPay: (
+    which: 'dia' | 'coto',
+    cart: Cart,
+    handoffUrl: string | undefined,
+    receiptLines: { name: string; quantity: number; lineTotal: string }[],
+    acceptedAlternatives: { diaSkuId: string; cotoId: string }[],
+  ) => void;
+}) {
+  const similarKeys = block.rows
+    .filter(
+      (row) =>
+        (row.confidence === 'ean' || row.confidence === 'brand_size_unit') &&
+        row.coto?.available === true &&
+        row.coto,
+    )
+    .map((row) => `${row.skuId}:${row.coto!.id}`);
+  const [accepted, setAccepted] = useState(() => new Set(similarKeys));
+  // Re-seed when the compare card settles new rows.
+  useEffect(() => {
+    setAccepted(new Set(similarKeys));
+    // similarKeys is derived from block.rows; join is stable enough for this reset.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [block.id, similarKeys.join('|')]);
+  const onToggle = (key: string) => {
+    setAccepted((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  return (
+    <div className="compare-pay">
+      <ComparisonCard block={block} />
+      <DualPay
+        block={block}
+        blocks={blocks}
+        canOrder={canOrder}
+        payLock={payLock}
+        paying={paying}
+        accepted={accepted}
+        onToggle={onToggle}
+        onPay={(which, cart, handoffUrl, receiptLines, acceptedAlternatives) => {
+          if (!address) {
+            const body: {
+              cart: Cart;
+              location?: unknown;
+              handoffUrl?: string;
+              payRetailer?: 'coto';
+              compare?: boolean;
+              acceptedAlternatives?: { diaSkuId: string; cotoId: string }[];
+              checkoutPath?: 'dual';
+            } = {
+              cart,
+              location,
+              compare: true,
+              checkoutPath: 'dual',
+            };
+            if (which === 'coto') {
+              body.payRetailer = 'coto';
+              body.acceptedAlternatives = acceptedAlternatives;
+            } else if (handoffUrl) {
+              body.handoffUrl = handoffUrl;
+            }
+            void fetch('/api/checkout/quote', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+          }
+          onPay(which, cart, handoffUrl, receiptLines, acceptedAlternatives);
+        }}
+      />
+    </div>
+  );
+}
+
+function DualPay({
+  block,
+  blocks,
+  canOrder,
+  payLock,
+  paying,
+  accepted,
+  onToggle,
+  onPay,
+}: {
+  block: Extract<Block, { kind: 'compare' }>;
+  blocks: Block[];
+  canOrder: boolean;
+  payLock: null | 'dia' | 'coto';
+  paying: boolean;
+  /** Keys `diaSkuId:cotoId` the shopper accepted as Coto alternativas. */
+  accepted: Set<string>;
+  onToggle: (key: string) => void;
+  onPay: (
+    which: 'dia' | 'coto',
+    cart: Cart,
+    handoffUrl: string | undefined,
+    receiptLines: { name: string; quantity: number; lineTotal: string }[],
+    acceptedAlternatives: { diaSkuId: string; cotoId: string }[],
+  ) => void;
+}) {
+  const offer =
+    block.checkoutDemo === true &&
+    (block.status === 'ok' || block.status === 'degraded') &&
+    block.matched >= 1;
+  const cartBlock = cartFor(blocks, block.cartId);
+  if (!offer || !cartBlock || cartBlock.cart.retailer !== 'dia') return null;
+  const diaLines: PayCardLine[] = cartBlock.cart.lines
+    .filter((line) => line.available && line.quantity > 0)
+    .map((line) => ({ key: `${line.index}:${line.skuId}`, name: line.name, quantity: line.quantity }));
+  // Similars: EAN or brand+size. PayCard Coto shows accepted alternativas only.
+  const similarRows = block.rows.filter(
+    (row) =>
+      (row.confidence === 'ean' || row.confidence === 'brand_size_unit') &&
+      row.coto?.available === true &&
+      row.coto,
+  );
+  if (diaLines.length === 0 || similarRows.length === 0) return null;
+  const acceptedRows = similarRows.filter((row) => accepted.has(`${row.skuId}:${row.coto!.id}`));
+  const cotoLines: PayCardLine[] = acceptedRows.map((row) => ({
+    key: row.coto?.id ?? row.skuId,
+    name: row.coto?.name ?? row.name,
+    quantity: row.quantity,
+  }));
+  const acceptedAlternatives = acceptedRows.map((row) => ({
+    diaSkuId: row.skuId,
+    cotoId: row.coto!.id,
+  }));
+  const diaReceipt = cartBlock.cart.lines
+    .filter((line) => line.available && line.quantity > 0)
+    .map((line) => ({ name: line.name, quantity: line.quantity, lineTotal: line.lineTotal.display }));
+  const cotoReceipt = acceptedRows.map((row) => ({
+    name: row.coto?.name ?? row.name,
+    quantity: row.quantity,
+    lineTotal: PESOS.format((row.coto?.lineCentavos ?? 0) / 100),
+  }));
+  const busy = (which: 'dia' | 'coto') => paying || (payLock !== null && payLock !== which);
+  return (
+    <div className="pay-cards">
+      <ul className="pay-card-accept" data-testid="coto-alternatives">
+        {similarRows.map((row) => {
+          const key = `${row.skuId}:${row.coto!.id}`;
+          const id = `alt-${key}`;
+          return (
+            <li key={key}>
+              <label htmlFor={id}>
+                <input
+                  id={id}
+                  type="checkbox"
+                  checked={accepted.has(key)}
+                  onChange={() => onToggle(key)}
+                  data-testid={`coto-alt-${row.coto!.id}`}
+                />
+                {row.coto!.name}
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+      <PayCard
+        which="dia"
+        lines={diaLines}
+        enabled={canOrder}
+        busy={busy('dia')}
+        onPay={() => onPay('dia', cartBlock.cart, cartBlock.handoffUrl, diaReceipt, acceptedAlternatives)}
+      />
+      <PayCard
+        which="coto"
+        lines={cotoLines}
+        enabled={canOrder && cotoLines.length > 0}
+        busy={busy('coto')}
+        onPay={() => onPay('coto', cartBlock.cart, cartBlock.handoffUrl, cotoReceipt, acceptedAlternatives)}
+      />
     </div>
   );
 }
@@ -767,7 +1181,7 @@ export function ReceiptCard({ receipt }: { receipt: Receipt }) {
     (receipt.orderRef ? storeOrderUrl(receipt.retailer, receipt.orderRef) : null) ??
     storeOrdersUrl(receipt.retailer);
   return (
-    <section className="card receipt" data-testid="receipt" aria-label={copy.receiptAria}>
+    <section className="card receipt ph-no-capture" data-testid="receipt" aria-label={copy.receiptAria}>
       <header className="receipt-head">
         <strong>{copy.receiptTitle}</strong>
         <time dateTime={new Date(receipt.paidAt).toISOString()}>{paidOn(receipt.paidAt, lang)}</time>
@@ -843,7 +1257,7 @@ export function UserBubble({
     <div className="msg-user">
       {block.image ? (
         <img
-          className="bubble-photo"
+          className="bubble-photo ph-no-capture"
           data-testid="user-photo"
           alt={copy.photoAlt}
           src={`data:${block.image.mediaType};base64,${block.image.data}`}

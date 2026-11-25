@@ -1,32 +1,22 @@
 # End-to-end
 
-Playwright, in three projects. Unit tests stay on `npm test` and do not open a
-browser.
+Playwright. Unit tests stay on `npm test` and do not open a browser.
 
 | Project | Target |
 |---|---|
 | `landing` | `LANDING_BASE_URL`, default `https://www.changuito.me` |
 | `app` | `APP_BASE_URL`, default `https://app.changuito.me` |
-| `checkout` | `CHECKOUT_BASE_URL`, default a `next dev` Playwright starts on 3124 |
+| `compare` | `APP_BASE_URL`. Opt-in. `npm run test:e2e:compare` |
 
 The first two are smokes, and production is their target on purpose. A local
 preview needs Pollar, Turnstile, and the model keys the app already has on
-Vercel; CI does not have those, and a preview would not be what visitors hit.
+the Worker; CI does not have those, and a preview would not be what visitors hit.
 Neither smoke pays, opens a store checkout, or clicks **Cargar USDC**.
 
-`checkout` is the odd one and has to be. It runs the whole frame-checkout flow
-— basket, importe, framed store, single-use card, receipt — and it cannot run
-against a deployment, because the fixture it frames in the store's place
-(`app/dev/checkout`) `notFound()`s in production. So it gets its own base URL
-and its own server. Playwright starts that server only when the run includes
-this project; `--project=app` still builds nothing and starts nothing.
-
-**What it does not prove:** that a purchase happened. There is no sandbox
+**What a smoke does not prove:** that a purchase happened. There is no sandbox
 supermarket — Día has no test store — so past "Ya lo pagué" it asserts what the
-app does when the store *says* paid, and nothing about Día. The agent, Horizon
-and the card issuer are scripted too (`e2e/support/checkout-fixtures.ts` says
-why). The deposit leg has been run for real against testnet Horizon by hand;
-the card mint has not yet run against a live Vyrion sandbox account.
+app does when the store *says* paid, and nothing about Día. The deposit leg has
+been run for real against testnet Horizon by hand.
 
 ## Run locally
 
@@ -64,17 +54,12 @@ win over that file.
   The postal-code reply is, because a guest stuck before it was the blocker
   in issue [#51](https://github.com/raptor0929/changuito/issues/51); the
   server now answers it without a model hop.
-- **Checkout.** One test, the whole flow: a scripted turn draws a basket, the
-  importe is quoted with its código and confirmed on the second poll, the
-  fixture store renders inside the frame, a single-use card is issued and its
-  3DS code counts down, **Ya lo pagué** is corroborated before the receipt is
-  written, and the card is given back in the same breath. Then: the chat is
-  read-only, a second order in it is refused, and the receipt survives a
-  reload and reopens from the history rail. Two assertions are guardrails
-  rather than features — that the PAN, the CVV and the one-time code never
-  reach `localStorage` or `sessionStorage`, and that traces, video and
-  screenshots are off, because this repo is public and those numbers are on
-  screen for most of the run.
+- **Checkout.** Project `checkout`, against `next dev`, not a deployment.
+  The virtual-card path is gone. The spec seeds one basket, mocks quote /
+  lock / status as `demo`, and asserts the dialog stops at "Llegamos hasta
+  el pago" with a test-mode receipt. A second test opens `/dev/checkout` and
+  checks the fixture says it is not the supermarket. Traces, video, and
+  screenshots are off.
 - **App, auth.** Skipped unless both `CHANGUTO_E2E_EMAIL` and
   `CHANGUTO_E2E_PASSWORD` are non-empty. It opens **Empezá a comprar** and
   uses the email field. Traces and screenshots are off for this spec so a
@@ -103,10 +88,66 @@ issues a fixed test code. Google OAuth is intentionally not automated.
 If the modal has no email field, the spec skips and records that the widget
 was Google or wallet only.
 
+## Día vs Coto card
+
+`npm run test:e2e:compare` runs project `compare` with `COMPARE_E2E=1`.
+Without that variable the spec skips, so `npm run test:e2e` stays the
+production smoke. The target is the Worker at `APP_BASE_URL`.
+
+The spec does not shop, does not call the model, and does not flip
+`chat_dual_compare`, `sandbox_mock`, `sandbox_mock_fail`, or
+`turnstile_disabled`. It writes one stored chat into `localStorage` (the
+transcript the shopper already keeps) and opens it from the history rail.
+`GET /api/human` is answered as `{ "mode": "open" }` inside the test only,
+so the human gate does not hide the card. Checkout routes are not stubbed.
+
+It asserts the card at `data-testid=compare-card`: the Spanish match line
+(`2 de 3 productos coinciden` for the fixture), no `20%` and no fee words
+on that card, a Día link whose href is the cart handoff, and a Coto link
+on `https://www.coto.com.ar/`. After each click, no request goes to
+`/api/checkout/quote`, `/api/checkout/start`, `/api/checkout/open`, or
+`/api/checkout/channels`.
+
+Screenshot, video, and trace are on for this project. They land in
+`test-results/` and `playwright-report/`, which are gitignored. Do not
+commit them.
+
+## Dual mock checkout
+
+`npm run test:e2e:dual-checkout` runs project `dual-checkout` with
+`DUAL_CHECKOUT_E2E=1`. Without that variable the spec skips. It seeds one
+stored chat, stubs `GET /api/human`, and does not flip config rows or call
+the model. It checks both pay cards (heading, accessible name, and a 44px
+target at 390 and 1440), no `checkout-compare`, no `20%`, no `rail-pay`,
+that the Coto quote body sends `payRetailer: "coto"` and no amount, and that
+starting one pay disables the other. Settlement basis stays a unit test.
+Screenshot and video are on. Do not commit `test-results/`.
+
 ## GitHub Actions
 
-Actions runs `.github/workflows/unit.yml` on every pull request and on every
-push to `main`. That job is `npm test` only. Playwright is not a workflow in
-this repo: run it locally with `npm run test:e2e`.
+`.github/workflows/unit.yml` runs `npm test` and the web typecheck on every
+pull request. Docs-only changes skip that job. It does not run on push to
+`main`.
+
+`.github/workflows/e2e-weekly.yml` runs Monday at 05:00 in
+America/Argentina/Buenos_Aires (`0 8 * * 1` UTC), and on `workflow_dispatch`.
+It has three parts:
+
+- Soroban `cargo test` for `contracts/`.
+- Project `checkout`: a local `next dev` on port 3124, Cloudflare's published
+  Turnstile dummy keys, and route mocks. It does not call the model, the
+  database, or mainnet. Traces, video, and screenshots are off.
+- Project `shell`: a read-only look at the public shopper. It does not send
+  a chat message. `landing` is not in this workflow. Cloudflare's interactive
+  challenge blocks the GitHub runner on www.changuito.me, so a weekly landing
+  smoke cannot see the page. `e2e/landing.spec.ts` stays in the repo and still
+  runs when you ask for that project locally.
+
+`@quarantine` tests are excluded (`grepInvert` in `playwright.config.ts` and
+`--grep-invert` in the workflow). HTML and JUnit land as artifacts for 7 days.
+
+`npm run test:e2e` locally still runs the projects you name. A run with no
+`--project` also starts the checkout dev server, because that suite is part
+of the full set.
 
 Never commit `e2e/.env` or a real inbox.

@@ -5,7 +5,7 @@ import { bootMcp, closeMcp, type McpPair } from './boot.ts';
 /**
  * Sessions, on a host that does not promise to keep anything.
  *
- * A Vercel lambda's module scope is a cache, not a database: instances are
+ * A Worker isolate's module scope is a cache, not a database: isolates are
  * recycled on deploy, on idle and on scale-out, and two messages from the same
  * user can land on different ones. So this keeps a warm Map for speed and
  * treats the snapshot the browser sends as the record of truth.

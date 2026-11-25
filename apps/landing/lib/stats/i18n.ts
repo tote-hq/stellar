@@ -90,6 +90,8 @@ const en = {
   newTab: 'opens in a new tab',
   filterStatus: 'Showing {network}. Chart range {range}.',
   lastKnown: 'last known value',
+  unavailable: 'unavailable',
+  partialUnavailable: 'Partial · {chain} unavailable',
   appAccounts: '{count} app accounts',
 } as const;
 

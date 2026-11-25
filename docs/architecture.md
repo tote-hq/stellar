@@ -56,7 +56,7 @@ flowchart TB
         LS[("localStorage<br/><i>the transcript the shopper sees</i>")]
     end
 
-    subgraph VERCEL["NEXT.JS ON VERCEL — Node runtime, never edge"]
+    subgraph WORKERS["VINEXT ON CLOUDFLARE WORKERS — Node runtime"]
         direction TB
         API_CHAT["/api/chat<br/><i>the agent loop, streamed as SSE</i>"]
         MCPC["MCP Client ⇄ McpServer<br/><i>InMemoryTransport</i>"]
@@ -178,14 +178,21 @@ server does, so the protocol has to be on the wire.
 
 Spawning the published binary as a subprocess would also be real MCP, but the
 binary registers the checkout tools, which open a **headed browser on the server
-host** so a human can type their supermarket password. That cannot run on Vercel.
+host** so a human can type their supermarket password. That cannot run in the web app.
 `@changuito/mcp/server` is the half that can, and it has no path to the checkout
 module at all — the checkout tools sit behind a dynamic `import()`, so nothing in
 the web app's import graph can even resolve Playwright.
 
-The ten tools the agent sees: `list_retailers`, `set_location`,
+The eleven tools the agent sees: `list_retailers`, `set_location`,
 `search_products`, `get_product`, `price_check`, `add_to_cart`,
-`update_cart_item`, `view_cart`, `get_cart_link`, `where_am_i`.
+`update_cart_item`, `view_cart`, `get_cart_link`, `choose_retailer`,
+`where_am_i`.
+
+`choose_retailer` is how the shopper picks Día or Coto after a search that
+queried both. It only records the chain. The same turn then calls `add_to_cart`
+and `get_cart_link`, or the cart card is never drawn. A Coto order is a
+Changuito-held basket of Coto catalog lines. It has no store link and cannot
+be paid. A Día cart is never labeled as Coto.
 
 ### Two kinds of tool, and the split is the design
 
@@ -217,8 +224,8 @@ produced that rule.
 | The transcript the shopper sees | **localStorage** (`chat-store.ts`) | it is theirs, it must survive a reload, and a chat the server can no longer continue comes back **read-only** rather than pretending |
 | The record | **Postgres** (`chat-archive.ts`, `db.ts`) | it outlives the Redis TTL, survives a cleared browser, and is what an order is joined back to |
 
-Both server-side stores exist because a Vercel lambda's module scope is a cache,
-not a database: instances are recycled on deploy, on idle and on scale-out, and
+Both server-side stores exist because a Worker isolate's module scope is a cache,
+not a database: isolates are recycled on deploy, on idle and on scale-out, and
 two messages from the same user can land on different ones. With no Redis
 configured the history falls back to an in-process `Map`, which on one
 developer's machine is the same guarantee for free.
@@ -340,8 +347,8 @@ merely claims. `REAL_MODE_OPEN_TO_ALL` drops the allowlist; it does **not** drop
 the signature, because "anybody may pay" and "nobody has to prove who they are"
 are different sentences and only the first was ever asked for.
 
-**Deny by default.** In production an empty allowlist means nobody, which also
-covers Vercel previews, since those run as production too. Testnet is never
+**Deny by default.** In production an empty allowlist means nobody. The Worker
+sets `NODE_ENV=production`, so that is the live app. Testnet is never
 gated; it is the default and it cannot spend anything.
 
 ---
@@ -351,11 +358,11 @@ gated; it is the default and it cannot spend anything.
 ```
 changuito/
 ├── apps/web/                Next.js shopper — the agent, the UI, the API routes
-│   ├── app/api/             chat (SSE), deposit, card, order, balance, quote,
+│   ├── app/api/             chat (SSE), deposit, order, balance, quote,
 │   │                          faucet, session, orders, network, human, settle
 │   ├── app/dev/             fixtures: /dev/ui (component gallery, the escrow
 │   │                          panel) and /dev/checkout (the rehearsal store)
-│   ├── components/          Chat, CheckoutModal, CardPanel, CartRail,
+│   ├── components/          Chat, CheckoutModal, CartRail,
 │   │                          WalletWidget, HumanGate, Purchases, …
 │   └── lib/
 │       ├── agent/           loop, prompt, render-tools, turn-store, early-ask,
@@ -376,7 +383,7 @@ changuito/
 │   ├── escrow/              open, settle, refund, events — 19 tests, login-network checkout
 │   └── mock_usdc/           SEP-41 token, admin-gated mint — 15 tests
 ├── packages/
-│   ├── mcp/                 the vendored MCP server — 520 tests
+│   ├── mcp/                 the vendored MCP server — 304 tests
 │   ├── trust/               footer copy shared by both apps, so they cannot drift
 │   ├── escrow-bindings/     generated from the deployed wasm
 │   └── usdc-bindings/       generated from the deployed wasm

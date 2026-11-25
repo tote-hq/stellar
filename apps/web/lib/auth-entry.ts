@@ -1,17 +1,24 @@
 /**
- * The bytes Freighter can sign, and the entry the network will check.
+ * The bytes a wallet can sign, and the entry the network will check.
  *
- * `signAuthEntry` is handed a `HashIdPreimage`, not a `SorobanAuthorizationEntry`.
- * Freighter parses that preimage with an SDK that only knows the original
- * Soroban authorization envelope. Protocol 30 simulation records
- * `ADDRESS_V2`, whose preimage is the newer with-address envelope, and the
- * wallet reports it as an authorization entry it could not parse.
+ * Freighter's `signAuthEntry` is handed a `HashIdPreimage`, not a
+ * `SorobanAuthorizationEntry`. It parses that preimage with an SDK that only
+ * knows the original Soroban authorization envelope. Protocol 30 simulation
+ * records `ADDRESS_V2`, whose preimage is the newer with-address envelope,
+ * and the wallet reports it as an authorization entry it could not parse.
  *
- * So the shopper signs the original preimage — network id, nonce, invocation,
- * expiry, and not the address — and the entry we submit uses the original
- * address credentials. The host rebuilds that same preimage when it checks
- * the signature. A wallet that already returns a complete entry (the same
- * invocation, with a signature filled in) is passed through.
+ * An external wallet therefore signs the original preimage — network id,
+ * nonce, invocation, expiry, and not the address — and the entry we submit
+ * uses the original address credentials. The host rebuilds that same
+ * preimage when it checks the signature.
+ *
+ * A custodial wallet has no adapter. Pollar's `/tx/sign-auth-entry` expects
+ * a `SorobanAuthorizationEntry`, so `entryForCustodial` rewrites the
+ * simulated entry onto those original address credentials with a void
+ * signature. `ADDRESS_V2` is converted the same way either path submits.
+ *
+ * A wallet that already returns a complete entry (the same invocation, with
+ * a signature filled in) is passed through.
  */
 
 import { Address, Keypair, hash, nativeToScVal, StrKey, xdr } from '@stellar/stellar-sdk';
@@ -38,7 +45,7 @@ function decodeEntry(entryXdr: string): xdr.SorobanAuthorizationEntry {
   }
 }
 
-/** The V1 preimage, base64. This is what `signAuthEntry` is given. */
+/** The V1 preimage, base64. This is what an external wallet's `signAuthEntry` is given. */
 export function preimageForWallet(entryXdr: string, networkPassphrase: string): string {
   const entry = decodeEntry(entryXdr);
   const creds = addressCredentials(entry);
@@ -52,6 +59,27 @@ export function preimageForWallet(entryXdr: string, networkPassphrase: string): 
     }),
   );
   return preimage.toXDR('base64');
+}
+
+/**
+ * The V1 authorization entry a custodial signer is given, base64.
+ * Same address, nonce, expiration and invocation, with a void signature.
+ */
+export function entryForCustodial(entryXdr: string): string {
+  const entry = decodeEntry(entryXdr);
+  const creds = addressCredentials(entry);
+  if (!creds) throw new AuthEntryError('La autorización no corresponde a este pago.');
+  return new xdr.SorobanAuthorizationEntry({
+    credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
+      new xdr.SorobanAddressCredentials({
+        address: creds.address,
+        nonce: creds.nonce,
+        signatureExpirationLedger: creds.signatureExpirationLedger,
+        signature: xdr.ScVal.scvVoid(),
+      }),
+    ),
+    rootInvocation: entry.rootInvocation,
+  }).toXDR('base64');
 }
 
 function bytesFromBase64(value: string): Uint8Array {

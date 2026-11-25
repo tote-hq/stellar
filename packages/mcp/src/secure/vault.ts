@@ -8,8 +8,7 @@ import { dirname } from 'node:path';
  * which is a live authenticated session for the user's supermarket account.
  * Anyone who reads that file is logged in as them.
  *
- * Private keys do NOT use this: they use the standard Web3 Secret Storage
- * keystore in wallet/keystore.ts, so they stay portable to other wallet tools.
+ * This is for a session, not for a signing key.
  *
  * Format: scrypt(passphrase, salt) -> 32-byte key -> AES-256-GCM.
  * The auth tag is what makes this tamper-evident; decryption of a modified file

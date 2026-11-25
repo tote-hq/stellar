@@ -40,7 +40,15 @@ export function CartRail() {
           height={609}
         />
         <header className="rail-cart-head">
-          <span className="rail-cart-title">{receipt ? copy.paidTitle : copy.cartTitle}</span>
+          <span className="rail-cart-title">
+            {receipt
+              ? copy.paidTitle
+              : store === 'coto'
+                ? copy.cotoTitle
+                : store === 'dia'
+                  ? copy.diaTitle
+                  : copy.cartTitle}
+          </span>
           {store ? <span className="rail-cart-store">{RETAILER_NAMES[store] ?? store}</span> : null}
         </header>
         {receipt ? (
@@ -48,7 +56,15 @@ export function CartRail() {
         ) : cart && cart.lines.length > 0 ? (
           // Pagar under the basket too, not only on the card in the thread,
           // which has usually scrolled away by the time the basket is ready.
-          <RailLines cart={cart} onPay={shop?.canOrder ? shop.requestPay : undefined} />
+          <RailLines
+            cart={cart}
+            cotoPay={Boolean(shop?.cotoReal && cart.retailer === 'coto')}
+            onPay={
+              shop?.canOrder && !shop.dualCheckout && (cart.retailer !== 'coto' || shop.cotoReal)
+                ? shop.requestPay
+                : undefined
+            }
+          />
         ) : (
           <EmptyRail />
         )}
@@ -70,7 +86,9 @@ function RailReceipt({ receipt }: { receipt: Receipt }) {
   const lang = useLang();
   const copy = uiCopy(lang).rail;
   return (
-    <>
+    // One element, so the paid amount and the order id are both omitted.
+    // display: contents keeps these rows in the panel's flex layout.
+    <div className="ph-no-capture" data-testid="rail-receipt" style={{ display: 'contents' }}>
       <p className="rail-cart-paid" data-testid="receipt-paid">
         <span className="rail-chip rail-chip-paid">{copy.paid}</span>
         <time dateTime={new Date(receipt.paidAt).toISOString()}>{paidOn(receipt.paidAt, lang)}</time>
@@ -93,7 +111,7 @@ function RailReceipt({ receipt }: { receipt: Receipt }) {
         </div>
         <p className="rail-cart-ref">{copy.ref(receipt.paidDisplay, receipt.orderId)}</p>
       </footer>
-    </>
+    </div>
   );
 }
 
@@ -110,7 +128,7 @@ function EmptyRail() {
   return <p className="rail-cart-empty">{uiCopy(useLang()).rail.empty}</p>;
 }
 
-function RailLines({ cart, onPay }: { cart: Cart; onPay?: () => void }) {
+function RailLines({ cart, onPay, cotoPay = false }: { cart: Cart; onPay?: () => void; cotoPay?: boolean }) {
   const lang = useLang();
   const copy = uiCopy(lang).rail;
   const payable = cart.lines.some((l) => l.available && l.quantity > 0) && cart.total.centavos > 0;
@@ -139,8 +157,24 @@ function RailLines({ cart, onPay }: { cart: Cart; onPay?: () => void }) {
           <span>{copy.total}</span>
           <strong>{cart.total.display}</strong>
         </div>
-        {onPay && payable ? (
+        {cart.retailer === 'coto' && !cotoPay ? (
+          <p className="rail-cart-warn" data-testid="rail-coto-unpayable">
+            {copy.notPayable}
+          </p>
+        ) : null}
+        {onPay && payable && cart.retailer !== 'coto' ? (
           <button type="button" className="btn btn-pay rail-cart-pay" data-testid="rail-pay" onClick={onPay}>
+            {uiCopy(lang).cart.payCta}
+          </button>
+        ) : null}
+        {onPay && payable && cotoPay ? (
+          <button
+            type="button"
+            className="btn btn-pay rail-cart-pay"
+            data-testid="rail-coto-pay"
+            style={{ minHeight: 44, minWidth: 44 }}
+            onClick={onPay}
+          >
             {uiCopy(lang).cart.payCta}
           </button>
         ) : null}

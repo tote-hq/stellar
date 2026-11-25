@@ -1,5 +1,16 @@
+import { randomUUID } from 'node:crypto';
+
 import type { Cart, LocationContext } from './types.js';
 import { getAdapter } from './adapters/registry.js';
+
+/** Which chain the shopper chose for this basket. Absent until they pick. */
+export type OrderRetailer = 'dia' | 'coto';
+
+/** A Coto line is an id and a quantity. The price is looked up, never stored. */
+export interface CotoLineSnap {
+  id: string;
+  quantity: number;
+}
 
 /**
  * Per-session state.
@@ -18,23 +29,72 @@ import { getAdapter } from './adapters/registry.js';
  */
 export interface SessionSnapshot {
   location?: LocationContext;
-  /** retailer id -> cart id */
+  /** retailer id -> cart id. A Coto basket's id is `coto-<uuid>` under `coto`. */
   carts: Record<string, string>;
+  /**
+   * The chain this order belongs to. Optional, like `drawn`: a snapshot from
+   * before the field existed restores as today.
+   */
+  order?: OrderRetailer;
+  /** Coto lines. Absent when the basket is empty. */
+  coto?: CotoLineSnap[];
+  /**
+   * City asked after the postal code, before set_location. Omitted when unset
+   * so a snapshot from before this field restores as it did.
+   */
+  city?: string;
 }
 
 export interface SessionState {
   setLocation(ctx: LocationContext): void;
   requireLocation(): LocationContext;
   getLocation(): LocationContext | undefined;
+  getCity(): string | undefined;
+  setCity(city: string): void;
+  /** Postal code seen before the city answer. Not part of the snapshot. */
+  notePostal(code: string): void;
+  getPendingPostal(): string | undefined;
   ensureCart(): Promise<{ cart: Cart; ctx: LocationContext }>;
   rememberCart(retailer: string, cartId: string): void;
+  getOrder(): OrderRetailer | undefined;
+  cotoLines(): CotoLineSnap[];
+  setCotoLines(lines: readonly CotoLineSnap[]): void;
+  /** Stable `coto-<uuid>`, minted the first time a Coto basket needs one. */
+  cotoCartId(): string;
+  /**
+   * Point the order at `next`. When the current basket has lines and `next`
+   * is the other chain, `replace` has to be set or this returns
+   * `needs_replace` and changes nothing. `replace` drops the side being left:
+   * the Día cart id, or the Coto lines. Lines are never merged.
+   * `hasLines` is computed by the caller so this stays free of a store call.
+   */
+  chooseOrder(
+    next: OrderRetailer,
+    opts?: { replace?: boolean; hasLines?: boolean },
+  ): 'set' | 'replaced' | 'needs_replace';
   snapshot(): SessionSnapshot;
   restore(snap: SessionSnapshot): void;
 }
 
+function copyCoto(lines: readonly CotoLineSnap[]): CotoLineSnap[] {
+  return lines.map((line) => ({ id: line.id, quantity: line.quantity }));
+}
+
 export function createSessionState(): SessionState {
   let location: LocationContext | undefined;
+  let city: string | undefined;
+  let pendingPostal: string | undefined;
+  let order: OrderRetailer | undefined;
+  let cotoLines: CotoLineSnap[] = [];
   const carts = new Map<string, string>();
+
+  const cotoCartId = (): string => {
+    const existing = carts.get('coto');
+    if (existing && existing.startsWith('coto-')) return existing;
+    const id = `coto-${randomUUID()}`;
+    carts.set('coto', id);
+    return id;
+  };
 
   const requireLocation = (): LocationContext => {
     if (!location) {
@@ -52,12 +112,24 @@ export function createSessionState(): SessionState {
         // Prices and cart ids are per-retailer; keeping old carts around invites
         // handing the user a link to a cart from a different supermarket.
         carts.clear();
+        order = undefined;
+        cotoLines = [];
       }
       location = ctx;
     },
 
     requireLocation,
     getLocation: () => location,
+    getCity: () => city,
+    setCity(next) {
+      const trimmed = next.trim();
+      if (trimmed) city = trimmed;
+    },
+    notePostal(code) {
+      const trimmed = code.trim();
+      if (trimmed) pendingPostal = trimmed;
+    },
+    getPendingPostal: () => pendingPostal,
 
     /** Returns the current cart for the active retailer, creating one on first use. */
     async ensureCart() {
@@ -80,14 +152,65 @@ export function createSessionState(): SessionState {
       carts.set(retailer, cartId);
     },
 
-    snapshot: () => ({ location, carts: Object.fromEntries(carts) }),
+    getOrder: () => order,
+
+    cotoLines: () => copyCoto(cotoLines),
+
+    setCotoLines(lines) {
+      cotoLines = lines.map((line) => {
+        const id = line.id.trim();
+        if (!id || !Number.isSafeInteger(line.quantity) || line.quantity < 1) {
+          throw new Error('coto line');
+        }
+        return { id, quantity: line.quantity };
+      });
+    },
+
+    cotoCartId,
+
+    chooseOrder(next, opts = {}) {
+      const replace = opts.replace === true;
+      const hasLines = opts.hasLines === true;
+      if (order && order !== next) {
+        if (hasLines && !replace) return 'needs_replace';
+        if (replace) {
+          if (order === 'dia') carts.delete('dia');
+          else cotoLines = [];
+        }
+        order = next;
+        if (next === 'coto') cotoCartId();
+        return replace ? 'replaced' : 'set';
+      }
+      order = next;
+      if (next === 'coto') cotoCartId();
+      return 'set';
+    },
+
+    snapshot: () => ({
+      location,
+      carts: Object.fromEntries(carts),
+      ...(order ? { order } : {}),
+      ...(cotoLines.length ? { coto: copyCoto(cotoLines) } : {}),
+      ...(city ? { city } : {}),
+    }),
 
     restore(snap) {
       location = snap.location;
+      city = typeof snap.city === 'string' && snap.city.trim() ? snap.city.trim() : undefined;
+      pendingPostal = undefined;
       carts.clear();
       for (const [retailer, cartId] of Object.entries(snap.carts ?? {})) {
         carts.set(retailer, cartId);
       }
+      order = snap.order === 'dia' || snap.order === 'coto' ? snap.order : undefined;
+      cotoLines = Array.isArray(snap.coto)
+        ? snap.coto.flatMap((line) => {
+            if (!line || typeof line.id !== 'string') return [];
+            const id = line.id.trim();
+            if (!id || !Number.isSafeInteger(line.quantity) || line.quantity < 1) return [];
+            return [{ id, quantity: line.quantity }];
+          })
+        : [];
     },
   };
 }

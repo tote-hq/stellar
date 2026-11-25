@@ -8,6 +8,7 @@ import { withSession } from '@/lib/mcp/session';
 import { encodeEvent, HEARTBEAT, SSE_HEADERS, type ChatRequest, type UiEvent } from '@/lib/protocol';
 import { requireHuman } from '@/lib/human-gate';
 import { readLoggedInUser, requireLoginOrFreeTurn } from '@/lib/login-gate';
+import { rememberCity } from '@/lib/agent/early-ask';
 import { presetLocationFromProfile } from '@/lib/profile-location';
 import { networkNotServed, requestNetwork } from '@/lib/server-network';
 import { recallPair, shownProducts } from '@/lib/chat-recall';
@@ -144,6 +145,7 @@ export async function POST(req: Request): Promise<Response> {
           // banner reads, so the model does not ask for it again.
           const earlier = priorLines(body.prior);
           const shown = shownProducts(body.shown);
+          rememberCity(session.state, turn.messages, body.message);
           if (owner) await presetLocationFromProfile(session, owner);
           await applyShopperPlace(session, [...earlier, body.message]);
           // This isolate has no transcript. The browser still has the lines
@@ -158,7 +160,7 @@ export async function POST(req: Request): Promise<Response> {
               );
             }
           }
-          brain = (await runTurn(session, turn, body.message, emit, lang, body.image)).brain;
+          brain = (await runTurn(session, turn, body.message, emit, lang, body.image, owner)).brain;
 
           // Only after a clean return. A turn that threw mid-hop can leave an
           // assistant `tool_use` with no matching `tool_result`, and the API

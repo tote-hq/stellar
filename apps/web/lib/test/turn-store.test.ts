@@ -77,6 +77,51 @@ test('messages, cart and handoff url survive a round trip', () => {
   assert.equal(back.cache.handoffUrl, 'https://diaonline.supermercadosdia.com.ar/checkout');
 });
 
+test('compare fields round-trip, a turn without them still decodes, and v stays 1', () => {
+  const bare = decodeTurn(JSON.parse(JSON.stringify(encodeTurn(newTurnState()))) as unknown);
+  assert.ok(bare);
+  assert.equal(bare.cache.compareFor, undefined);
+  assert.equal(bare.cache.compareResult, undefined);
+  assert.equal(encodeTurn(newTurnState()).v, 1);
+
+  const turn = newTurnState();
+  turn.cache.compareFor = 'cart-1|0:1:2:630000:1';
+  turn.cache.compareResult = {
+    status: 'ok',
+    cartId: 'cart-1',
+    handoffUrl: 'https://dia.example/cart',
+    matched: 1,
+    lines: 1,
+    rows: [],
+    gap: { diaSubtotalCentavos: 100, cotoSubtotalCentavos: 80, gapCentavos: 20 },
+  };
+  const wire = encodeTurn(turn);
+  assert.equal(wire.v, 1);
+  const back = decodeTurn(JSON.parse(JSON.stringify(wire)) as unknown);
+  assert.equal(back?.cache.compareFor, 'cart-1|0:1:2:630000:1');
+  assert.equal(back?.cache.compareResult?.gap?.gapCentavos, 20);
+  assert.equal(back?.cache.compareResult?.status, 'ok');
+});
+
+test('coto cache and searches round-trip, and an older turn still decodes', () => {
+  const older = decodeTurn({ v: 1, messages: [], products: [] });
+  assert.ok(older);
+  assert.equal(older.cache.coto, undefined);
+  assert.equal(older.cache.searches, undefined);
+
+  const turn = newTurnState();
+  turn.cache.coto = { c1: { id: 'c1', name: 'Yerba', shelfCentavos: 1000, available: true } };
+  turn.cache.searches = [{ query: 'yerba', retailer: 'coto', available: 1 }];
+  turn.cache.diaPairs = [{ cotoId: 'c1', diaSkuId: 'd1', diaCentavos: 1100, confidence: 'ean' }];
+  turn.cache.cotoRealDia = { pairs: turn.cache.diaPairs, buyer: 'GABC' };
+  const back = decodeTurn(JSON.parse(JSON.stringify(encodeTurn(turn))) as unknown);
+  assert.equal(back?.cache.coto?.c1?.name, 'Yerba');
+  assert.equal(back?.cache.diaPairs?.[0]?.diaSkuId, 'd1');
+  assert.equal(back?.cache.cotoRealDia?.buyer, 'GABC');
+  assert.equal(back?.cache.searches?.[0]?.available, 1);
+  assert.equal(encodeTurn(turn).v, 1);
+});
+
 test('an empty conversation round trips to an empty one, not to undefined', () => {
   const back = decodeTurn(JSON.parse(JSON.stringify(encodeTurn(newTurnState()))) as unknown);
 

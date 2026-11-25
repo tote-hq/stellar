@@ -1,6 +1,7 @@
 import { hasDatabase } from '../db.ts';
 import { kvGet, kvSet } from '../kv.ts';
 import { db } from '../db.ts';
+import type { ComparisonQuote } from './compare-fee.ts';
 import type { ManualState } from './manual-policy.ts';
 
 /**
@@ -16,7 +17,7 @@ import type { ManualState } from './manual-policy.ts';
  * and the buyer can refund on chain after the deadline without us.
  */
 export interface CheckoutRecord {
-  checkoutKind?: 'manual_fee_v1';
+  checkoutKind?: 'manual_fee_v1' | 'coto_real_v1';
   orderNonce?: string;
   manual?: ManualState;
   /** Chosen at start and kept for this order. A later config flip does not move it. */
@@ -36,6 +37,15 @@ export interface CheckoutRecord {
   shippingCentavos?: number;
   /** Where the shopper browsed: the sandbox delivers here when their Día account has no saved address. */
   postalCode?: string;
+  /**
+   * Server-side Coto delivery address for checkoutKind coto_real_v1.
+   * Never copied onto a shopper response.
+   */
+  resolvedAddress?: { postalCode: string; street: string; number?: string; city: string; complement?: string };
+  fulfillment?: 'home' | 'pickup';
+  /** City asked in chat. The delivery city, if edited, is on resolvedAddress. */
+  city?: string;
+  shippingProvisionCentavos?: number;
   /** Pesos as the shopper saw them. */
   totalDisplay: string;
   retailer: string;
@@ -43,8 +53,14 @@ export interface CheckoutRecord {
   /** The shopper's own cart link at the store. */
   handoffUrl: string | null;
   createdAt: number;
-  /** What the quote decided (lib/shared-card.ts `checkoutMode`). Absent on records from before it existed. */
+  /** What the quote decided (lib/checkout/mode.ts). Absent on records from before it existed. */
   mode?: 'live' | 'demo' | 'mock';
+  /**
+   * Present when the shopper compared this Día basket. `amount` / `amountCents`
+   * include the fee (may be 0). Absent on every other checkout, including the 0.10 preparation fee.
+   */
+  comparison?: ComparisonQuote;
+  checkoutPath?: 'solo_dia' | 'solo_coto' | 'dual';
 
   jobId?: string;
   /**

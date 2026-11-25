@@ -9,4 +9,5 @@ export const RETAILER_NAMES: Readonly<Record<string, string>> = {
   carrefour: 'Carrefour',
   jumbo: 'Jumbo',
   disco: 'Disco',
+  coto: 'Coto',
 };

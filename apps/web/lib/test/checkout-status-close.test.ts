@@ -377,4 +377,30 @@ describe('GET /api/checkout/status closes the escrow', () => {
     assert.equal((await res.json()).stage, 'done');
     assert.equal(escrow.settles[0]?.order.basketHash, BASKET);
   });
+
+  it('settles a placed Coto mock without copying the Día order form', async () => {
+    escrow.order = openOrder();
+    await store.set(record({ retailer: 'coto', mode: 'mock', handoffUrl: null }));
+    jobs.set('job-1', {
+      job_id: 'job-1',
+      status: 'done',
+      phase: 'placed',
+      result: {
+        reached_payment: true,
+        payment: 'placed',
+        store_order_id: 'mock-1',
+        items_added: 1,
+        cart: { orderFormId: 'dia-order-form' },
+        final_url: 'https://diaonline.supermercadosdia.com.ar/checkout/#/payment',
+      },
+    });
+
+    const res = await poll();
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).stage, 'done');
+    const saved = await store.get(ORDER);
+    assert.equal(saved?.storeOrderForm, undefined);
+    assert.equal(saved?.handoffUrl, null);
+    assert.equal(escrow.settles.length, 1);
+  });
 });

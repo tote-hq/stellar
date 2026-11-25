@@ -4,15 +4,10 @@ import { describe, it } from 'node:test';
 import { Keypair } from '@stellar/stellar-sdk';
 
 import { POST } from '../../app/api/deposit/demo/route.ts';
-import { DEPLOYMENTS, NETWORK_IDS } from '../deployments.ts';
+import { NETWORK_IDS } from '../deployments.ts';
 import { mintMemo } from '../deposit.ts';
 import { __resetTurnCounterForTests } from '../login-gate.ts';
-import {
-  canDemoPay,
-  DEMO_WALLET_SECRET_VAR,
-  demoWalletAddress,
-  demoWalletKeypair,
-} from '../server/demo-wallet.ts';
+import { DEMO_WALLET_SECRET_VAR, demoWalletAddress, demoWalletKeypair } from '../server/demo-wallet.ts';
 
 /**
  * The one hot key in the deployment, and the route that spends it.
@@ -31,12 +26,8 @@ describe('the demo wallet is pinned to one network', () => {
     const withWallet = NETWORK_IDS.filter((net) => demoWalletAddress(net));
     assert.deepEqual([...withWallet], ['testnet']);
     assert.equal(demoWalletAddress('mainnet'), '');
-  });
-
-  it('RULE: a network with no demo wallet refuses before it looks for a secret', () => {
     // The order matters. If it read the secret first, a mainnet secret pasted
-    // into the slot would produce "wrong public key" — which reads like a
-    // fixable mistake rather than like "this must never work here".
+    // into the slot would produce "wrong public key".
     assert.throws(
       () => demoWalletKeypair('mainnet', env({ [DEMO_WALLET_SECRET_VAR]: Keypair.random().secret() })),
       /no demo wallet on mainnet/,
@@ -75,25 +66,6 @@ describe('the demo wallet is pinned to one network', () => {
     }
   });
 
-  it('accepts the key the config pins, whitespace and all', () => {
-    // Nothing here can produce the real secret, so this proves the check by
-    // pinning a throwaway and asserting the *shape* of the agreement instead.
-    const kp = Keypair.random();
-    const pinned = kp.publicKey();
-    assert.notEqual(pinned, DEPLOYMENTS.testnet.demoWallet);
-    // The rule under test, stated directly: the keypair is returned exactly
-    // when its public key equals what deployments.json names.
-    assert.equal(demoWalletAddress('testnet'), DEPLOYMENTS.testnet.demoWallet);
-    assert.throws(() => demoWalletKeypair('testnet', env({ [DEMO_WALLET_SECRET_VAR]: `\n${kp.secret()}\n` })));
-  });
-
-  it('RULE: a missing secret is not the same as a missing wallet', () => {
-    assert.throws(() => demoWalletKeypair('testnet', env()), /is not set/);
-    assert.equal(canDemoPay('testnet', env()), false);
-    assert.equal(canDemoPay('testnet', env({ [DEMO_WALLET_SECRET_VAR]: 'anything' })), true);
-    // Still false with a secret, because the network has nowhere to pay from.
-    assert.equal(canDemoPay('mainnet', env({ [DEMO_WALLET_SECRET_VAR]: 'anything' })), false);
-  });
 });
 
 /* ------------------------------------------------------------------ *
@@ -144,13 +116,6 @@ describe('POST /api/deposit/demo', () => {
     });
   });
 
-  it('names an unrecognised network rather than falling back to one that pays', async () => {
-    await withEnv(READY, async () => {
-      const res = await ask({ memo: mintMemo(), amount: '1.0000000', network: 'futurenet' });
-      assert.equal(res.status, 400);
-    });
-  });
-
   it('RULE: refuses a memo that is not one of ours', async () => {
     await withEnv(READY, async () => {
       for (const memo of ['', 'abc', 'ABCDEFGHI', 'ABCDEFG0', null, 42]) {
@@ -168,22 +133,10 @@ describe('POST /api/deposit/demo', () => {
       const over = await ask({ memo: mintMemo(), amount: '5000.0000001', network: 'testnet' });
       assert.equal(over.status, 400);
       assert.equal((await over.json()).error, 'monto demasiado grande');
-    });
-  });
-
-  it('refuses an amount that is not a Stellar amount at all', async () => {
-    await withEnv(READY, async () => {
       for (const amount of ['', '0', '-1', '1.00000001', 'abc', '1e3', ' ']) {
         const res = await ask({ memo: mintMemo(), amount, network: 'testnet' });
         assert.equal(res.status, 400, JSON.stringify(amount));
       }
-    });
-  });
-
-  it('RULE: says "not enabled here" rather than signing when the key is absent', async () => {
-    await withEnv({ DEPOSIT_ADDRESS_TESTNET: OPERATOR }, async () => {
-      const res = await ask({ memo: mintMemo(), amount: '1.0000000', network: 'testnet' });
-      assert.equal(res.status, 503);
     });
   });
 

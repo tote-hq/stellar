@@ -1,9 +1,12 @@
 /**
  * The beta funnel, as short event names on top of lib/analytics.ts.
+ * GA4, Meta, Clarity and PostHog are sinks of that module. This file adds
+ * no events of its own.
  *
  * login → faucet → cart_built → pay_open → settle | refund, with failure
  * along the way. Props are codes only: no email, DNI, password,
  * address, amount or free text ever goes out (sanitizeProps drops those too).
+ * PostHog is another sink on this same path, and only after consent.
  */
 
 export const FUNNEL_EVENTS = [

@@ -34,7 +34,7 @@ if (typeof window !== "undefined") {
 export const networks = {
   testnet: {
     networkPassphrase: "Test SDF Network ; September 2015",
-    contractId: "CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX",
+    contractId: "CA4BDF4U65OHCO6AB4KRJWBRZ4BJBZURDFNFKJDEZAKQRCUNJZFLN72S",
   }
 } as const
 
@@ -107,6 +107,7 @@ export enum Status {
 
 
 
+
 export interface Client {
   /**
    * Construct and simulate a open transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -146,6 +147,18 @@ export interface Client {
    * paying for a basket the buyer never saw.
    */
   settle: ({order_id, basket_hash, receipt_hash}: {order_id: Buffer, basket_hash: Buffer, receipt_hash: Buffer}, options?: MethodOptions) => Promise<AssembledTransaction<Order>>
+
+  /**
+   * Construct and simulate a upgrade transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Replace this contract's code. The resolver signs, and the new code is
+   * the one the next call runs: there is no queued proposal and no delay.
+   * 
+   * The host applies the swap when this call succeeds, not in a later
+   * ledger. Storage stays. The constructor does not run again, so the
+   * token, the resolver and the open orders are the ones already stored.
+   * `new_wasm_hash` is a wasm already uploaded to the network.
+   */
+  upgrade: ({new_wasm_hash}: {new_wasm_hash: Buffer}, options?: MethodOptions) => Promise<AssembledTransaction<null>>
 
   /**
    * Construct and simulate a get_order transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -188,10 +201,12 @@ export class Client extends ContractClient {
         "AAAABQAAAAAAAAAAAAAABk9wZW5lZAAAAAAAAQAAAAZvcGVuZWQAAAAAAAUAAAAAAAAACG9yZGVyX2lkAAAD7gAAACAAAAABAAAAAAAAAAVidXllcgAAAAAAABMAAAABAAAAAAAAAAZhbW91bnQAAAAAAAsAAAAAAAAAAAAAAAtiYXNrZXRfaGFzaAAAAAPuAAAAIAAAAAAAAAAAAAAACGRlYWRsaW5lAAAABgAAAAAAAAAC",
         "AAAABQAAAAAAAAAAAAAAB1NldHRsZWQAAAAAAQAAAAdzZXR0bGVkAAAAAAQAAAAAAAAACG9yZGVyX2lkAAAD7gAAACAAAAABAAAAAAAAAAVidXllcgAAAAAAABMAAAABAAAAAAAAAAZhbW91bnQAAAAAAAsAAAAAAAAAAAAAAAxyZWNlaXB0X2hhc2gAAAPuAAAAIAAAAAAAAAAC",
         "AAAABQAAAAAAAAAAAAAACFJlZnVuZGVkAAAAAQAAAAhyZWZ1bmRlZAAAAAQAAAAAAAAACG9yZGVyX2lkAAAD7gAAACAAAAABAAAAAAAAAAVidXllcgAAAAAAABMAAAABAAAAAAAAAAZhbW91bnQAAAAAAAsAAAAAAAAAtVRydWUgd2hlbiB0aGUgYnV5ZXIgdG9vayB0aGUgbW9uZXkgYmFjayB0aGVtc2VsdmVzIGFmdGVyIHRoZSBkZWFkbGluZSwKcmF0aGVyIHRoYW4gdGhlIHJlc29sdmVyIHJlbGVhc2luZyBpdC4gV29ydGggZGlzdGluZ3Vpc2hpbmcgaW4gYW4gYXVkaXQ6Cml0IG1lYW5zIHRoZSBiYWNrZW5kIG5ldmVyIGNhbWUgYmFjay4AAAAAAAAMc2VsZl9zZXJ2aWNlAAAAAQAAAAAAAAAC",
+        "AAAABQAAAAAAAAAAAAAACFVwZ3JhZGVkAAAAAQAAAAh1cGdyYWRlZAAAAAEAAAAAAAAADW5ld193YXNtX2hhc2gAAAAAAAPuAAAAIAAAAAAAAAAC",
         "AAAAAAAAAOVMb2NrIGBhbW91bnRgIG9mIHRoZSBlc2Nyb3cncyB0b2tlbiBhZ2FpbnN0IGBvcmRlcl9pZGAuCgpUaGUgYnV5ZXIgYXV0aG9yaXplcyB0aGlzIGNhbGwsIHdoaWNoIGlzIGFsc28gd2hhdCBhdXRob3JpemVzIHRoZQp0cmFuc2ZlciBvdXQgb2YgdGhlaXIgYmFsYW5jZTogYHJlcXVpcmVfYXV0aGAgaGVyZSBhbmQgYHRyYW5zZmVyYCBiZWxvdwphcmUgY292ZXJlZCBieSB0aGUgc2FtZSBzaWduYXR1cmUuAAAAAAAABG9wZW4AAAAFAAAAAAAAAAVidXllcgAAAAAAABMAAAAAAAAACG9yZGVyX2lkAAAD7gAAACAAAAAAAAAABmFtb3VudAAAAAAACwAAAAAAAAALYmFza2V0X2hhc2gAAAAD7gAAACAAAAAAAAAADHRpbWVvdXRfc2VjcwAAAAYAAAABAAAH0AAAAAVPcmRlcgAAAA==",
         "AAAAAAAAAAAAAAAGY29uZmlnAAAAAAAAAAAAAQAAB9AAAAAGQ29uZmlnAAA=",
         "AAAAAAAAAXpSZXR1cm4gdGhlIG1vbmV5IHRvIHRoZSBidXllci4KClRoZSByZXNvbHZlciBtYXkgZG8gdGhpcyBhdCBhbnkgdGltZSDigJQgdGhhdCBpcyB0aGUgbm9ybWFsIHBhdGggd2hlbiBhCmJhc2tldCBmYWlscy4gVGhlIGJ1eWVyIG1heSBkbyBpdCB0aGVtc2VsdmVzIG9uY2UgYGRlYWRsaW5lYCBoYXMgcGFzc2VkLAp3aGljaCBpcyB3aGF0IG1ha2VzIHRoaXMgYW4gZXNjcm93IHJhdGhlciB0aGFuIGEgZGVwb3NpdC4KCmBjYWxsZXJgIGlzIGV4cGxpY2l0IGJlY2F1c2UgdGhlIHR3byBjYXNlcyBhdXRob3JpemUgZGlmZmVyZW50IGFkZHJlc3NlcywKYW5kIGByZXF1aXJlX2F1dGhgIGhhcyB0byBiZSBjYWxsZWQgb24gdGhlIG9uZSB0aGF0IGFjdHVhbGx5IHNpZ25lZC4AAAAAAAZyZWZ1bmQAAAAAAAIAAAAAAAAABmNhbGxlcgAAAAAAEwAAAAAAAAAIb3JkZXJfaWQAAAPuAAAAIAAAAAEAAAfQAAAABU9yZGVyAAAA",
         "AAAAAAAAAQ1SZWxlYXNlIHRoZSBtb25leSB0byB0aGUgdHJlYXN1cnksIHJlY29yZGluZyB3aGljaCBiYXNrZXQgYW5kIHdoaWNoCnN0b3JlIG9yZGVyIGl0IHBhaWQgZm9yLgoKYGJhc2tldF9oYXNoYCBpcyBwYXNzZWQgYmFjayByYXRoZXIgdGhhbiByZWFkIGZyb20gc3RvcmFnZSBzbyB0aGF0IGEKcmVzb2x2ZXIgc2V0dGxpbmcgdGhlIHdyb25nIG9yZGVyIGZhaWxzIGxvdWRseSBpbnN0ZWFkIG9mIHF1aWV0bHkKcGF5aW5nIGZvciBhIGJhc2tldCB0aGUgYnV5ZXIgbmV2ZXIgc2F3LgAAAAAAAAZzZXR0bGUAAAAAAAMAAAAAAAAACG9yZGVyX2lkAAAD7gAAACAAAAAAAAAAC2Jhc2tldF9oYXNoAAAAA+4AAAAgAAAAAAAAAAxyZWNlaXB0X2hhc2gAAAPuAAAAIAAAAAEAAAfQAAAABU9yZGVyAAAA",
+        "AAAAAAAAAZBSZXBsYWNlIHRoaXMgY29udHJhY3QncyBjb2RlLiBUaGUgcmVzb2x2ZXIgc2lnbnMsIGFuZCB0aGUgbmV3IGNvZGUgaXMKdGhlIG9uZSB0aGUgbmV4dCBjYWxsIHJ1bnM6IHRoZXJlIGlzIG5vIHF1ZXVlZCBwcm9wb3NhbCBhbmQgbm8gZGVsYXkuCgpUaGUgaG9zdCBhcHBsaWVzIHRoZSBzd2FwIHdoZW4gdGhpcyBjYWxsIHN1Y2NlZWRzLCBub3QgaW4gYSBsYXRlcgpsZWRnZXIuIFN0b3JhZ2Ugc3RheXMuIFRoZSBjb25zdHJ1Y3RvciBkb2VzIG5vdCBydW4gYWdhaW4sIHNvIHRoZQp0b2tlbiwgdGhlIHJlc29sdmVyIGFuZCB0aGUgb3BlbiBvcmRlcnMgYXJlIHRoZSBvbmVzIGFscmVhZHkgc3RvcmVkLgpgbmV3X3dhc21faGFzaGAgaXMgYSB3YXNtIGFscmVhZHkgdXBsb2FkZWQgdG8gdGhlIG5ldHdvcmsuAAAAB3VwZ3JhZGUAAAAAAQAAAAAAAAANbmV3X3dhc21faGFzaAAAAAAAA+4AAAAgAAAAAA==",
         "AAAAAAAAAAAAAAAJZ2V0X29yZGVyAAAAAAAAAQAAAAAAAAAIb3JkZXJfaWQAAAPuAAAAIAAAAAEAAAfQAAAABU9yZGVyAAAA",
         "AAAAAAAAAQRgZ2V0X29yZGVyYCBwYW5pY3Mgb24gYW4gdW5rbm93biBpZDsgdGhpcyBpcyBmb3IgY2FsbGVycyB0aGF0IGFyZSBhc2tpbmcKd2hldGhlciBhbiBvcmRlciBleGlzdHMgYXQgYWxsLCBzdWNoIGFzIGEgVUkgcG9sbGluZyBhZnRlciBhIHN1Ym1pdC4KTm90IG5hbWVkIGB0cnlfZ2V0X29yZGVyYDogdGhlIGdlbmVyYXRlZCBjbGllbnQgcmVzZXJ2ZXMgdGhhdCBwcmVmaXggZm9yCml0cyBvd24gbm9uLXBhbmlja2luZyB3cmFwcGVyIG9mIGBnZXRfb3JkZXJgLgAAAApmaW5kX29yZGVyAAAAAAABAAAAAAAAAAhvcmRlcl9pZAAAA+4AAAAgAAAAAQAAA+gAAAfQAAAABU9yZGVyAAAA",
         "AAAAAAAAAJJTZXQgb25jZSwgYXQgZGVwbG95LiBUaGUgdG9rZW4gY2Fubm90IGJlIGNoYW5nZWQgYWZ0ZXJ3YXJkcyDigJQgYW4gZXNjcm93CnRoYXQgY2FuIGJlIHBvaW50ZWQgYXQgYSBkaWZmZXJlbnQgYXNzZXQgd2hpbGUgaG9sZGluZyBmdW5kcyBpcyBub3Qgb25lLgAAAAAADV9fY29uc3RydWN0b3IAAAAAAAADAAAAAAAAAAhyZXNvbHZlcgAAABMAAAAAAAAACHRyZWFzdXJ5AAAAEwAAAAAAAAAFdG9rZW4AAAAAAAATAAAAAA==" ]),
@@ -203,6 +218,7 @@ export class Client extends ContractClient {
         config: this.txFromJSON<Config>,
         refund: this.txFromJSON<Order>,
         settle: this.txFromJSON<Order>,
+        upgrade: this.txFromJSON<null>,
         get_order: this.txFromJSON<Order>,
         find_order: this.txFromJSON<Option<Order>>
   }

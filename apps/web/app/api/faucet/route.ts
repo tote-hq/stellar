@@ -1,47 +1,19 @@
 /**
- * POST /api/faucet { address, proof }  ->  { xlm, usdc, usdcDisplay, txHash, created }
+ * POST /api/faucet { address, proof, chunks? }  ->  { xlm, usdc, usdcDisplay, txHash, created }
  *
  * Two steps, in this order, and the order is the point:
  *
- *   1. friendbot, if the address has no account yet. An address nobody funded
- *      is just a public key — every transaction it signs fails with
- *      tx_no_source_account, which reads like a bug in the app rather than an
- *      empty wallet.
- *   2. mint demo USDC.
+ *   1. friendbot, if the address has no account yet.
+ *   2. mint demo USDC in +100 USDC chunks, capped at 1000 USDC balance.
  *
- * Doing it the other way round hands someone money they cannot spend.
+ * Body `{ chunks?: 1..10 }` defaults to 1. Outside that range → 400 (from the gate).
+ * Cap and cooldown both answer 429 with distinct notes (`reasonKind`).
  *
- * Both steps sign with our keys, so neither runs until `authorizeFaucet` says
- * so: the database says this wallet may mint, and the wallet proves it with a
- * fresh SEP-53 signature. See lib/faucet-auth.ts.
- *
- * GET /api/faucet?address=…&network=…  ->  { mode, allowed }, so the widget can
- * leave the button out instead of showing one that can only fail. On a network
- * with no friendbot the answer is always no, which is how the button
- * disappears in modo real without a new conditional in the widget.
- *
- * ## Dormant: nothing in the app can reach this today
- *
- * Two independent reasons, both from the preview/production split:
- *
- *   1. It needs a connected wallet to fund, and since lib/app-mode.ts having
- *      one means being signed in, which means mainnet — where there is no
- *      friendbot and `faucetAccess` answers no. A preview visitor has no
- *      address to pass.
- *   2. It mints contracts/mock_usdc, the Soroban token. That is no longer the
- *      testnet deposit asset: scripts/setup-demo-asset.mjs issued a classic
- *      USDC, and preview pays from the demo wallet out of a fixed supply, not
- *      from a faucet. Minting mock USDC would top up a balance the deposit
- *      rail cannot see.
- *
- * Kept rather than deleted because it is the only thing that exercises
- * `usdcAsAdmin` and the mock token end to end, and because the escrow it was
- * built beside is dormant too, not dead. lib/faucet-gate.ts's `gateFaucet` is
- * very much alive: it is the house pattern for "we are about to spend
- * something on your behalf", and POST /api/deposit/demo follows it.
+ * GET /api/faucet?address=…&network=…  ->  { mode, allowed }
  */
+import { faucetOnNetwork } from '../../../lib/faucet-auth.ts';
 import { faucetButton, gateFaucet } from '../../../lib/faucet-gate.ts';
-import { faucetVerdict } from '../../../lib/faucet-policy.ts';
+import { CAP_UNITS, faucetVerdict } from '../../../lib/faucet-policy.ts';
 import { requireHuman } from '../../../lib/human-gate.ts';
 import { networkNotServed, requestNetwork } from '../../../lib/server-network.ts';
 import { usdcAsAdmin } from '../../../lib/server/resolver.ts';
@@ -80,7 +52,7 @@ export async function POST(req: Request): Promise<Response> {
   // Before friendbot and before the mint: both are signed by us.
   const gate = await gateFaucet(req);
   if (gate instanceof Response) return gate;
-  const { address, kind, network } = gate;
+  const { address, kind, network, chunks } = gate;
 
   try {
     // 1. XLM first. A contract wallet has no Horizon account to fund.
@@ -92,17 +64,20 @@ export async function POST(req: Request): Promise<Response> {
       created = funding.created;
     }
 
-    // 2. Then the token, if they need it.
+    // Faucet only exists on networks with friendbot / demo mint.
+    if (!faucetOnNetwork(network)) {
+      return Response.json({ error: 'El faucet no está disponible en esta red.' }, { status: 403 });
+    }
+
     const before = await usdcBalance(address, network);
     const verdict = faucetVerdict({
       balanceUnits: before,
       now: Date.now(),
+      chunks,
     });
 
     if (!verdict.allow) {
-      // Not an error when we just created the account: they got their XLM, and
-      // "you already have enough USDC" is a perfectly good outcome.
-      const body: FaucetResponse & { note: string } = {
+      const body: FaucetResponse & { note: string; reasonKind: string } = {
         address,
         xlm,
         created,
@@ -110,6 +85,7 @@ export async function POST(req: Request): Promise<Response> {
         usdcDisplay: formatUsdc(before),
         txHash: null,
         note: verdict.reason,
+        reasonKind: verdict.reasonKind,
       };
       return Response.json(body, { status: created ? 200 : 429 });
     }
@@ -118,17 +94,17 @@ export async function POST(req: Request): Promise<Response> {
     const sent = await tx.signAndSend();
 
     const after = before + verdict.amount;
+    const capped = after > CAP_UNITS ? CAP_UNITS : after;
     const body: FaucetResponse = {
       address,
       xlm,
       created,
-      usdc: after.toString(),
-      usdcDisplay: formatUsdc(after),
+      usdc: capped.toString(),
+      usdcDisplay: formatUsdc(capped),
       txHash: sent.sendTransactionResponse?.hash ?? null,
     };
     return Response.json(body);
   } catch (err) {
-    // Friendbot and Soroban errors carry URLs and XDR; the log keeps them.
     console.error('[faucet] failed:', err);
     return Response.json({ error: 'No pudimos cargar USDC de prueba. Probá de nuevo en un momento.' }, { status: 502 });
   }

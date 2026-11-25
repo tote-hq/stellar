@@ -52,7 +52,7 @@ money bugs live; the fetch is the part that needs a network and has nothing to
 get wrong. `lib/deposit-watch.ts` remains a facade for existing callers and
 tests.
 
-**Spending** — `POST /api/card` → `lib/pay/issue-card.ts`. Re-reads the ledger
+**Spending** — the deposit quote re-reads the ledger
 port for a payment carrying the código and derives the amount **from the payment
 that actually landed**. The deposit is then claimed exactly once, with a
 conditional `UPDATE … where card_id is null`.
@@ -98,7 +98,7 @@ code refuses to quote an asset it cannot observe.
 ### No secret passes through the issuing script
 
 Every signature in `setup-demo-asset.mjs` is made by the `stellar` CLI from a
-local identity named on the command line. The secrets stay in the CLI keystore —
+local identity named on the command line. The secrets stay in the Stellar CLI —
 never read by the script, never printed, never placed in `argv` where `ps` would
 show them, never written to an env file. The issuer's secret is discarded
 outright.
@@ -128,8 +128,8 @@ address — no session store, no shared secret, no account.
 and only the first one was ever asked for. Dropping the signature costs a
 logged-in shopper nothing and costs a script the whole exercise.
 
-Deny by default: in production an empty allowlist means nobody, which also covers
-Vercel previews, since those run as production too. Testnet is never gated; it is
+Deny by default: in production an empty allowlist means nobody. The Worker
+sets `NODE_ENV=production`, so that is the live app. Testnet is never gated; it is
 the default and it cannot spend anything.
 
 ---
@@ -140,18 +140,20 @@ the default and it cannot spend anything.
 shop uses, on testnet against the mintable `mock_usdc`
 (`CAOPLEE4NVOVEBYRO7NHG5K4FEML5O5C5AATYBK4FCDLYRAJFZWBNN3E`), 19 tests. On the
 login network the shopper path mounts `PaymentModal`, which calls `open`
-through Pollar. `deployments.json` still names the earlier contract
-`CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX`. The classic deposit
-issuer (`GCGV3225QTJFJ32KTPJNOR5SYANP4QWNUGKKGKVK7ILMK4QACZHJTGJB`) stays on
-the memo rail only — it is not the escrow token. An earlier `mock_usdc`
+through Pollar. The classic deposit issuer
+(`GCGV3225QTJFJ32KTPJNOR5SYANP4QWNUGKKGKVK7ILMK4QACZHJTGJB`) stays on the memo
+rail only — it is not the escrow token. The September open, settle and refund
+were sent to the earlier contract
+`CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX`. An earlier `mock_usdc`
 (`CB63C7UVZ3PBALQ7IE37QU2ZX5X3UMTLJOHDRI2EW44JU26YDGLQUBJF`) and the Circle
-SAC escrow are not this contract.
+SAC escrow are not what `deployments.json` points at.
 
 ```rust
 open(buyer, order_id: BytesN<32>, amount: i128,
      basket_hash: BytesN<32>, timeout_secs: u64) -> Order
 settle(order_id, basket_hash, receipt_hash) -> Order
 refund(caller, order_id) -> Order
+upgrade(new_wasm_hash: BytesN<32>)
 get_order(order_id) -> Order          // panics if unknown
 find_order(order_id) -> Option<Order> // does not
 config() -> Config                    // resolver, treasury, token
@@ -320,5 +322,5 @@ the suite rather than the demo.
 confusing class of build error, and the protocol accepts an older env meta
 version than the ledger's anyway. If you upgrade the CLI, move the pin with it.
 
-Node must be **≥ 22.12** — `@stellar/stellar-sdk@17` requires it, and on Vercel
-the project's Node version has to be set explicitly or the install fails.
+Node must be **≥ 22.12** — `@stellar/stellar-sdk@17` requires it. Workers Builds
+reads `.nvmrc`; the vinext config loader needs 22.18 or newer.

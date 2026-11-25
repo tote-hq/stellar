@@ -1,10 +1,10 @@
-# NO APROBADO — no usar
+# NOT APPROVED — do not use
 
-`mascota-exito.png` (pose éxito: destellos + medalla de girasol con check) **no está aprobada**.
+`mascota-exito.png` (success pose: sparkles + sunflower medal with a check) **is not approved**.
 
-No usar en la landing, en marketing de consumo, ni en piezas públicas.
+Do not use it on the landing, in consumer marketing, or in public pieces.
 
-El héroe de la landing usa `motion/animacion-cargando.gif` (productos que caen en el carrito).
-Con `prefers-reduced-motion`, usar la pose estática **idle** o **corriendo**. Nunca éxito.
+The landing hero uses `motion/animacion-cargando.gif` (products falling into the cart).
+With `prefers-reduced-motion`, use the static **idle** or **running** pose. Never success.
 
-Si el PDF del manual todavía nombra la pose éxito, manda el markdown: esa pose salió de la lista de situaciones aprobadas.
+If the manual PDF still names the success pose, the markdown wins: that pose left the list of approved situations.

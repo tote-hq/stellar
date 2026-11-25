@@ -6,12 +6,14 @@ import { useCallback, useMemo } from 'react';
 import {
   signAuthEntryWith,
   signTransactionWith,
+  walletKindFrom,
   type AuthEntryResult,
   type TxSignResult,
+  type WalletKind,
   type WalletSignClient,
 } from './wallet-signers.ts';
 
-export type { AuthEntryResult, TxSignResult };
+export type { AuthEntryResult, TxSignResult, WalletKind };
 
 /**
  * Auth-entry and transaction signing through the Pollar wallet.
@@ -27,6 +29,8 @@ export function useWalletSigners(): {
     options: { validUntilLedger: number },
   ) => Promise<AuthEntryResult>;
   signTransaction: (xdr: string) => Promise<TxSignResult>;
+  /** Read at sign time. An attached adapter is external; none is custodial. */
+  walletKind: () => WalletKind;
 } {
   const { getClient } = usePollar();
 
@@ -43,8 +47,10 @@ export function useWalletSigners(): {
     [client],
   );
 
+  const walletKind = useCallback(() => walletKindFrom(client()), [client]);
+
   return useMemo(
-    () => ({ signAuthEntry, signTransaction }),
-    [signAuthEntry, signTransaction],
+    () => ({ signAuthEntry, signTransaction, walletKind }),
+    [signAuthEntry, signTransaction, walletKind],
   );
 }

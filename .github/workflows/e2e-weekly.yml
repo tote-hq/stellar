@@ -1,0 +1,168 @@
+# Monday 05:00 in America/Argentina/Buenos_Aires (UTC-3, no DST) is 08:00 UTC.
+# Checkout runs on a local next dev with route mocks. The smoke jobs only
+# read the public sites. No model key, no database, no mainnet.
+name: Weekly E2E
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-weekly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  contracts:
+    name: Soroban cargo test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts
+
+      - name: cargo test
+        id: tests
+        run: |
+          set +e
+          start=$(date +%s)
+          cargo test --manifest-path contracts/Cargo.toml --locked
+          code=$?
+          end=$(date +%s)
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+          exit "$code"
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Soroban contracts"
+            echo "cargo test finished in ${{ steps.tests.outputs.seconds }}s (this step only, not the runner boot)."
+            echo "Result: ${{ steps.tests.outcome }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  checkout:
+    name: Test-mode checkout
+    # ubuntu-latest is 26.04. Playwright 1.55.1 has no Chromium build for it.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node from .nvmrc
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright checkout
+        id: tests
+        run: |
+          set +e
+          start=$(date +%s)
+          npx playwright test --project=checkout --workers=1 --grep-invert @quarantine
+          code=$?
+          end=$(date +%s)
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+          exit "$code"
+        env:
+          CI: true
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Test-mode checkout"
+            echo "Local next dev, route mocks, Turnstile dummy keys. No production secrets."
+            echo "Playwright finished in ${{ steps.tests.outputs.seconds }}s (this step only)."
+            echo "Result: ${{ steps.tests.outcome }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: playwright-checkout
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  smoke:
+    name: Read-only smoke (${{ matrix.project }})
+    # ubuntu-latest is 26.04. Playwright 1.55.1 has no Chromium build for it.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [shell]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node from .nvmrc
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright smoke
+        id: tests
+        run: |
+          set +e
+          start=$(date +%s)
+          npx playwright test --project=${{ matrix.project }} --grep-invert @quarantine
+          code=$?
+          end=$(date +%s)
+          echo "seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+          exit "$code"
+        env:
+          CI: true
+          LANDING_BASE_URL: https://www.changuito.me
+          APP_BASE_URL: https://app.changuito.me
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Read-only ${{ matrix.project }}"
+            echo "Playwright finished in ${{ steps.tests.outputs.seconds }}s (this step only)."
+            echo "Result: ${{ steps.tests.outcome }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: playwright-smoke-${{ matrix.project }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore

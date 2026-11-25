@@ -1,32 +1,27 @@
 /**
  * The full flow, stopped one step short of spending anything.
  *
- * It does everything a real purchase does — searches, opens your real session,
- * writes to your real cart, drives the real checkout to the card form — and
- * then prints the exact Vyrion request bodies it *would* have sent, redacted,
- * instead of sending them. No card is created. Nothing is submitted.
+ * It does everything a review does — searches, opens your real session,
+ * writes to your real cart, drives the real checkout to the payment form —
+ * and stops. No card is created. Nothing is submitted.
  *
- * That "everything except the last step" property is the point: the parts that
- * break are the browser parts, and a dry run exercises all of them. What it
- * cannot tell you is whether Día's gateway accepts the BIN — only a live run
- * answers that.
+ * That "everything except paying" property is the point: the parts that
+ * break are the browser parts, and a dry run exercises all of them.
  *
  *   node dist/dryrun.js --cp 1425 --search "leche descremada" \
  *                       --street "Av. Corrientes" --number 1234
  *   node dist/dryrun.js --skip-cart          # review whatever is in the cart already
- *   node dist/dryrun.js --no-browser         # config, Vyrion and FX checks only
+ *   node dist/dryrun.js --no-browser         # config and FX checks only
  */
 import { getAdapter } from './adapters/registry.js';
 import { withSession } from './checkout/browser.js';
 import { buildCart, describeCart } from './checkout/cart.js';
 import { driveToPayment, isEscalation } from './checkout/purchase.js';
 import { describeConfig, loadConfig, requirePassphrase } from './config.js';
-import { decideFunding, explainFunding } from './pay/funding.js';
 import { getArsPerUsd } from './pay/fx.js';
-import { formatUsd, toUsd } from './pay/vyrion.js';
 import { redactToString } from './secure/redact.js';
 import type { DeliveryAddress, Product } from './types.js';
-import { pickBin, toDeliveryAddress, vyrionFrom, type AddressInput } from './tools.js';
+import { toDeliveryAddress, type AddressInput } from './tools.js';
 import { formatARS } from './util/money.js';
 
 // ---- arguments -------------------------------------------------------------
@@ -86,23 +81,6 @@ head('Configuration');
 console.log(describeConfig(cfg));
 const address = addressFromArgs();
 say(address ? `Delivery address given: ${address.street} ${address.number}, CP ${address.postalCode}` : 'No address given (--street/--number) — the run will use whatever the account already has.');
-
-head('Vyrion — read-only checks');
-let requiredCents: number | undefined;
-let binId: string | undefined;
-try {
-  const client = vyrionFrom(cfg);
-  say(`key mode: ${client.isLive ? 'LIVE (sk_live_)' : 'sandbox (sk_test_)'}`);
-  const balance = await client.walletBalance();
-  say(`settled balance:  ${formatUsd(balance.settled)}`);
-  say(`pending deposits: ${formatUsd(balance.pending)}  (never counted towards a purchase)`);
-  const bins = await client.bins();
-  say(`3DS-capable BINs: ${bins.length ? bins.map((b) => `${b.id}(${b.network})`).join(', ') : 'none'}`);
-  binId = pickBin(bins, opt('bin')).id;
-  say(`would use BIN:    ${binId}`);
-} catch (e) {
-  bad('Vyrion', e);
-}
 
 head('FX rate');
 let arsPerUsd = 0;
@@ -189,41 +167,9 @@ try {
   }
 }
 
-head('What would have been sent to Vyrion — and was not');
-if (totalCentavos > 0 && arsPerUsd > 0) {
-  const plan = decideFunding({
-    arsTotal: totalCentavos,
-    arsPerUsd,
-    // Real balance is irrelevant to the shape of the request; show the request.
-    settledUsdCents: Number.MAX_SAFE_INTEGER,
-    buffer: cfg.fx.buffer,
-  });
-  requiredCents = plan.requiredUsdCents;
-
-  console.log(`   POST /cards\n${indent(JSON.stringify({
-    bin_id: binId ?? '<no BIN available>',
-    amount: toUsd(requiredCents),
-    spending_limit: toUsd(requiredCents),
-    allowed_categories: cfg.vyrion.allowedCategories,
-    label: 'grocery order',
-  }, null, 2))}`);
-  console.log(`   GET  /cards/{id}/details        → PAN/CVV, held in memory for the form fill only`);
-  console.log(`   GET  /3ds                       → polled for the one-time code`);
-  console.log(`   DELETE /cards/{id}              → terminated, residual back to the wallet`);
-  console.log('');
-  console.log(explainFunding(plan).split('\n').map((l) => `   ${l}`).join('\n'));
-} else {
-  say('no total to size a card from — nothing to show.');
-}
-
 head('Result');
 console.log(`   Cart total driven to: ${totalCentavos > 0 ? formatARS(totalCentavos) : '(none)'}`);
-console.log(`   Card that would be created: ${requiredCents ? formatUsd(requiredCents) : '(none)'}`);
-console.log('   Cards created: 0.  Payments submitted: 0.  Nothing was charged.');
+console.log('   Payments submitted: 0.  Nothing was charged.');
 console.log(problems === 0 ? '\n   ✓ dry run clean' : `\n   ✗ ${problems} problem(s) — fix these before a live run`);
 
 process.exit(problems ? 1 : 0);
-
-function indent(s: string): string {
-  return s.split('\n').map((l) => `     ${l}`).join('\n');
-}

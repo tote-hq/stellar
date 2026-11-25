@@ -6,8 +6,7 @@
  * No legal entity, address or registration number is stated because none
  * exists in the repositories.
  *
- * The support address is SUPPORT_EMAIL from @changuito/trust. It is
- * temporary until a Changuito workspace mailbox exists.
+ * The support address is SUPPORT_EMAIL from @changuito/trust.
  */
 import { SUPPORT_EMAIL } from '@changuito/trust';
 
@@ -18,9 +17,9 @@ export { SUPPORT_EMAIL };
 export type LegalLang = 'es' | 'en';
 export type LegalDoc = 'terms' | 'privacy' | 'deletion';
 
-export const LEGAL_UPDATED = '2026-10-25';
+export const LEGAL_UPDATED = '2026-11-24';
 /** Account-deletion page. Terms and privacy keep LEGAL_UPDATED. */
-export const DELETION_UPDATED = '2026-10-27';
+export const DELETION_UPDATED = '2026-11-24';
 
 export interface LegalSection {
   id: string;
@@ -441,7 +440,7 @@ const DELETE_EN: readonly LegalSection[] = [
     heading: '2. Ask by email',
     paragraphs: [
       `If you cannot sign in, write to ${SUPPORT_EMAIL} with the subject “Delete my Changuito account”. Include the email you used to sign in, or your wallet address, so we can find the account.`,
-      `We delete the Changuito data we can match to that request within 30 days, and we reply to the same email when it is done. If we cannot match it, we reply and ask for the missing detail. The 30 days start once we can identify the account. ${SUPPORT_EMAIL} is temporary until a Changuito mailbox exists.`,
+      `We delete the Changuito data we can match to that request within 30 days, and we reply to the same email when it is done. If we cannot match it, we reply and ask for the missing detail. The 30 days start once we can identify the account.`,
     ],
   },
   {
@@ -485,7 +484,7 @@ const DELETE_ES: readonly LegalSection[] = [
     heading: '2. Pedirlo por correo',
     paragraphs: [
       `Si no podés entrar, escribinos a ${SUPPORT_EMAIL} con el asunto “Eliminar mi cuenta de Changuito”. Incluí el email con el que entraste, o la dirección de tu billetera, para que encontremos la cuenta.`,
-      `Borramos los datos de Changuito que podamos asociar a ese pedido dentro de los 30 días, y respondemos a ese mismo correo cuando está hecho. Si no podemos asociarlo, respondemos y pedimos el dato que falta. Los 30 días empiezan cuando podemos identificar la cuenta. ${SUPPORT_EMAIL} es temporario, hasta que exista un correo de Changuito.`,
+      `Borramos los datos de Changuito que podamos asociar a ese pedido dentro de los 30 días, y respondemos a ese mismo correo cuando está hecho. Si no podemos asociarlo, respondemos y pedimos el dato que falta. Los 30 días empiezan cuando podemos identificar la cuenta.`,
     ],
   },
   {

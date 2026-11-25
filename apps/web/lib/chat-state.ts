@@ -2,7 +2,7 @@ import type { Cart, Product } from '@changuito/mcp/types';
 import type { SessionSnapshot } from '@changuito/mcp/session';
 
 import type { ChatImage } from './chat-image.ts';
-import type { TurnStage, UiEvent } from './protocol';
+import type { CompareCard, CompareLineView, SearchCompareItem, SearchCompareStatus, TurnStage, UiEvent } from './protocol';
 
 /**
  * The transcript, as a reducer over UiEvents.
@@ -47,7 +47,43 @@ export type Block =
   | { kind: 'user'; id: string; text: string; failed?: SendFailure; image?: ChatImage }
   | { kind: 'say'; id: string; text: string; thinking: string; tools: ToolRun[] }
   | { kind: 'products'; id: string; items: Product[]; note?: string }
-  | { kind: 'cart'; id: string; cart: Cart; handoffUrl?: string }
+  | {
+      kind: 'cart';
+      id: string;
+      cart: Cart;
+      handoffUrl?: string;
+      dualCheckout?: boolean;
+      soloDia?: boolean;
+      /** False when this basket cannot be paid. A Coto order. */
+      orderable?: boolean;
+    }
+  | {
+      kind: 'compare';
+      id: string;
+      status: 'pending' | CompareCard['status'];
+      cartId: string;
+      handoffUrl: string;
+      matched: number;
+      lines: number;
+      gap?: CompareCard['gap'];
+      rows: CompareLineView[];
+      /** Set when this card may offer the dual mock pay. Pending and timed out never do. */
+      checkoutDemo?: boolean;
+    }
+  | {
+      kind: 'search_compare';
+      id: string;
+      /** The server id that pairs pending with the finished card. */
+      compareId: string;
+      status: SearchCompareStatus;
+      query: string;
+      postalCode?: string;
+      dia: SearchCompareItem[];
+      coto: SearchCompareItem[];
+      gapCentavos?: number;
+      feeCentavos?: number;
+    }
+  | { kind: 'missing'; id: string; query: string; retailer: 'dia' | 'coto'; item: string }
   | { kind: 'error'; id: string; message: string; recoverable: boolean };
 
 export interface ChatState {
@@ -59,10 +95,27 @@ export interface ChatState {
   /** Opaque to the browser; handed back on the next turn so the agent remembers. */
   snapshot?: SessionSnapshot;
   /** The newest cart seen, wherever it appeared. What the pay button settles. */
-  cart?: { cart: Cart; handoffUrl?: string };
+  cart?: { cart: Cart; handoffUrl?: string; dualCheckout?: boolean; soloDia?: boolean };
 }
 
 export const initialState: ChatState = { blocks: [], streaming: false };
+
+/** The rail hides its pay control while the dual mock cards are the way to pay. */
+export function dualCheckoutOn(state: Pick<ChatState, 'blocks' | 'cart'>): boolean {
+  if (state.cart?.dualCheckout) return true;
+  for (const block of state.blocks) {
+    if (block.kind === 'cart' && block.dualCheckout) return true;
+    if (
+      block.kind === 'compare' &&
+      block.checkoutDemo &&
+      (block.status === 'ok' || block.status === 'degraded') &&
+      block.matched >= 1
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 let seq = 0;
 const nextId = () => `b${++seq}`;
@@ -230,6 +283,10 @@ export function applyEvent(state: ChatState, e: UiEvent): ChatState {
         // that adds it is the second of the pair, so this only matters in the
         // other order, where dropping it would remove a button the user saw.
         handoffUrl: e.handoffUrl ?? prior?.handoffUrl,
+        // The flag is read every hop. A later card without it is the flag off.
+        ...(e.dualCheckout ? { dualCheckout: true } : {}),
+        ...(e.soloDia ? { soloDia: true } : {}),
+        ...(e.orderable === false ? { orderable: false } : {}),
       });
 
       const blocks = prior
@@ -238,7 +295,12 @@ export function applyEvent(state: ChatState, e: UiEvent): ChatState {
 
       return {
         ...state,
-        cart: { cart: e.cart, handoffUrl: e.handoffUrl ?? prior?.handoffUrl },
+        cart: {
+          cart: e.cart,
+          handoffUrl: e.handoffUrl ?? prior?.handoffUrl,
+          ...(e.dualCheckout ? { dualCheckout: true } : {}),
+          ...(e.soloDia ? { soloDia: true } : {}),
+        },
         // Reusing the id matters: React keys off it, so the card updates in
         // place instead of unmounting and animating back in. The cart-link
         // row is removed in the same step, so it does not sit under the card
@@ -246,6 +308,93 @@ export function applyEvent(state: ChatState, e: UiEvent): ChatState {
         blocks: withoutCartLinkTrail(blocks, turnStart),
       };
     }
+
+    case 'compare': {
+      // Same rule as the cart card: one compare block per cart in this turn,
+      // replaced in place so the pending row becomes the finished one without
+      // a second animation. A compare from an earlier turn stays as history.
+      const turnStart = lastIndexWhere(state.blocks, (b) => b.kind === 'user');
+      const existing = lastIndexWhere(
+        state.blocks,
+        (b, i) => i > turnStart && b.kind === 'compare' && b.cartId === e.cartId,
+      );
+      const prior = existing === -1 ? undefined : (state.blocks[existing] as Extract<Block, { kind: 'compare' }>);
+      const block: Extract<Block, { kind: 'compare' }> = e.status === 'pending'
+        ? {
+            kind: 'compare',
+            id: prior?.id ?? nextId(),
+            status: 'pending',
+            cartId: e.cartId,
+            handoffUrl: e.handoffUrl || prior?.handoffUrl || '',
+            matched: 0,
+            lines: 0,
+            rows: [],
+          }
+        : {
+            kind: 'compare',
+            id: prior?.id ?? nextId(),
+            status: e.status,
+            cartId: e.cartId,
+            handoffUrl: e.handoffUrl || prior?.handoffUrl || '',
+            matched: e.matched,
+            lines: e.lines,
+            rows: e.rows,
+            ...(e.gap ? { gap: e.gap } : {}),
+            ...(e.checkoutDemo && (e.status === 'ok' || e.status === 'degraded') && e.matched >= 1
+              ? { checkoutDemo: true }
+              : {}),
+          };
+      const blocks = prior
+        ? state.blocks.map((b, i) => (i === existing ? block : b))
+        : [...state.blocks, block];
+      return { ...state, blocks };
+    }
+
+    case 'search_compare': {
+      // Same rule as the cart card: pending becomes the finished card in place.
+      const turnStart = lastIndexWhere(state.blocks, (b) => b.kind === 'user');
+      const existing = lastIndexWhere(
+        state.blocks,
+        (b, i) => i > turnStart && b.kind === 'search_compare' && b.compareId === e.id,
+      );
+      const prior = existing === -1 ? undefined : (state.blocks[existing] as Extract<Block, { kind: 'search_compare' }>);
+      const block: Extract<Block, { kind: 'search_compare' }> = e.status === 'pending'
+        ? {
+            kind: 'search_compare',
+            id: prior?.id ?? nextId(),
+            compareId: e.id,
+            status: 'pending',
+            query: e.query,
+            ...(e.postalCode ? { postalCode: e.postalCode } : {}),
+            dia: [],
+            coto: [],
+          }
+        : {
+            kind: 'search_compare',
+            id: prior?.id ?? nextId(),
+            compareId: e.id,
+            status: e.status,
+            query: e.query,
+            ...(e.postalCode || prior?.postalCode ? { postalCode: e.postalCode ?? prior?.postalCode } : {}),
+            dia: e.dia,
+            coto: e.coto,
+            ...(e.gapCentavos === undefined ? {} : { gapCentavos: e.gapCentavos }),
+            ...(e.feeCentavos === undefined ? {} : { feeCentavos: e.feeCentavos }),
+          };
+      const blocks = prior
+        ? state.blocks.map((b, i) => (i === existing ? block : b))
+        : [...state.blocks, block];
+      return { ...state, blocks };
+    }
+
+    case 'missing':
+      return {
+        ...state,
+        blocks: [
+          ...state.blocks,
+          { kind: 'missing', id: nextId(), query: e.query, retailer: e.retailer, item: e.item },
+        ],
+      };
 
     case 'error': {
       const blocks: Block[] = [

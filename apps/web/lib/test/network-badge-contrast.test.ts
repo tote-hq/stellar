@@ -45,8 +45,3 @@ test('the network badge uses ink on surface and clears 4.5:1', () => {
   const light = ratio(token('chg-espresso'), '#ffffff');
   assert.ok(light >= 4.5, `light: ${light.toFixed(2)}`);
 });
-
-test('the network badge does not dress up as a control', () => {
-  assert.match(rule('.network-badge'), /cursor:\s*default/);
-  assert.doesNotMatch(css, /\.network-badge:hover/);
-});

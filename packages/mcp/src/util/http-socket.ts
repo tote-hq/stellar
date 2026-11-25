@@ -6,10 +6,13 @@
  * request comes back as an HTML block instead of the JSON the adapter needs.
  * A TLS socket carries only the headers written here. Node never calls this:
  * the module that opens the socket is loaded only after a Worker fetch has
- * already failed to produce JSON.
+ * already failed to produce a usable body.
+ *
+ * Cap is above Coto's storefront `main.*.js` (~2.4MB), which compare may scrape
+ * for the public Constructor key when Workers fetch is blocked.
  */
 
-const MAX_BYTES = 2_000_000;
+const MAX_BYTES = 5_000_000;
 
 type Socket = {
   readable: ReadableStream<Uint8Array>;

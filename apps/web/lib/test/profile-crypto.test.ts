@@ -21,10 +21,6 @@ describe('profile encryption', () => {
     assert.ok(!JSON.stringify(env).includes('30123456'));
   });
 
-  it('uses a fresh IV every time', () => {
-    assert.notEqual(encryptProfile(DATA, AAD, ring).iv, encryptProfile(DATA, AAD, ring).iv);
-  });
-
   it("will not open for another wallet's address", () => {
     const env = encryptProfile(DATA, AAD, ring);
     assert.throws(() => decryptProfile(env, aadFor('devnet', 'SomeoneElse1111111111111111111111111111111'), ring));

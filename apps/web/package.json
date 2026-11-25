@@ -15,7 +15,7 @@
     "build:vinext": "vite build",
     "postbuild:vinext": "node ../../scripts/migrate-on-build.mjs",
     "start:vinext": "vinext start",
-    "deploy:vinext": "vinext-cloudflare deploy --skip-build"
+    "deploy:vinext": "node ../../scripts/deploy-vinext.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.127.0",
@@ -30,8 +30,10 @@
     "@stellar/stellar-sdk": "17.1.0",
     "@upstash/redis": "^1.39.0",
     "@vinext/cloudflare": "^1.3.2",
+    "hash-wasm": "4.12.0",
     "next": "16.3.5",
     "postgres": "^3.4.9",
+    "posthog-js": "1.453.0",
     "qr.js": "0.0.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

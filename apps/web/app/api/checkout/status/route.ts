@@ -9,15 +9,14 @@
  *   - store failed / not placed  -> refund: vault -> buyer
  *   - deadline passed while open -> refund: vault -> buyer
  *
- * "Store failed" includes a declined card, a card that was never tried (the
- * job carried no card because `shared_card` has no row) and a run that never reached payment.
- * A demo run (a wallet not on the card's member list) stops at payment on
- * purpose and still *settles* once it gets there: the treasury takes the
- * testnet USDC so the demo ends like a purchase, and the receipt's basis is
- * `demo-reached-payment`, not `sandbox-order-placed`. The reply carries the
- * cart link so the shopper finishes in Día.
- * The treasury keeps the USDC only when the operator's card actually paid
- * for the shopper's order; the receipt carries Día's order number.
+ * "Store failed" includes a declined payment, a payment that was never tried
+ * (the job carries no card) and a run that never reached payment.
+ * A demo run stops at payment on purpose and still *settles* once it gets
+ * there: the treasury takes the testnet USDC so the demo ends like a purchase,
+ * and the receipt's basis is `demo-reached-payment`, not `sandbox-order-placed`.
+ * The reply carries the cart link so the shopper finishes in Día.
+ * The treasury keeps the USDC only when the store actually placed the order;
+ * the receipt carries Día's order number.
  *
  * Idempotent by reading the chain first: a closed order is reported, never
  * closed again. Settle still passes the on-chain basket_hash, so a different
@@ -25,6 +24,9 @@
  */
 import { createHash } from 'node:crypto';
 
+import { cotoDemoPayRecord, cotoRealRecord, settleBasis } from '../../../../lib/checkout/coto-guard.ts';
+import { adminStore } from '../../../../lib/admin/store.ts';
+import { COTO_REAL_WAIT, cotoRealOutcome, cotoShopperBody, shopperCopy, type ShopperPrompt } from '../../../../lib/checkout/coto-real.ts';
 import { readOrder, refundOrder, settleOrder } from '../../../../lib/checkout/escrow-server.ts';
 import { refundReason } from '../../../../lib/checkout/failure.ts';
 import { checkoutAlert, resolverFailureCode, resolverLogLine } from '../../../../lib/checkout/resolver-alert.ts';
@@ -44,7 +46,15 @@ export const dynamic = 'force-dynamic';
 const g = globalThis as { __chgClosing?: Set<string> };
 const closing = (g.__chgClosing ??= new Set());
 
-function reply(rec: CheckoutRecord, stage: StatusResponse['stage']): Response {
+function reply(
+  rec: CheckoutRecord,
+  stage: StatusResponse['stage'],
+  note?: string | null,
+  prompt?: ShopperPrompt | null,
+): Response {
+  if (cotoRealRecord(rec)) {
+    return Response.json(cotoShopperBody(rec, stage, note ?? null, prompt), { headers: { 'cache-control': 'no-store' } });
+  }
   const res: StatusResponse = {
     orderId: rec.orderId,
     stage,
@@ -102,15 +112,62 @@ export async function GET(req: Request): Promise<Response> {
   if (!rec.jobId) return reply(rec, 'quoted');
 
   let finished: 'settle' | 'refund' | null = null;
+  let note: string | null = null;
+  let prompt: ShopperPrompt | null = null;
   if (rec.jobId === 'none') {
     finished = 'refund';
+    if (cotoRealRecord(rec)) rec.error = rec.error ?? shopperCopy(null);
   } else {
     try {
       const job = await readJob(rec.jobId);
       rec.phase = job.phase;
-      if (job.status === 'done' || job.status === 'failed') {
+      if (cotoRealRecord(rec)) {
+        const decision = cotoRealOutcome({
+          status: job.status,
+          payment: job.result?.payment ?? null,
+          storeOrderId: job.result?.store_order_id ?? null,
+        });
+        if (job.status === 'running' && job.phase === 'needs_human') {
+          note = COTO_REAL_WAIT;
+          try {
+            await adminStore().notifyOnce('needs_human', rec.orderId, 'El pago necesita a una persona.');
+          } catch (err) {
+            console.error('[checkout/status] notify', err instanceof Error ? err.name : 'insert');
+          }
+        }
+        if (job.status === 'running' && job.phase === 'needs_shopper' && job.prompt?.label) {
+          prompt = {
+            label: job.prompt.label,
+            fieldRef: job.prompt.fieldRef ?? null,
+            options: job.prompt.options ?? null,
+          };
+          try {
+            await adminStore().notifyOnce('needs_shopper', rec.orderId, job.prompt.label);
+            await adminStore().openPrompt({
+              orderId: rec.orderId,
+              label: job.prompt.label,
+              fieldRef: job.prompt.fieldRef ?? null,
+              options: job.prompt.options ?? null,
+              source: 'agent',
+            });
+          } catch (err) {
+            console.error('[checkout/status] prompt', err instanceof Error ? err.name : 'insert');
+          }
+        }
+        if (decision === 'settle') {
+          finished = 'settle';
+          rec.storeOrderId = job.result?.store_order_id ?? undefined;
+          rec.payment = 'placed';
+        } else if (decision === 'refund') {
+          finished = 'refund';
+          rec.payment = job.result?.payment ?? 'not_attempted';
+          rec.error = shopperCopy(job.result?.code, job.result?.payment);
+        }
+      } else if (job.status === 'done' || job.status === 'failed') {
         rec.payment = job.result?.payment ?? 'not_attempted';
-        rec.storeOrderForm = job.result?.cart?.orderFormId;
+        // A Coto mock must not inherit the Día order form or the payment URL
+        // the in-process mock stamps on every job. Those belong to Día.
+        if (!cotoDemoPayRecord(rec)) rec.storeOrderForm = job.result?.cart?.orderFormId;
         // A demo run that reached payment is a finished order too: the
         // treasury takes the (testnet) USDC as it would for a placed one, so
         // the demo ends the way a purchase does. Its receipt says what it was.
@@ -147,7 +204,19 @@ export async function GET(req: Request): Promise<Response> {
   if (!finished || closing.has(orderId)) {
     noteAlert(rec);
     await store.set(rec);
-    return reply(rec, 'shopping');
+    return reply(rec, 'shopping', note, prompt);
+  }
+
+  if (cotoRealRecord(rec)) {
+    try {
+      await adminStore().notifyOnce(
+        finished === 'settle' ? 'placed' : 'failed',
+        rec.orderId,
+        finished === 'settle' ? 'El pedido quedó hecho.' : 'El pedido no se completó.',
+      );
+    } catch (err) {
+      console.error('[checkout/status] notify', err instanceof Error ? err.name : 'insert');
+    }
   }
 
   closing.add(orderId);
@@ -163,7 +232,7 @@ export async function GET(req: Request): Promise<Response> {
             basketHash: order.basketHash,
             amountUnits: order.amount.toString(),
             settledAt: new Date().toISOString(),
-          }).replace('basis|buyer-confirmed', rec.mode === 'demo' ? 'basis|demo-reached-payment' : 'basis|sandbox-order-placed') +
+          }).replace('basis|buyer-confirmed', settleBasis(rec)) +
           `job|${rec.jobId}\norderform|${rec.storeOrderForm ?? ''}\nstore-order|${rec.storeOrderId ?? ''}\n`;
         // basketHash comes from the on-chain order, never from a re-quoted cart.
         rec.closeSig = await settleOrder(order, createHash('sha256').update(receipt).digest());

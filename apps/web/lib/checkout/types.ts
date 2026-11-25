@@ -1,5 +1,7 @@
 /** Wire shapes shared by app/api/checkout/* and CheckoutModal. Types only. */
 
+import type { ComparisonQuote } from './compare-fee.ts';
+
 export interface QuoteResponse {
   checkoutKind?: 'manual_fee_v1';
   orderNonce?: string;
@@ -30,11 +32,18 @@ export interface QuoteResponse {
   programId: string;
   usdcMint: string;
   /**
-   * Which run this checkout gets (lib/shared-card.ts `checkoutMode`): `live`
-   * pays with the shared card and needs the Día login; `demo` stops at payment,
-   * refunds and hands off to the cart link; `mock` is the operator's mock.
+   * Which run this checkout gets (lib/checkout/mode.ts): `live` is an admitted
+   * manual checkout and needs the Día login; `demo` stops at payment, refunds
+   * and hands off to the cart link; `mock` is the operator's mock.
    */
   mode: 'live' | 'demo' | 'mock';
+  /**
+   * Set when this quote compared the Día basket with the Coto catalog.
+   * `amountCents` already includes `feeUsdCents` (may be 0). Coto is not checked out.
+   */
+  comparison?: ComparisonQuote;
+  /** Solo Día / Solo Coto / Dual — drives which PayCard the client showed. */
+  checkoutPath?: 'solo_dia' | 'solo_coto' | 'dual';
 }
 
 export type CheckoutStage = 'quoted' | 'locked' | 'shopping' | 'done' | 'refunded';

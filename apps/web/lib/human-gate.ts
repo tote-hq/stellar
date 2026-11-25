@@ -6,6 +6,7 @@
  * httpOnly cookie. APIs refuse without it in production.
  */
 
+import { turnstileDisabled } from './config.ts';
 import { SOLO_HUMANOS } from './human-gate-ui.ts';
 
 export { SOLO_HUMANOS, HUMAN_REQUIRED_EVENT, clientGateDecision, notifyHumanRequired } from './human-gate-ui.ts';
@@ -23,11 +24,11 @@ function nonempty(value: unknown): string {
 /**
  * Turnstile env.
  *
- * Next and Vercel only ship a variable that the source mentions as
+ * Next only inlines a variable the source mentions as
  * `process.env.NAME`. A bracket lookup alone is invisible to that pass, so
  * production reported both keys missing and the shopper never mounted the
  * widget. The literal member expressions below are the ones the bundler sees.
- * Bracket access still wins when the lambda has a runtime value the build
+ * Bracket access still wins when the Worker has a runtime binding the build
  * did not inline.
  *
  * The secret is what makes the gate real. The site key is public and is what
@@ -56,6 +57,18 @@ export function humanGateMode(env: NodeJS.ProcessEnv = process.env): GateMode {
   if (turnstileSecret(env)) return 'enforce';
   if (env.NODE_ENV === 'production') return 'closed';
   return 'open';
+}
+
+/**
+ * Env mode, unless the operator set `turnstile_disabled` in the config table.
+ * That read lives in `turnstileDisabled` (JSON true or "true"). Already-open
+ * skips the database: local dev without keys must not dial Postgres.
+ */
+export async function resolveHumanGateMode(env: NodeJS.ProcessEnv = process.env): Promise<GateMode> {
+  const mode = humanGateMode(env);
+  if (mode === 'open') return 'open';
+  if (await turnstileDisabled()) return 'open';
+  return mode;
 }
 
 export function soloHumanosResponse(status = 403): Response {
@@ -192,9 +205,11 @@ export async function verifyTurnstile(
  * Call at the top of every cost-bearing route.
  */
 export async function requireHuman(req: Request, env: NodeJS.ProcessEnv = process.env): Promise<Response | null> {
-  const mode = humanGateMode(env);
+  const mode = await resolveHumanGateMode(env);
   if (mode === 'open') {
-    if (!(globalThis as { __chgHumanWarned?: boolean }).__chgHumanWarned) {
+    // The warning is for missing keys. An operator who set turnstile_disabled
+    // already chose this, including in production.
+    if (humanGateMode(env) === 'open' && !(globalThis as { __chgHumanWarned?: boolean }).__chgHumanWarned) {
       (globalThis as { __chgHumanWarned?: boolean }).__chgHumanWarned = true;
       console.warn(
         '[changuito] human-gate OPEN (dev): set NEXT_PUBLIC_TURNSTILE_SITE_KEY + TURNSTILE_SECRET_KEY to enforce.',

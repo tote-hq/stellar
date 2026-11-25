@@ -17,7 +17,7 @@ import { createSessionState, type SessionState } from '@changuito/mcp/session';
  *
  * Spawning the published binary as a subprocess would also be real MCP, but
  * the binary registers the checkout tools, which drive a headed browser on the
- * server host. That cannot run on Vercel. `@changuito/mcp/server` is the half
+ * server host. That cannot run on the Worker. `@changuito/mcp/server` is the half
  * that can: it has no path to the checkout module at all.
  */
 export interface McpPair {

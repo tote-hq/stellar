@@ -90,10 +90,20 @@ fingerprint has changed since the last card. Four parts hold it up:
   records which cartId `handoffUrl` belongs to, at `get_cart_link`, the one
   moment the pairing is known. A card whose only actionable control is missing
   is the first bug again; a link carried onto a different basket opens somebody
-  else's.
+  else's. A Coto basket is the exception, and it does not reopen that bug. It
+  has no store link and no pay control — Coto payment is not implemented — so
+  the card draws from the lines alone and says the order cannot be paid yet.
+  A Día cart without a link still does not draw. The link rule exists because
+  a Día card's action is that link. A card that is not allowed to spend
+  anything is not missing its only control.
 - **`drawn` and `handoffFor` ride in `turn-store.ts` as optional fields**, not a
   `v: 2`. A version bump resets every conversation in flight at deploy time,
   which is a worse trade than one redundant card.
+
+The Día vs Coto card draws itself the same way, for a Día cart only, when
+`chat_dual_compare` is on. It is not a model tool. `autoCompare` runs from the
+loop after `get_cart_link`, and the prices on the card come from the catalog
+lookup, never from a tool argument. A missing config row leaves the card off.
 
 `render_cart` survives for the one job left to it: bringing an *unchanged*
 basket back after a question about it. Its description says so, and says never
@@ -144,7 +154,7 @@ Failed MCP tools stay visible. Do not "clean up" the trail by hiding those.
 *`c88332d`.*
 
 History used to be a module-scope `Map`. On one developer's machine that is
-correct and free. On Vercel it is not: module scope is a cache, not a database,
+correct and free. On a serverless host it is not: module scope is a cache, not a database,
 and a cold start, a deploy or a scale-out mid-basket wipes it. The symptom was
 the agent re-asking a question the user had already answered while the page
 still showed every bubble — the user sees continuity the server does not have,
@@ -223,8 +233,9 @@ along with their tests, and `loop.ts` calls `anthropicProvider()` directly.
 answer "is the machine really being used?", because `auto` succeeds either way
 by design. But it made two variables that had to agree — the provider name and
 the URL — and they were set in different moments, so removing `OLLAMA_URL` from
-Vercel while the provider name stayed behind asked for a model that could not
-be reached and forbade the only fallback. Every turn died at the first hop, in
+the deployment's environment while the provider name stayed behind asked for a
+model that could not be reached and forbade the only fallback. Every turn died
+at the first hop, in
 Spanish, saying the local model was unavailable. A working deployment turned
 off by deleting a variable that was no longer used.
 
@@ -337,54 +348,34 @@ the message, which is what used to happen to every message.
 
 ---
 
-## Two repos, one product
+## 8. A search can ask both chains, and a Coto basket draws without a link
 
-This repo is one of two under `tote-hq`: **`stellar`** and **`solana`**. They
-share everything up to `419304d` and diverge from there — the chain layer
-(escrow, wallet, checkout) is different, and the agent, the MCP package, the
-landing, the gates and the migrations are the same code twice. The split
-exists so each chain's judges see only that chain's work, with real PRs,
-reviews and CI; it is not a monorepo with a mirror, and nothing syncs by
-itself.
+When `chat_dual_compare` is on, `retailer_search.enabled.coto` is true, and the
+session retailer is Día, `search_products` also queries the Coto catalog
+in-process, in parallel with the Día call, with a 10s cap. The Coto lookup is
+not an MCP call and gets no trail row (§3). The shopper picks the chain with
+`choose_retailer`. The model cannot `add_to_cart` before that choice, and it
+cannot pick the cheaper chain: the chosen store has to be named in the
+shopper's message or in the assistant question just before it.
 
-The rules, enforced by `.github/workflows/shared-label.yml` and carried out
-by `.github/workflows/sync.yml`:
+`choose_retailer` only records the chain. It does not put lines in the basket,
+and `autoRenderCart` draws nothing until there are lines (a Día card also
+needs `get_cart_link`). The click "Pedir en Día" is the sentence "Quiero pedir
+en Día." The prompt, the tool description and the tool result all tell the
+model to `add_to_cart` and `get_cart_link` in that same turn. Stopping after
+`choose_retailer` is how a turn ended with the compare card still on screen
+and no cart. The compared item is `pairDia` / `pairCoto` on the
+`search_compare` line, not every row on the card.
 
-- **A PR that touches a path in `.github/shared-paths.txt` must carry one of
-  two labels**, or the check fails and it cannot merge. `shared` means: when
-  this merges, cherry-pick it into the sibling repo and open a PR there.
-  `chain-only` means: this touches shared paths but stays here on purpose —
-  the sibling already has it, or it must not have it.
-- **A `shared` PR becomes an ordinary PR in the sibling**, on a
-  `sync/<source branch>` branch, labelled `chain-only`, with the source PR's
-  title and body and the original author on the commit. Review it there like
-  any other PR, and merge it the same day: an unmerged sync PR is exactly the
-  drift the labels exist to make visible.
-- **Nothing in the sibling names where a change came from** — not the
-  branch, title, body, commit or issue — because each repo is judged on its
-  own. The link is recorded on the source PR instead, as a comment with the
-  sibling PR number inside a code span. Keep it in one: a plain `org/repo#N`
-  or URL anywhere public puts a "mentioned this" entry on the sibling PR's
-  timeline, which is the link this avoids. Write shared PR descriptions and
-  commit messages without naming either chain; when one does, the workflow
-  gives the sibling PR a neutral body and drops the commit messages.
-- **A conflict opens a neutral issue in the sibling, not a broken branch.**
-  The commands to resolve it go on the source PR. Whoever owns the sibling
-  resolves it on a `sync/` branch, labelled `chain-only`, committed as the
-  original author without `-x`.
-- **Never label a `sync/…` PR `shared`.** The workflow skips those branches
-  anyway, but the label would be a lie.
-- **Merge by squash or merge commit, never rebase.** Rebase merging is off in
-  both repos because its `merge_commit_sha` is only the last of N commits and
-  the sync would carry one commit out of N.
-- **`.github/shared-paths.txt` is itself a shared path.** Edit it in one repo
-  with the `shared` label and let the sync carry it, so the two lists cannot
-  disagree about what is shared.
+A Coto basket is lines held on the session snapshot (`order`, `coto`) and
+priced from `CotoCatalog.getProduct` on every read. The id is a stable
+`coto-<uuid>`. Oracle ATG, the store link and payment are not implemented.
+`getAdapter('coto')` still throws. `autoCompare` stays Día-only.
 
-Prefix PR titles with what the PR is — `stellar:`, `solana:` or `shared:` —
-because judges read titles, not diffs. Needs that are not in the repo:
-`SYNC_TOKEN` (a fine-grained PAT with Contents, Pull requests and Issues on
-both repos) as a secret in each, and the two labels.
+`render_missing` takes a query and a retailer, and only when that query was
+searched this turn on that store and came back with no available hit.
+
+---
 
 ## Things that are the way they are on purpose
 
@@ -412,7 +403,7 @@ both repos) as a secret in each, and the two labels.
 ## Before you commit
 
 ```
-npm test -w @changuito/web      # 577 tests, node:test with --experimental-strip-types
+npm test                        # 720: mcp 209 · trust 1 · web 510
 npm run typecheck -w @changuito/web
 npm run build
 ```
@@ -439,9 +430,10 @@ Two constraints that bite in this repo specifically:
   The same goes for `enum` and namespaces. If a test dies at load with that
   code, this is why.
 
-**Don't modify the tests.** For now they are the fixed point the deployment is
-checked against: a change that only passes because its test moved with it tells
-you nothing once it is live. If a test is genuinely wrong, say so rather than
-editing it — and a test file that has to go because the module under it is gone
-is a deletion, which is a different thing and worth naming out loud.
+**A test may be deleted or changed when the PR says which one and why.**
+Deleting or weakening a test on money, auth or security needs the person's
+approval (`Blocked: approval`).
+
+While building, run only the tests of the package being changed
+(`npm test -w <package>`); the full suite runs in the gate.
   

@@ -9,8 +9,14 @@ const page = publicPage('/stats');
 
 export const metadata: Metadata = pageMetadata(page);
 
-/** Regenerated in the background at most every 5 minutes. */
-export const revalidate = 300;
+/**
+ * Render on the request. getStatsSnapshot returns a cached snapshot or a
+ * live read that always finishes inside its deadline, so this document is
+ * not a prerender the build can omit and the build does not call the RPCs.
+ * The Worker sets Cache-Control on the way out (s-maxage and
+ * stale-while-revalidate) for the HTML. Flight requests are left uncached.
+ */
+export const dynamic = 'force-dynamic';
 
 export default async function StatsPage() {
   const snapshot = await getStatsSnapshot();

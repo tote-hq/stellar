@@ -1,5 +1,6 @@
 import type { NetworkId } from './deployments.ts';
 import { authorizeFaucet, faucetView } from './faucet-auth.ts';
+import { MAX_CHUNKS, MIN_CHUNKS } from './faucet-policy.ts';
 import type { FaucetAccess, FaucetProof } from './faucet-proof.ts';
 import { requireHuman } from './human-gate.ts';
 import { guestTurnCounter, limiterUnavailableResponse, takeQuota, type TurnCounter } from './login-gate.ts';
@@ -48,18 +49,33 @@ export async function gateFaucet(
   now: number = Date.now(),
   store: TurnCounter = guestTurnCounter(env),
   wallets?: WalletDirectory,
-): Promise<{ address: string; kind: 'account' | 'contract'; network: NetworkId } | Response> {
+): Promise<{ address: string; kind: 'account' | 'contract'; network: NetworkId; chunks: number } | Response> {
   const gated = await requireHuman(req, env);
   if (gated) return gated;
 
   let address: string;
   let proof: Partial<FaucetProof> | null = null;
   let networkParam: unknown = undefined;
+  let chunks = 1;
   try {
-    const body = (await req.json()) as { address?: unknown; proof?: unknown; network?: unknown };
+    const body = (await req.json()) as { address?: unknown; proof?: unknown; network?: unknown; chunks?: unknown };
     address = typeof body.address === 'string' ? body.address : '';
     if (body.proof && typeof body.proof === 'object') proof = body.proof as Partial<FaucetProof>;
     networkParam = body.network;
+    if (body.chunks !== undefined && body.chunks !== null) {
+      if (
+        typeof body.chunks !== 'number' ||
+        !Number.isInteger(body.chunks) ||
+        body.chunks < MIN_CHUNKS ||
+        body.chunks > MAX_CHUNKS
+      ) {
+        return Response.json(
+          { error: `chunks must be an integer from ${MIN_CHUNKS} to ${MAX_CHUNKS}.` },
+          { status: 400 },
+        );
+      }
+      chunks = body.chunks;
+    }
   } catch {
     return Response.json({ error: 'expected a JSON body' }, { status: 400 });
   }
@@ -101,5 +117,5 @@ export async function gateFaucet(
     return Response.json({ error: 'rate_limited', message: busy, note: busy }, { status: 429 });
   }
 
-  return { address, kind, network };
+  return { address, kind, network, chunks };
 }

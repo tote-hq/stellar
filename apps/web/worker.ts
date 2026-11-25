@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import handler from "vinext/server/fetch-handler";
 
 import { applyContractIdBindings } from "./lib/contract-ids.ts";
+import { proxyPostHog } from "./lib/posthog-proxy.ts";
 import { applyRpcUrlBindings } from "./lib/rpc-url.ts";
 
 /**
@@ -15,6 +16,8 @@ const fetchHandler = handler as {
 
 export default {
   fetch(request: Request, cfEnv: unknown, ctx: unknown) {
+    const proxied = proxyPostHog(request);
+    if (proxied) return proxied;
     const binding = (env as { HYPERDRIVE?: { connectionString?: string } }).HYPERDRIVE;
     const url = binding?.connectionString?.trim();
     if (url) {

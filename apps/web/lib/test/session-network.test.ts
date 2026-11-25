@@ -18,23 +18,17 @@ describe('sessionNetwork', () => {
   it('RULE: a session lands on the login network', () => {
     assert.equal(sessionNetwork(true, 'testnet', DEFAULT_NETWORK), 'testnet');
     assert.equal(sessionNetwork(true, 'mainnet', DEFAULT_NETWORK), 'mainnet');
-  });
-
-  it('stays on the default when there is no login network at all', () => {
     assert.equal(sessionNetwork(true, null, DEFAULT_NETWORK), DEFAULT_NETWORK);
   });
 });
 
 describe('mode follows the session, not the network', () => {
-  it('RULE: production on testnet is a valid state', () => {
+  it('RULE: production on testnet keeps records and preview does not', () => {
     // Who pays is the session; which chain is the key. A signed-in shopper
     // on testnet is production — their wallet pays — and keeps records.
     assert.equal(modeForSession(true), 'production');
     assert.equal(sessionNetwork(true, 'testnet', DEFAULT_NETWORK), 'testnet');
     assert.equal(modeKeepsRecords(modeForSession(true)), true);
-  });
-
-  it('RULE: preview never keeps records', () => {
     assert.equal(modeKeepsRecords(modeForSession(false)), false);
   });
 });

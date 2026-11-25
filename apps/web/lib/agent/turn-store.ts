@@ -1,11 +1,15 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Cart, Product } from '@changuito/mcp/types';
+
+import { decodeCotoRealDia, decodeDiaPairs, type CotoRealDia, type DiaPair } from '../checkout/coto-real.ts';
 import { Redis } from '@upstash/redis';
 
 // Type-only, deliberately: a store that imported the agent loop would drag the
 // Anthropic client and the whole MCP bridge in behind it, for a file that only
 // ever moves plain data.
+import type { CompareCard } from '../protocol';
 import type { Turn } from './loop';
+import type { CotoCacheItem, SearchRecord } from './render-tools';
 
 /**
  * Where a conversation lives between two requests.
@@ -60,6 +64,18 @@ interface StoredTurn {
    */
   handoffFor?: string;
   drawn?: string;
+  /**
+   * The Día vs Coto card for this fingerprint. Optional on `v: 1` so a turn
+   * stored before the card existed still decodes. See autoCompare.
+   */
+  compareFor?: string;
+  compareResult?: CompareCard;
+  /** Coto hits and the searches that produced them. Optional on `v: 1`. */
+  coto?: Record<string, CotoCacheItem>;
+  searches?: SearchRecord[];
+  /** Día pairs and the chain-pick snapshot. Optional arrays, never a Map. */
+  diaPairs?: DiaPair[];
+  cotoRealDia?: CotoRealDia;
 }
 
 export function encodeTurn(turn: Turn): StoredTurn {
@@ -71,7 +87,58 @@ export function encodeTurn(turn: Turn): StoredTurn {
     handoffUrl: turn.cache.handoffUrl,
     handoffFor: turn.cache.handoffFor,
     drawn: turn.cache.drawn,
+    compareFor: turn.cache.compareFor,
+    compareResult: turn.cache.compareResult,
+    ...(turn.cache.coto ? { coto: turn.cache.coto } : {}),
+    ...(turn.cache.searches ? { searches: turn.cache.searches } : {}),
+    ...(turn.cache.diaPairs ? { diaPairs: turn.cache.diaPairs } : {}),
+    ...(turn.cache.cotoRealDia ? { cotoRealDia: turn.cache.cotoRealDia } : {}),
   };
+}
+
+function asCompareCard(value: unknown): CompareCard | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const card = value as Partial<CompareCard>;
+  if (card.status !== 'ok' && card.status !== 'degraded' && card.status !== 'timed_out') return undefined;
+  if (typeof card.cartId !== 'string' || typeof card.handoffUrl !== 'string') return undefined;
+  if (!Number.isSafeInteger(card.matched) || !Number.isSafeInteger(card.lines)) return undefined;
+  if (!Array.isArray(card.rows)) return undefined;
+  return card as CompareCard;
+}
+
+function asCoto(value: unknown): Record<string, CotoCacheItem> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const out: Record<string, CotoCacheItem> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (!raw || typeof raw !== 'object') continue;
+    const item = raw as Partial<CotoCacheItem>;
+    if (typeof item.id !== 'string' || typeof item.name !== 'string') continue;
+    if (!Number.isSafeInteger(item.shelfCentavos) || (item.shelfCentavos ?? 0) <= 0) continue;
+    out[key] = {
+      id: item.id,
+      name: item.name,
+      shelfCentavos: item.shelfCentavos as number,
+      available: item.available === true,
+      ...(typeof item.ean === 'string' ? { ean: item.ean } : {}),
+      ...(typeof item.brand === 'string' ? { brand: item.brand } : {}),
+      ...(typeof item.url === 'string' ? { url: item.url } : {}),
+      ...(typeof item.imageUrl === 'string' ? { imageUrl: item.imageUrl } : {}),
+    };
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function asSearches(value: unknown): SearchRecord[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const rows: SearchRecord[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue;
+    const row = raw as Partial<SearchRecord>;
+    if (typeof row.query !== 'string' || (row.retailer !== 'dia' && row.retailer !== 'coto')) continue;
+    if (!Number.isSafeInteger(row.available) || (row.available ?? -1) < 0) continue;
+    rows.push({ query: row.query, retailer: row.retailer, available: row.available as number });
+  }
+  return rows.length ? rows : undefined;
 }
 
 /**
@@ -84,6 +151,10 @@ export function decodeTurn(raw: unknown): Turn | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const s = raw as Partial<StoredTurn>;
   if (s.v !== 1 || !Array.isArray(s.messages) || !Array.isArray(s.products)) return undefined;
+  const coto = asCoto(s.coto);
+  const searches = asSearches(s.searches);
+  const diaPairs = decodeDiaPairs(s.diaPairs);
+  const cotoRealDia = decodeCotoRealDia(s.cotoRealDia);
 
   return {
     messages: s.messages,
@@ -93,6 +164,12 @@ export function decodeTurn(raw: unknown): Turn | undefined {
       handoffUrl: s.handoffUrl,
       handoffFor: s.handoffFor,
       drawn: s.drawn,
+      compareFor: typeof s.compareFor === 'string' ? s.compareFor : undefined,
+      compareResult: asCompareCard(s.compareResult),
+      ...(coto ? { coto } : {}),
+      ...(searches ? { searches } : {}),
+      ...(diaPairs ? { diaPairs } : {}),
+      ...(cotoRealDia ? { cotoRealDia } : {}),
     },
   };
 }
@@ -108,13 +185,12 @@ export interface TurnStore {
 }
 
 /**
- * The Upstash integration on Vercel injects KV-compatible names
- * (`KV_REST_API_URL`), while a database created straight from Upstash uses its
- * own (`UPSTASH_REDIS_REST_URL`). Both are the same REST endpoint, so both are
+ * `KV_REST_API_URL` / `KV_REST_API_TOKEN` and `UPSTASH_REDIS_REST_URL` /
+ * `UPSTASH_REDIS_REST_TOKEN` are the same REST endpoint, so both pairs are
  * accepted and neither is worth making the reader care about.
  *
  * The REST pair is the one to use, not `REDIS_URL` or `KV_URL`: those are
- * `rediss://` strings for a TCP client, and a TCP connection per lambda is the
+ * `rediss://` strings for a TCP client, and a TCP connection per isolate is the
  * connection-limit problem that picking an HTTP client avoids.
  */
 function credentials(): { url: string; token: string } | undefined {
@@ -188,7 +264,7 @@ function memoryStore(): TurnStore {
  * A store aimed at one REST endpoint.
  *
  * `turnStore()` reads the environment once and keeps that answer for the
- * process. A test that starts its own Redis — standing in for Vercel KV —
+ * process. A test that starts its own Redis — standing in for Upstash —
  * has to point at that endpoint without changing the one already chosen.
  */
 export function turnStoreAt(url: string, token: string): TurnStore {

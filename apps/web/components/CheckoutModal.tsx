@@ -7,10 +7,12 @@ import type { Cart, LocationContext } from '@changuito/mcp/types';
 import { lockFailureCode, refundFailureCode } from '../lib/funnel';
 import { track } from '../lib/analytics';
 import type { Receipt } from '../lib/chat-store.ts';
+import { chunksForShortfall } from '../lib/faucet-policy.ts';
 import { escrowCopy } from '../lib/checkout/copy.ts';
 import type { QuoteResponse, StatusResponse } from '../lib/checkout/types.ts';
 import { OpenConfirmationPending, recoverOpen, submitOpen, type OpenSubmission } from '../lib/checkout/open-submission.ts';
 import type { PublicProfile } from '../lib/profile.ts';
+import { faucetOnNetwork } from '../lib/faucet-auth.ts';
 import { postFaucet } from '../lib/faucet-client.ts';
 import { fetchAs } from '../lib/fetch-as.ts';
 import { ensureUserCookie } from '../lib/session-login';
@@ -25,6 +27,9 @@ import { ManualPaymentPanel } from './ManualPaymentPanel';
 import { GuidedCheckout } from './GuidedCheckout';
 import { flowLabels, flowRailIndex, flowScreen } from '../lib/checkout/flow.ts';
 
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 /**
  * From a full basket to a settled escrow, in four steps:
  *
@@ -36,22 +41,24 @@ import { flowLabels, flowRailIndex, flowScreen } from '../lib/checkout/flow.ts';
  *                pays the fee and sends. The USDC is
  *                now in a vault the program owns, not in an account of ours.
  *   3. shop    — the server starts a sandbox job (services/sandbox) that logs
- *                into the shopper's Día account, fills the cart, picks the
- *                delivery and pays with the operator's card. This dialog
- *                polls /api/checkout/status, which reports the phase.
+ *                into the shopper's Día account, fills the cart and picks the
+ *                delivery. This dialog polls /api/checkout/status, which
+ *                reports the phase. The job does not carry a card.
  *   4. done    — Día placed the order: the resolver settled the escrow to the
- *                treasury. Anything else, a declined card included, refunds.
+ *                treasury. Anything else refunds.
  *
- * The quote says which run this is (`mode`, lib/shared-card.ts):
+ * The quote says which run this is (`mode`, lib/checkout/mode.ts):
  *
  *   - `live` / `mock`: the sandbox logs into the shopper's Día account, so the
  *     Día login has to be in their profile first. When it is not, this dialog
  *     asks for it and saves it (/api/profile, encrypted) *before* anything is
  *     locked; the start route decrypts it. The password lives in this
  *     component's state until that one request, and never in chat-store.
- *   - `demo`: a wallet not on the shared card's member list. No Día login; the
- *     run stops at payment, the USDC comes back, and the last step hands off
- *     to the cart link so the shopper finishes in Día.
+ *     `live` here is an admitted manual checkout, which leaves this path
+ *     before the sandbox job. `mock` is the operator's rehearsal.
+ *   - `demo`: every other wallet. No Día login; the run stops at payment, the
+ *     USDC comes back, and the last step hands off to the cart link so the
+ *     shopper finishes in Día.
  *
  * The dialog never decides an outcome. Every stage after `lock` is what the
  * server read from the chain or the sandbox, and the server reads the chain
@@ -63,6 +70,16 @@ interface Props {
   location?: Pick<LocationContext, 'postalCode' | 'salesChannel' | 'country'>;
   handoffUrl?: string;
   chatId?: string;
+  /** Coto locks the accepted alternativas. The cart itself stays the Día basket. */
+  payRetailer?: 'coto';
+  /** Dual demo: one POST of N×100 USDC chunks to cover the lock shortfall. */
+  demoTopUp?: boolean;
+  /** Accepted Coto alternativas `{ diaSkuId, cotoId }` for the Coto quote. */
+  acceptedAlternatives?: { diaSkuId: string; cotoId: string }[];
+  checkoutPath?: 'solo_dia' | 'solo_coto' | 'dual';
+  receiptLines?: { name: string; quantity: number; lineTotal: string }[];
+  /** Escrow open succeeded. Closing before this re-enables the other pay. */
+  onOpened?: () => void;
   onClose: () => void;
   onPaid: (receipt: Receipt) => void;
 }
@@ -89,12 +106,24 @@ function loginReady(d: DiaLogin): boolean {
 
 type Step = 'login' | 'review' | 'locking' | 'shopping' | 'done' | 'refunded';
 
-export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: Props) {
+export function CheckoutModal({
+  cart,
+  location,
+  handoffUrl,
+  payRetailer,
+  demoTopUp,
+  acceptedAlternatives,
+  checkoutPath,
+  receiptLines,
+  onOpened,
+  onClose,
+  onPaid,
+}: Props) {
   const lang = useLang();
   const copy = escrowCopy(lang);
   const wallet = useWallet();
   const { network } = useNetwork();
-  const { data: balance, refresh } = useBalances(wallet.address);
+  const { data: balance, loading: balanceLoading, refresh } = useBalances(wallet.address);
 
   const [quote, setQuote] = useState<QuoteResponse | null>(null);
   const [status, setStatus] = useState<StatusResponse | null>(null);
@@ -112,8 +141,41 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
   const [savingDia, setSavingDia] = useState(false);
   const [nativeBusy, setNativeBusy] = useState(false);
   const quoting = useRef(false);
+  const topped = useRef(false);
+  const dialogRef = useRef<HTMLElement>(null);
+  const stepRef = useRef<Step>('login');
   const alerted = useRef<string | null>(null);
   const field = (k: keyof DiaLogin) => (e: ChangeEvent<HTMLInputElement>) => setDia((d) => ({ ...d, [k]: e.target.value }));
+
+  // Focus trap + no Escape / backdrop dismiss. Only the X / cancel closes.
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE);
+      if (focusable.length === 0) return;
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('keydown', onKey, true);
+      if (opener?.isConnected) opener.focus();
+    };
+  }, []);
 
   // Signed in -> mint the session cookie -> quote. Once.
   useEffect(() => {
@@ -128,10 +190,32 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
       try {
         const ok = await ensureUserCookie(wallet.address!, wallet.accessToken);
         if (!ok) throw new Error(copy.failed);
+        const quoteBody: {
+          cart: Cart;
+          location?: Props['location'];
+          handoffUrl?: string;
+          payRetailer?: 'coto';
+          compare?: boolean;
+          acceptedAlternatives?: { diaSkuId: string; cotoId: string }[];
+          checkoutPath?: 'solo_dia' | 'solo_coto' | 'dual';
+        } = {
+          cart,
+          location,
+        };
+        if (payRetailer === 'coto') {
+          quoteBody.payRetailer = 'coto';
+          if (acceptedAlternatives?.length) quoteBody.acceptedAlternatives = acceptedAlternatives;
+        } else if (handoffUrl) {
+          quoteBody.handoffUrl = handoffUrl;
+        }
+        // Dual / solo demo pays always price the 20% gap fee (may be 0).
+        if (demoTopUp || payRetailer === 'coto') quoteBody.compare = true;
+        if (checkoutPath) quoteBody.checkoutPath = checkoutPath;
+        else if (demoTopUp) quoteBody.checkoutPath = payRetailer === 'coto' ? 'solo_coto' : 'dual';
         const res = await fetchAs({ address: wallet.address, sign: wallet.accessToken }, '/api/checkout/quote', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ cart, handoffUrl, location }),
+          body: JSON.stringify(quoteBody),
         });
         const body = await res.json().catch(() => null);
         if (!res.ok) throw new Error(body?.error ?? copy.failed);
@@ -139,20 +223,42 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
         const p = await fetchAs({ address: wallet.address, sign: wallet.accessToken }, '/api/profile', { cache: 'no-store' }).catch(() => null);
         if (p?.ok) setProfile((await p.json().catch(() => null)) as PublicProfile | null);
         setQuote(body as QuoteResponse);
-        if (body.resumeStatus) { setStatus(body.resumeStatus); setOpenSig(body.resumeStatus.openSig); setStep('shopping'); }
+        if (body.resumeStatus) {
+          setStatus(body.resumeStatus);
+          setOpenSig(body.resumeStatus.openSig);
+          if (body.resumeStatus.openSig) onOpened?.();
+          setStep('shopping');
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : copy.failed);
         quoting.current = false;
       }
     })();
-  }, [wallet.ready, wallet.address, wallet.accessToken, quote, cart, location, handoffUrl, copy.failed]);
+  }, [wallet.ready, wallet.address, wallet.accessToken, quote, cart, location, handoffUrl, copy.failed, payRetailer, demoTopUp, acceptedAlternatives, checkoutPath, onOpened]);
 
+  // After the quote: one POST of N×100 chunks covering the lock shortfall.
+  useEffect(() => {
+    if (!demoTopUp || !faucetOnNetwork(network) || !quote || !wallet.address || !balance || topped.current) return;
+    const units = BigInt(balance.usdc);
+    const lockUnits = BigInt(quote.amount);
+    const chunks = chunksForShortfall(units, lockUnits);
+    if (chunks < 1) return;
+    topped.current = true;
+    void (async () => {
+      await postFaucet({ address: wallet.address, sign: wallet.accessToken }, network, chunks);
+      refresh();
+    })();
+  }, [demoTopUp, network, quote, wallet.address, wallet.accessToken, balance, refresh]);
+
+  stepRef.current = step;
   const short = Boolean(quote && balance && BigInt(balance.usdc) < BigInt(quote.amount));
   const manual = quote?.checkoutKind === 'manual_fee_v1';
   const demo = quote?.mode === 'demo' || status?.mode === 'demo';
+  const cotoPay = payRetailer === 'coto';
   // Only a run that logs into Día needs the login, and it has to be saved first.
-  const needsDia = Boolean(quote) && !demo && (!profile?.complete || editing);
-  const ready = demo || (Boolean(profile?.complete) && !editing);
+  // A Coto mock never asks for the Día email, password, or DNI.
+  const needsDia = Boolean(quote) && !cotoPay && !demo && (!profile?.complete || editing);
+  const ready = cotoPay || demo || (Boolean(profile?.complete) && !editing);
 
   // Saved before the lock, not after: a run that would stop at Día's login
   // page is a lock and a refund for nothing.
@@ -179,26 +285,29 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
     } finally {
       setSavingDia(false);
     }
-  }, [dia, copy.diaMissing, copy.failed]);
+  }, [dia, copy.diaMissing, copy.failed, wallet.accessToken, wallet.address]);
 
   const faucet = useCallback(async () => {
     setFunding(true);
     setError(null);
     try {
-      const res = await postFaucet({ address: wallet.address, sign: wallet.accessToken }, network);
+      const units = balance?.usdc ? BigInt(balance.usdc) : 0n;
+      const lockUnits = quote ? BigInt(quote.amount) : 0n;
+      const chunks = Math.max(1, chunksForShortfall(units, lockUnits) || 1);
+      const res = await postFaucet({ address: wallet.address, sign: wallet.accessToken }, network, chunks);
       if (!res) throw new Error(copy.failed);
       const body = await res.json().catch(() => null);
       if (!res.ok && res.status !== 429) throw new Error(body?.error ?? copy.failed);
       if (res.status === 429 && body?.note) setError(body.note);
       track('faucet_grant', {});
-      track('faucet', { code: res.status === 429 ? 'enough' : 'ok' });
+      track('faucet', { code: res.status === 429 ? (body?.reasonKind === 'cap' ? 'cap' : 'enough') : 'ok' });
       refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : copy.failed);
     } finally {
       setFunding(false);
     }
-  }, [copy.failed, network, refresh, wallet.accessToken, wallet.address]);
+  }, [balance, copy.failed, network, quote, refresh, wallet.accessToken, wallet.address]);
 
   const lock = useCallback(async () => {
     if (!quote || !wallet.address) return;
@@ -229,6 +338,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
         setPendingOpen(null);
         const sig = fundedSig;
         setOpenSig(sig);
+        onOpened?.();
         track('escrow_open');
         track('pay_open');
         if (manual && opened.status) {
@@ -271,7 +381,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
         setStep('shopping');
       } else setStep('review');
     }
-  }, [quote, wallet, dia, ready, copy.failed, copy.diaMissing, manual, openSig, pendingOpen, lang, refresh]);
+  }, [quote, wallet, dia, ready, copy.failed, copy.diaMissing, manual, openSig, pendingOpen, lang, refresh, onOpened]);
 
   // Confirmation can finish even when the PUT reply never reaches this tab.
   // Poll only the existing order; never build or sign another lock here.
@@ -286,6 +396,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
       inFlight = false;
       if (stopped || !recovered) return;
       setOpenSig(recovered.openSig);
+      onOpened?.();
       setPendingOpen(null);
       setError(null);
       setStatus(recovered.status!);
@@ -295,7 +406,7 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
     void tick();
     const timer = setInterval(() => void tick(), POLL_MS);
     return () => { stopped = true; clearInterval(timer); };
-  }, [manual, pendingOpen, quote?.orderId, step, wallet.address, wallet.accessToken, refresh]);
+  }, [manual, pendingOpen, quote?.orderId, step, wallet.address, wallet.accessToken, refresh, onOpened]);
 
   // Poll while the sandbox shops.
   useEffect(() => {
@@ -345,13 +456,17 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
     if ((step !== 'done' && !demoFinished) || !quote) return onClose();
     onPaid({
       orderId: quote.orderId.slice(0, 12),
-      retailer: cart.retailer,
+      retailer: cotoPay ? 'coto' : cart.retailer,
       paidDisplay: demoFinished ? copy.demoPaid(quote.amountDisplay) : `${quote.amountDisplay} USDC`,
       paidAt: Date.now(),
-      lines: cart.lines.filter((l) => l.available).map((l) => ({ name: l.name, quantity: l.quantity, lineTotal: l.lineTotal.display })),
-      total: cart.total.display,
+      lines: (receiptLines ?? cart.lines.filter((l) => l.available).map((l) => ({
+        name: l.name,
+        quantity: l.quantity,
+        lineTotal: l.lineTotal.display,
+      }))),
+      total: cotoPay ? pesos(quote.totalCentavos) : cart.total.display,
     });
-  }, [step, demoFinished, quote, cart, copy, onClose, onPaid]);
+  }, [step, demoFinished, quote, cart, copy, onClose, onPaid, cotoPay, receiptLines]);
 
   // Closing mid-purchase is allowed: the server keeps shopping and the escrow
   // closes either way. Only the view goes.
@@ -369,14 +484,14 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
   useEffect(() => { setCardSent(false); }, [quote?.orderId]);
 
   return (
-    <div className="modal-backdrop" onClick={close}>
+    <div className="modal-backdrop ph-no-capture" data-testid="checkout-modal-backdrop">
       <section
+        ref={dialogRef}
         className="modal modal-wide"
         role="dialog"
         aria-modal="true"
         aria-label={copy.title}
         data-testid="checkout-modal"
-        onClick={(e) => e.stopPropagation()}
       >
         <header className="modal-head">
           <h2>{copy.title}</h2>
@@ -502,7 +617,10 @@ export function CheckoutModal({ cart, location, handoffUrl, onClose, onPaid }: P
                 ? 'Lock 0.10 test USDC for checkout preparation. The fee is charged when the browser is ready, even if you never open it, abandon, or DIA declines payment. You then have 15 minutes to pay DIA with your own card. Preparation failures refund the fee.'
                 : 'Bloqueás 0,10 USDC de prueba por preparar el pago. La comisión se cobra cuando el navegador está listo, aunque no lo abras, abandones o DIA rechace el pago. Tenés 15 minutos para pagar en DIA con tu tarjeta. Si falla la preparación, devolvemos la comisión.') : copy.escrowNote}</p>
 
-              {demo ? (
+              {/* A Coto mock never logs into Día. needsDia is already false
+                  and the quote mode is mock, so the Día branch below would
+                  otherwise show the saved account and its edit control. */}
+              {cotoPay ? null : demo ? (
                 <p className="ck-note ck-demo" data-testid="checkout-demo-note">
                   {copy.demoNote}
                 </p>

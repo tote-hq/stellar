@@ -4,10 +4,9 @@ For the optional embedded browser and preparation-fee flow, see
 [manual checkout](../../docs/manual-checkout.md). It is disabled by default.
 
 A Jev + Playwright worker that logs into the shopper's Día account, fills the
-cart with an escrowed basket by SKU, picks the delivery, and pays with the
-operator's card. The service holds neither: each job brings the shopper's
-login (their encrypted profile in the web app) and the card (the web app's
-`shared_card` row). A job without a card stops at the payment step. The web
+cart with an escrowed basket by SKU and picks the delivery. The service holds
+no login of its own. A job may carry a card; this app no longer sends one, and
+a job without a card stops at the payment step. The web
 app starts a job after the shopper's USDC is locked, polls it, and settles
 the escrow only when Día places the order.
 

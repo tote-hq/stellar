@@ -1,152 +1,150 @@
 # @changuito/landing
 
-Landing de marketing para **www.changuito.me**. Es un proyecto Next.js aparte de `apps/web` (el shopper Stellar, en app.changuito.me / ste.changuito.me).
+Marketing landing for **www.changuito.me**, and the public stats dashboard at **/stats** (also the root of **stats.changuito.me**). It is a Next.js project separate from `apps/web` (the Stellar shopper, at app.changuito.me / ste.changuito.me).
 
-No comparte rutas con el shopper. Durante la beta controlada, los botones «Probar Changuito» van a `/whitelist`. `APP_URL` (`https://app.changuito.me`) queda para SEO y docs, sin navegación desde la landing.
+It does not share routes with the shopper. During the controlled beta, the «Probar Changuito» buttons go to `/whitelist`. `APP_URL` (`https://app.changuito.me`) stays for SEO and docs, with no navigation from the landing.
 
-## Vercel
+## What the landing needs
 
-Crear un **proyecto nuevo**, no reusar el de `apps/web`.
+The Worker is **`changuito-landing`**. It already serves `changuito.me`, `www.changuito.me` and `stats.changuito.me`. The deploy config is `cloudflare.config.ts`, `worker.ts` and `vite.config.ts`. Exact commands, and which names are build variables versus Worker secrets, are in [DEPLOY.md](../../DEPLOY.md) part 4. From the repo root, Node 22.18 or newer (`.nvmrc`):
 
-| Setting | Value |
-|---|---|
-| Framework preset | Next.js |
-| Root Directory | `apps/landing` |
-| Node.js | **22.x** (el repo pide `>=22.12`) |
-| Install command | default — Vercel instala desde la raíz del monorepo (`npm ci`) |
-| Build command | default — corre `next build` de este paquete |
-| Environment variables | el sitio se construye sin ellas. `/whitelist` en producción no anota a nadie si faltan Turnstile o un destino. `/reportarbug` funciona sin variables (ver abajo). |
+```bash
+npm run build:vinext -w @changuito/landing
+npm run deploy:vinext -w @changuito/landing
+npm run preview:vinext -w @changuito/landing   # http://127.0.0.1:3125 after the build
+```
 
-Dominio de producción: `www.changuito.me`. El shopper Stellar (`app.changuito.me` / `ste.changuito.me`) sigue en el proyecto de `apps/web`.
+The site builds without variables. In production, `/whitelist` signs nobody up if Turnstile or a destination is missing. `/reportarbug` works with no variables (see below). `/stats` works with no variables: on-chain numbers come from public endpoints.
 
-La lista de espera vive en `/whitelist`. No hace falta login de Vercel para mergear el código: el próximo deploy toma la ruta. Sin un destino configurado, producción responde que no pudo anotar a la persona (no finge el alta). En `next dev` / `next start` local, si no hay variables, el alta se agrega a `apps/landing/.data/waitlist.jsonl` (gitignored).
+Production domains stay on `changuito-landing`. The Stellar shopper (`app.changuito.me` / `ste.changuito.me`) stays on the `apps/web` deployment. Do not point one at the other.
 
-### Variables que el proyecto de Vercel de la landing tiene que tener
+The waitlist lives at `/whitelist`. The next deploy picks up the route. With no destination configured, production answers that it could not sign the person up (it does not pretend the signup worked). In local `next dev` / `next start`, with no variables, the signup is appended to `apps/landing/.data/waitlist.jsonl` (gitignored).
 
-El proyecto de `apps/web` (`app.changuito.me`) no comparte env con este. Las keys de Turnstile que ya usa el shopper hay que copiarlas al proyecto de la landing. Si falta alguna, `/whitelist` responde 503: «No pudimos anotarte por un problema nuestro. Probá de nuevo en un rato.» Producción no saltea el CAPTCHA.
+### Variables the landing's deployment has to have
 
-En el proyecto de Vercel de **landing**, Production (y Preview si se prueba el alta ahí):
+The `apps/web` deployment (`app.changuito.me`) does not share env with this one. Turnstile keys the shopper already uses have to be copied onto the landing's deployment. If either is missing, `/whitelist` answers 503: «No pudimos anotarte por un problema nuestro. Probá de nuevo en un rato.» Production does not skip the CAPTCHA.
+
+On the landing's deployment:
 
 - `NEXT_PUBLIC_TURNSTILE_SITE_KEY`
 - `TURNSTILE_SECRET_KEY`
 - `WAITLIST_WEBHOOK_URL`
 - `WAITLIST_WEBHOOK_SECRET`
 
-Analytics es opcional y gratis. Si estas variables quedan vacías, la landing no carga gtag, Meta Pixel ni Clarity. Setealas en **Production** del proyecto de Vercel de la landing. Preview y local pueden quedar sin ellas.
+Analytics is optional and free. If these variables stay empty, the landing loads no gtag, Meta Pixel, or Clarity. Set them on the landing's deployment. Local can stay without them.
 
-- `NEXT_PUBLIC_GA_MEASUREMENT_ID` (GA4, forma `G-XXXX`)
-- `NEXT_PUBLIC_META_PIXEL_ID` (numérico)
+- `NEXT_PUBLIC_GA_MEASUREMENT_ID` (GA4, shape `G-XXXX`)
+- `NEXT_PUBLIC_META_PIXEL_ID` (numeric)
 - `NEXT_PUBLIC_CLARITY_PROJECT_ID`
 
-`NEXT_PUBLIC_TURNSTILE_SITE_KEY` entra en el bundle del cliente: un valor vacío deja el formulario sin widget. `TURNSTILE_SECRET_KEY`, `WAITLIST_WEBHOOK_URL` y `WAITLIST_WEBHOOK_SECRET` son de servidor. Los tres ids de analytics también son públicos y, vacíos, no cargan scripts. Un cambio de env se aplica en el próximo deploy.
+`NEXT_PUBLIC_TURNSTILE_SITE_KEY` is inlined into the client bundle: an empty value leaves the form with no widget. `TURNSTILE_SECRET_KEY`, `WAITLIST_WEBHOOK_URL` and `WAITLIST_WEBHOOK_SECRET` are server-only. On `changuito-landing` they are Secrets, not plain text variables and not entries in `cloudflare.config.ts`. The three analytics ids are public too, and when empty they load no scripts. An env change applies on the next deploy.
 
-El alta en vivo va a Apps Script, así que las dos variables del webhook hacen falta.
+The live signup goes to Apps Script, so both webhook variables are required.
 
-| Variable | Obligatoria | Para qué |
+| Variable | Required | For |
 |---|---|---|
-| `WAITLIST_WEBHOOK_URL` | en producción | `POST` JSON `{ kind, name, email, source, otherDetail, whatsapp, whatsappGroup, userAgent, createdAt }` y, si hay secreto, `webhookSecret`. HTTPS (Apps Script, Notion, Sheets, Slack, Make). `http` solo en `localhost`. |
-| `WAITLIST_WEBHOOK_SECRET` | junto con el webhook en producción | `Authorization: Bearer …` y el mismo valor en el cuerpo como `webhookSecret`. Apps Script no entrega `Authorization` ni headers custom en `e.headers`; `doPost` tiene que leer el secreto del body y no guardarlo en la hoja. Un HTTP 200 con `{ "ok": false }` es un fallo, no un alta. |
-| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | en producción | Site key pública de Cloudflare Turnstile (widget en el formulario). Tiene que estar en este proyecto, no solo en el del shopper. |
-| `TURNSTILE_SECRET_KEY` | en producción | Secret key de Turnstile (solo servidor; verifica el token antes de guardar). Nunca commitearla. Si falta esta o la site key, producción rechaza el alta. |
+| `WAITLIST_WEBHOOK_URL` | in production | `POST` JSON `{ kind, name, email, source, otherDetail, whatsapp, whatsappGroup, userAgent, createdAt }` and, if there is a secret, `webhookSecret`. HTTPS (Apps Script, Notion, Sheets, Slack, Make). `http` only on `localhost`. |
+| `WAITLIST_WEBHOOK_SECRET` | together with the webhook in production | `Authorization: Bearer …` and the same value in the body as `webhookSecret`. Apps Script does not deliver `Authorization` or custom headers in `e.headers`; `doPost` has to read the secret from the body and must not store it on the sheet. An HTTP 200 with `{ "ok": false }` is a failure, not a signup. |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | in production | Public Cloudflare Turnstile site key (the widget on the form). It has to be on this deployment, not only on the shopper's. |
+| `TURNSTILE_SECRET_KEY` | in production | Turnstile secret key (server only; verifies the token before saving). Never commit it. If this or the site key is missing, production rejects the signup. |
 
-El Apps Script (`appendWaitlist_`) no está en este repo. El `POST` manda este JSON (header `X-Changuito-Waitlist: 1`), con los nombres que el script ya lee:
+The Apps Script (`appendWaitlist_`) is not in this repo. The `POST` sends this JSON (header `X-Changuito-Waitlist: 1`), with the names the script already reads:
 
-| Campo | Tipo | Notas |
+| Field | Type | Notes |
 |---|---|---|
-| `kind` | string | Siempre `"waitlist"`. |
-| `name` | string | Nombre limpio. El script también acepta `nombre`. |
-| `email` | string | En minúsculas. |
-| `source` | string | Una opción de la lista (el valor visible). El script también acepta `fuente`. |
-| `otherDetail` | string o `null` | Solo si `source` es `Otros`. El script también acepta `detalle_otros`. |
-| `whatsapp` | string | Obligatorio. E.164 con `+`. Un número argentino local se guarda como `+549…` (se saca el `15` y se agrega el `9`). |
-| `whatsappGroup` | boolean | `true` si quiere entrar al grupo de beta testers. En la hoja va a `grupo_whatsapp`. |
-| `userAgent` | string | Solo si el request trae `User-Agent`. El script también acepta `user_agent`. |
+| `kind` | string | Always `"waitlist"`. |
+| `name` | string | Cleaned name. The script also accepts `nombre`. |
+| `email` | string | Lowercased. |
+| `source` | string | One option from the list (the visible value). The script also accepts `fuente`. |
+| `otherDetail` | string or `null` | Only when `source` is `Otros`. The script also accepts `detalle_otros`. |
+| `whatsapp` | string | Required. E.164 with `+`. A local Argentine number is stored as `+549…` (the `15` is dropped and the `9` is added). |
+| `whatsappGroup` | boolean | `true` if they want the beta-tester group. On the sheet it goes to `grupo_whatsapp`. |
+| `userAgent` | string | Only if the request carries `User-Agent`. The script also accepts `user_agent`. |
 | `createdAt` | string | ISO 8601. |
-| `webhookSecret` | string | Solo si `WAITLIST_WEBHOOK_SECRET` está seteado. Es auth, no un dato de la persona. El script lo lee y no lo escribe en la fila. |
+| `webhookSecret` | string | Only if `WAITLIST_WEBHOOK_SECRET` is set. It is auth, not a field about the person. The script reads it and does not write it on the row. |
 
-No se envía `feedback` ni `contactForFeedback`. La pregunta de contacto quedó reemplazada por `whatsappGroup`.
+`feedback` and `contactForFeedback` are not sent. The contact question was replaced by `whatsappGroup`.
 
 ### Cloudflare Turnstile
 
-El formulario de `/whitelist` manda un token de Turnstile con el alta. El servidor lo verifica contra `siteverify` antes de persistir. El honeypot (`company`) y el rate-limit siguen activos; el CAPTCHA es adicional.
+The `/whitelist` form sends a Turnstile token with the signup. The server checks it against `siteverify` before persisting. The honeypot (`company`) and the rate limit stay on; the CAPTCHA is additional.
 
-- **Producción:** si faltan `NEXT_PUBLIC_TURNSTILE_SITE_KEY` o `TURNSTILE_SECRET_KEY` en el proyecto de Vercel de la landing, el alta se rechaza (mismo espíritu que un sink sin configurar). No se saltea la verificación.
-- **Local / no-production:** si las keys no están, el submit se acepta sin widget (se loguea un aviso una vez) para que `next dev` siga funcionando.
+- **Production:** if `NEXT_PUBLIC_TURNSTILE_SITE_KEY` or `TURNSTILE_SECRET_KEY` is missing on the landing's deployment, the signup is rejected (same spirit as an unconfigured sink). Verification is not skipped.
+- **Local / non-production:** if the keys are unset, the submit is accepted with no widget (a warning is logged once) so `next dev` still works.
 
-Creá un widget en el [dashboard de Turnstile](https://dash.cloudflare.com/?to=/:account/turnstile) (o reusá el de `app.changuito.me` si el hostname `www.changuito.me` está permitido) y pegá las dos keys en el proyecto de Vercel de la landing.
+Create a widget in the [Turnstile dashboard](https://dash.cloudflare.com/?to=/:account/turnstile) (or reuse the one for `app.changuito.me` if the hostname `www.changuito.me` is allowed) and put both keys on the landing's deployment.
 
-## Reportar un bug
+## Report a bug
 
-`/reportarbug` es la página pública para contar un fallo (la app enlaza `https://www.changuito.me/reportarbug`). El pie del home también apunta ahí.
+`/reportarbug` is the public page for describing a failure (the app links `https://www.changuito.me/reportarbug`). The home footer points there too.
 
-Si `BUG_REPORT_WEBHOOK_URL` está configurada, el servidor hace `POST` JSON. Si no está, el reporte se acepta igual y queda en el log del proceso con el prefijo `[bug-report]`, para que la página sirva antes de tener un destino. Un webhook que responde mal sí es un error: la persona puede reintentar. Un HTTP 200 con `{ "ok": false }` también es un fallo.
+If `BUG_REPORT_WEBHOOK_URL` is set, the server `POST`s JSON. If it is not, the report is still accepted and lands in the process log with the prefix `[bug-report]`, so the page works before there is a destination. A webhook that answers badly is an error: the person can retry. An HTTP 200 with `{ "ok": false }` is also a failure.
 
-| Variable | Obligatoria | Para qué |
+| Variable | Required | For |
 |---|---|---|
-| `BUG_REPORT_WEBHOOK_URL` | no | `POST` JSON con `kind: "bug"`, el relato en `error`, cómo repetirlo en `pasos`, `adjuntos` (foto o video en base64) y, si hay secreto, `webhookSecret`. `http` solo en `localhost`. |
-| `BUG_REPORT_WEBHOOK_SECRET` | no | Si está, va como `Authorization: Bearer …` y el mismo valor en el cuerpo como `webhookSecret`. Apps Script no entrega `Authorization` ni headers custom en `e.headers`; `doPost` tiene que leer el secreto del body y no guardarlo en la hoja. Un HTTP 200 con `{ "ok": false }` es un fallo, no un reporte guardado. |
+| `BUG_REPORT_WEBHOOK_URL` | no | `POST` JSON with `kind: "bug"`, the description in `error`, how to repeat it in `pasos`, `adjuntos` (photo or video in base64) and, if there is a secret, `webhookSecret`. `http` only on `localhost`. |
+| `BUG_REPORT_WEBHOOK_SECRET` | no | If set, it goes as `Authorization: Bearer …` and the same value in the body as `webhookSecret`. Apps Script does not deliver `Authorization` or custom headers in `e.headers`; `doPost` has to read the secret from the body and must not store it on the sheet. An HTTP 200 with `{ "ok": false }` is a failure, not a saved report. |
 
-La mascota de esa página es `public/brand/mascot-error.png` (el carrito idle con ojos en X y gesto hacia abajo). No se usa en el hero ni en el GIF de carga.
+That page's mascot is `public/brand/mascot-error.png` (the idle cart with X eyes and a downward gesture). It is not used in the hero or in the loading GIF.
 
-El adjunto es opcional: hasta 3 archivos, 3 MB en total, JPG, PNG, WEBP, GIF, MP4, WEBM o MOV. El tope entra en el cuerpo del request (el base64 lo agranda) y en lo que Apps Script sube a Drive. Cada ítem va `{ name, mimeType, base64 }`. El script los sube y escribe las URLs en la columna `adjuntos`.
+The attachment is optional: up to 3 files, 3 MB total, JPG, PNG, WEBP, GIF, MP4, WEBM or MOV. The cap applies to the request body (base64 makes it larger) and to what Apps Script uploads to Drive. Each item is `{ name, mimeType, base64 }`. The script uploads them and writes the URLs in the `adjuntos` column.
 
-Si el dashboard no detecta el workspace y pide comandos a mano (el working directory es `apps/landing`):
+If the dashboard does not detect the workspace and asks for commands by hand (the working directory is `apps/landing`):
 
 ```bash
 npm ci --prefix ../..
 npm run build -w @changuito/landing --prefix ../..
 ```
 
-El lockfile está en la raíz. No hace falta `vercel.json`: los headers de seguridad salen de `next.config.ts`.
+The lockfile is at the repo root. Security headers come from `next.config.ts`.
 
 ## Monorepo
 
-Desde la raíz del repo:
+From the repo root:
 
 ```bash
 npm ci
 npm run dev -w @changuito/landing      # http://localhost:3125
 npm run build -w @changuito/landing
-npm test -w @changuito/landing
 npm run typecheck -w @changuito/landing
 ```
 
-El paquete entra por el workspace `apps/*` del `package.json` raíz. No depende de `@changuito/mcp` ni de los bindings.
+The package is included by the root `package.json` workspace `apps/*`. It does not depend on `@changuito/mcp` or the bindings.
 
 ## Assets
 
-El kit completo vive en `apps/branding/` (manuals, logo, mascota, pattern, motion, social, copy, tokens). Esta app solo copia a `public/` lo que la página sirve:
+The full kit lives in `apps/branding/` (manuals, logo, mascot, pattern, motion, social, copy, tokens). This app copies into `public/` only what the page serves:
 
-| Público | Origen |
+| Public | Source |
 |---|---|
-| `public/brand/animacion-cargando.gif` | `apps/branding/motion/animacion-cargando.gif` (asset de marca; el hero ya no lo usa: es una demo en código) |
-| `public/brand/mascot-idle.png` | `apps/branding/mascot/mascota-idle.png` (movimiento reducido, header de `/whitelist`, pie y cierre) |
-| `public/brand/mascota-corriendo.png` | `apps/branding/mascot/mascota-corriendo.png` (CTA, en el lugar de la flecha) |
-| `public/brand/wordmark.png` | `apps/branding/logo/wordmark.png` (lettering chunky con Sol de Mayo). Header de `/` (solo), `/whitelist` y `/reportarbug`. El mismo archivo está en `apps/web/public/brand`. |
-| `public/og.jpg` | pose idle ancha del zip de landing (1280×720, JPEG), Open Graph y Twitter. El archivo anterior se llamaba `og.png` pero los bytes eran JPEG, así que el content-type no coincidía. |
-| `public/brand/isotipo-mascota.png` | `apps/branding/logo/isotipo-mascota.png` (isotipo del JSON-LD, no va en el header) |
-| `public/brand/mascot-error.png` | carrito idle con ojos en X y gesto hacia abajo. Header de `/reportarbug`, junto al wordmark. |
-| `app/favicon.ico`, `app/icon.png`, `app/apple-icon.png` | mascota idle completa (`mascota-idle.png`) encajada en un cuadrado con margen transparente (16/32/48, 32 y 180). Sin recorte de cara. Los mismos archivos están en `apps/web/app`. `/whitelist` hereda estos íconos (no hay `app/whitelist/icon.png`). |
+| `public/brand/animacion-cargando.gif` | `apps/branding/motion/animacion-cargando.gif` (brand asset; the hero no longer uses it: that is a demo in code) |
+| `public/brand/mascot-idle.png` | `apps/branding/mascot/mascota-idle.png` (reduced motion, `/whitelist` header, footer and close) |
+| `public/brand/mascota-corriendo.png` | `apps/branding/mascot/mascota-corriendo.png` (CTA, in place of the arrow) |
+| `public/brand/wordmark.png` | `apps/branding/logo/wordmark.png` (chunky lettering with the Sol de Mayo). Header of `/` (alone), `/whitelist` and `/reportarbug`. The same file is in `apps/web/public/brand`. |
+| `public/og.jpg` | wide idle pose from the landing zip (1280×720, JPEG), Open Graph and Twitter. The previous file was named `og.png` but the bytes were JPEG, so the content-type did not match. |
+| `public/brand/isotipo-mascota.png` | `apps/branding/logo/isotipo-mascota.png` (JSON-LD isotipo, not in the header) |
+| `public/brand/mascot-error.png` | idle cart with X eyes and a downward gesture. Header of `/reportarbug`, next to the wordmark. |
+| `app/favicon.ico`, `app/icon.png`, `app/apple-icon.png` | full idle mascot (`mascota-idle.png`) fitted in a square with a transparent margin (16/32/48, 32 and 180). No face crop. The same files are in `apps/web/app`. `/whitelist` inherits these icons (there is no `app/whitelist/icon.png`). |
 
-El header del home es solo el wordmark. El pie y el cierre siguen con la mascota idle y la palabra «Changuito» en Inter. `/whitelist` muestra la mascota idle y el wordmark. `/reportarbug` muestra la mascota de error y el wordmark. El fondo es `#FAFAF7` plano: el patrón mate-pan no se tilea.
+The home header is the wordmark only. The footer and the close still use the idle mascot and the word «Changuito» in Inter. `/whitelist` shows the idle mascot and the wordmark. `/reportarbug` shows the error mascot and the wordmark. The background is flat `#FAFAF7`: the mate-pan pattern is not tiled.
 
 ## SEO
 
-No hace falta ninguna variable de entorno. El HTML sale en `es-AR`. Next genera, en el build:
+No environment variable is required. The HTML is `es-AR`. Next generates, at build time:
 
-| Ruta | Qué es |
+| Path | What it is |
 |---|---|
-| `/robots.txt` | permite indexar las páginas de marketing (también a buscadores y crawlers de respuesta) y deja afuera `/api/` |
+| `/robots.txt` | allows indexing the marketing pages (including search and answer crawlers) and leaves `/api/` out |
 | `/sitemap.xml` | `/`, `/whitelist`, `/reportarbug` |
-| `/llms.txt` | resumen en texto, armado con el copy público |
-| `/manifest.webmanifest` | nombre, idioma e íconos |
+| `/llms.txt` | a text summary, built from the public copy |
+| `/manifest.webmanifest` | name, language and icons |
 
-El shopper (`app.changuito.me`) tiene su propio `robots.txt` y no se toca desde acá. `?estado=` en la lista y en el reporte de bug no se indexa; el canonical queda en la URL limpia.
+The shopper (`app.changuito.me`) has its own `robots.txt` and is not touched from here. `?estado=` on the list and on the bug report is not indexed; the canonical stays on the clean URL.
 
 ## Public stats (`/stats`, stats.changuito.me)
 
-The dashboard reads live data on the server and regenerates at most every 5 minutes (ISR); the page and `/stats/export` share one cached read.
+`worker.ts` serves this page at the root of `stats.changuito.me`. `/stats` is the same document on every host. The page renders on the request. The live read and `/stats/export` share one snapshot. That read has a 5.5s deadline: a source that does not answer is marked unavailable and the last published number stays. The last good snapshot is kept in the Cache API and on the edge (`s-maxage=300`, `stale-while-revalidate=600`), and a stale hit refreshes in the background.
 
-- **No secrets needed:** Solana devnet escrow program `BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d` (public RPC), Stellar testnet escrow `CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX` and mock USDC `CAOPLEE4NVOVEBYRO7NHG5K4FEML5O5C5AATYBK4FCDLYRAJFZWBNN3E` (Stellar Expert events + Horizon), merged PRs (GitHub public search).
-- **Optional, server-only:** `STATS_STELLAR_DATABASE_URL` and `STATS_SOLANA_DATABASE_URL` (read-only roles) for app accounts and delivered orders. The waitlist figure stays on the last published value.
-- Any source that is missing or down keeps its last published value, and the page says so next to the "Updated" time. Only aggregates and public transaction hashes reach the browser.
+- **No secrets needed:** Solana devnet escrow program `BFa1gZL9kVVo8Mq5gaDRM5RiCG4NDiyHLbpymfXvLz9d` (public RPC), Stellar testnet escrow from `deployments.json` (`CA4BDF4U65OHCO6AB4KRJWBRZ4BJBZURDFNFKJDEZAKQRCUNJZFLN72S`) and mock USDC `CAOPLEE4NVOVEBYRO7NHG5K4FEML5O5C5AATYBK4FCDLYRAJFZWBNN3E` (Stellar Expert events + Horizon), merged PRs (GitHub public search).
+- **Optional Worker secrets, server-only:** `STATS_STELLAR_DATABASE_URL` and `STATS_SOLANA_DATABASE_URL` (read-only roles) for app accounts and delivered orders, and `STATS_GITHUB_TOKEN` for the GitHub search when the public rate limit is not enough. Set them on `changuito-landing` as Secrets. Do not commit them, and do not declare them in `cloudflare.config.ts`. The waitlist figure stays on the last published value.
+- Any source that is missing, down, or still running when the 5.5s deadline fires keeps its last published value, and the page marks that source unavailable. In the All view, a single failed chain is marked partial and the live chain's numbers stay on the card. Only aggregates and public transaction hashes reach the browser. The Solana request path reads one signature page and a small set of transaction bodies; it does not scan the full history per hit.

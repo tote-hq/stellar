@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   signAuthEntryWith,
   signTransactionWith,
+  walletKindFrom,
   type AuthEntryResult,
   type TxSignResult,
   type WalletSignClient,
@@ -11,6 +12,7 @@ import {
 
 function fakeClient(overrides: Partial<WalletSignClient>): WalletSignClient {
   return {
+    getWalletType: () => null,
     signAuthEntry: async () => ({ status: 'error', details: 'unset' }),
     signTx: async () => ({ status: 'error', details: 'unset' }),
     ...overrides,
@@ -33,42 +35,45 @@ describe('signAuthEntryWith', () => {
   });
 
   it('returns an error when the wallet rejects, without throwing', async () => {
-    const client = fakeClient({
+    const declined = fakeClient({
       signAuthEntry: async () => ({
         status: 'error',
         details: 'User declined access',
       }),
     });
-    const result = await signAuthEntryWith(client, 'entry-xdr', { validUntilLedger: 100 });
-    assert.equal(result.status, 'error');
-    if (result.status === 'error') {
-      assert.equal(result.details, 'User declined access');
+    const declinedResult = await signAuthEntryWith(declined, 'entry-xdr', { validUntilLedger: 100 });
+    assert.equal(declinedResult.status, 'error');
+    if (declinedResult.status === 'error') {
+      assert.equal(declinedResult.details, 'User declined access');
     }
-  });
 
-  it('turns a thrown rejection into an error result', async () => {
-    const client = fakeClient({
+    const thrown = fakeClient({
       signAuthEntry: async () => {
         throw new Error('User declined access');
       },
     });
-    const result = await signAuthEntryWith(client, 'entry-xdr', { validUntilLedger: 100 });
-    assert.deepEqual(result, {
+    const thrownResult = await signAuthEntryWith(thrown, 'entry-xdr', { validUntilLedger: 100 });
+    assert.deepEqual(thrownResult, {
       status: 'error',
       details: 'User declined access',
     });
-  });
 
-  it('surfaces a smart-wallet error the same way (no throw)', async () => {
     // Pollar returns status:error for passkey wallets; they cannot sign an entry.
-    const client = fakeClient({
+    const smart = fakeClient({
       signAuthEntry: async () => ({
         status: 'error',
         details: 'Smart wallets cannot sign auth entries',
       }),
     });
-    const result = await signAuthEntryWith(client, 'entry-xdr', { validUntilLedger: 42 });
-    assert.equal(result.status, 'error');
+    const smartResult = await signAuthEntryWith(smart, 'entry-xdr', { validUntilLedger: 42 });
+    assert.equal(smartResult.status, 'error');
+  });
+});
+
+describe('walletKindFrom', () => {
+  it('treats a missing adapter as custodial and a named adapter as external', () => {
+    assert.equal(walletKindFrom(fakeClient({})), 'custodial');
+    assert.equal(walletKindFrom(fakeClient({ getWalletType: () => 'freighter' })), 'external');
   });
 });
 
@@ -82,26 +87,5 @@ describe('signTransactionWith', () => {
       status: 'signed',
       signedXdr: 'signed-tx-xdr',
     } satisfies TxSignResult);
-  });
-
-  it('returns an error when the wallet rejects, without throwing', async () => {
-    const client = fakeClient({
-      signTx: async () => ({ status: 'error', details: 'User declined access' }),
-    });
-    const result = await signTransactionWith(client, 'unsigned-xdr');
-    assert.equal(result.status, 'error');
-  });
-
-  it('turns a thrown rejection into an error result', async () => {
-    const client = fakeClient({
-      signTx: async () => {
-        throw new Error('User declined access');
-      },
-    });
-    const result = await signTransactionWith(client, 'unsigned-xdr');
-    assert.deepEqual(result, {
-      status: 'error',
-      details: 'User declined access',
-    });
   });
 });

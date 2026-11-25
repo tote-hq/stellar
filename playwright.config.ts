@@ -8,34 +8,21 @@ const landingBaseURL = process.env.LANDING_BASE_URL?.trim() || 'https://www.chan
 const appBaseURL = process.env.APP_BASE_URL?.trim() || 'https://app.changuito.me';
 
 /**
- * The checkout spec is the one that cannot run against a deployment.
- *
- * `app/dev/checkout` — the fixture the modal frames in the store's place in
- * modo prueba — `notFound()`s in production, on purpose: a page that says
- * "pagado" and takes no money has no business on a real deployment. So this
- * project gets its own base URL and its own `next dev`, while `landing` and
- * `app` keep pointing at what is live.
- *
- * Port 3124 matches `npm run dev`, so a server already open for hacking is
- * reused rather than fought with.
+ * Checkout cannot run against a deployment. `/dev/checkout` 404s in
+ * production, and the weekly job points this project at `next dev`.
+ * Playwright would otherwise boot that server for a production smoke too,
+ * so it is added only when this process asked for the checkout project.
  */
 const checkoutBaseURL = process.env.CHECKOUT_BASE_URL?.trim() || 'http://localhost:3124';
-
-/**
- * Which projects this run asked for.
- *
- * Playwright starts every `webServer` in the config whatever `--project` says,
- * and only the checkout project needs one — starting a dev server for a
- * production smoke run would be waste in CI and a new way for it to fail. So
- * the server is added to the config only when this run includes `checkout`,
- * which means reading the command line, because that is where the answer is.
- */
 const requested = new Set(
   process.argv.flatMap((arg, i) =>
-    arg === '--project' ? [process.argv[i + 1]] : arg.startsWith('--project=') ? [arg.slice(10)] : [],
+    arg === '--project' ? [process.argv[i + 1] ?? ''] : arg.startsWith('--project=') ? [arg.slice(10)] : [],
   ),
 );
 const runsCheckout = requested.size === 0 || requested.has('checkout');
+
+const turnstileSiteKey = '1x00000000000000000000AA';
+const turnstileSecret = '1x0000000000000000000000000000000AA';
 
 export default defineConfig({
   testDir: './e2e',
@@ -45,9 +32,11 @@ export default defineConfig({
   workers: process.env.CI ? 2 : undefined,
   timeout: 60_000,
   expect: { timeout: 15_000 },
+  grepInvert: /@quarantine/,
   reporter: process.env.CI
     ? [
         ['html', { open: 'never' }],
+        ['junit', { outputFile: 'test-results/e2e-junit.xml' }],
         ['github'],
         ['list'],
       ]
@@ -67,12 +56,18 @@ export default defineConfig({
         webServer: {
           command: 'npm run dev -w @changuito/web',
           url: checkoutBaseURL,
-          // Next compiles on demand, and the first request pays for the whole
-          // page. Three minutes is a cold `next dev` on a cold cache.
           timeout: 180_000,
           reuseExistingServer: !process.env.CI,
-          stdout: 'pipe',
-          stderr: 'pipe',
+          stdout: 'pipe' as const,
+          stderr: 'pipe' as const,
+          env: {
+            PATH: process.env.PATH ?? '',
+            HOME: process.env.HOME ?? '',
+            CI: process.env.CI ?? '',
+            NEXT_PUBLIC_E2E_CHECKOUT: '1',
+            NEXT_PUBLIC_TURNSTILE_SITE_KEY: turnstileSiteKey,
+            TURNSTILE_SECRET_KEY: turnstileSecret,
+          },
         },
       }
     : {}),
@@ -84,33 +79,52 @@ export default defineConfig({
     },
     {
       name: 'app',
-      testMatch: /app-.*\.spec\.ts/,
-      // Named rather than left to the pattern: `app-frame-checkout` is an
-      // `app-` spec by name so it sits with its siblings, but it is the one
-      // that needs a server of its own, and a production run of it would
-      // frame a real supermarket.
-      testIgnore: /app-frame-checkout\.spec\.ts/,
+      testMatch: /app-(guest|auth)\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'], baseURL: appBaseURL },
+    },
+    {
+      name: 'shell',
+      testMatch: /app-shell\.spec\.ts/,
       use: { ...devices['Desktop Chrome'], baseURL: appBaseURL },
     },
     {
       name: 'checkout',
       testMatch: /app-frame-checkout\.spec\.ts/,
-      // The three-column shell starts at 1200px and the spec reads the rails.
-      // Pinned rather than inherited: Desktop Chrome's 1280 is four pixels of
-      // margin either side of a layout decision.
       use: {
         ...devices['Desktop Chrome'],
         baseURL: checkoutBaseURL,
         viewport: { width: 1440, height: 900 },
-        // A PAN and a one-time code are on screen for most of this test, and
-        // this repo is public. Same reason app-auth.spec.ts does it.
         trace: 'off',
         video: 'off',
         screenshot: 'off',
       },
-      // A dev server compiling a route on first hit is slower than a warm
-      // deployment, and the flow deliberately waits out two polls.
       timeout: 180_000,
+    },
+    {
+      // Opt-in Día vs Coto card. `npm run test:e2e:compare` sets COMPARE_E2E.
+      // Screenshot and video stay on so a green run still has evidence.
+      // test-results/ and playwright-report/ are gitignored.
+      name: 'compare',
+      testMatch: /app-dual-compare\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: appBaseURL,
+        screenshot: 'on',
+        video: 'on',
+        trace: 'on',
+      },
+    },
+    {
+      // Opt-in dual mock pay cards. `npm run test:e2e:dual-checkout` sets DUAL_CHECKOUT_E2E.
+      name: 'dual-checkout',
+      testMatch: /app-dual-checkout\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: appBaseURL,
+        screenshot: 'on',
+        video: 'on',
+        trace: 'on',
+      },
     },
   ],
 });

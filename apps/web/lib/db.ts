@@ -1,17 +1,14 @@
 /**
  * The only module in this app that opens a Postgres connection.
  *
- * Everything the money path needs to remember now lives here rather than in
- * Redis, and the reason is not preference. A card the customer keeps has no
- * expiry, and a binding with no expiry does not belong in a cache with an
- * eviction policy: `SET NX` gives atomicity but Redis can still drop the key
- * under memory pressure, at which point the next deposit mints a second card
- * for somebody who already has one. A primary key cannot be evicted.
+ * The order row lives here rather than in Redis. A primary key cannot be
+ * evicted, and a deposit that confirmed late has to find the memo it was
+ * quoted against.
  *
  * Redis is still the right home for what remains there — the agent's in-flight
- * turn and the local-model breaker are genuine cache workloads, read many times
- * a turn, and both already degrade safely (CLAUDE.md §4). What left Redis is
- * the part where being wrong costs a shopper money.
+ * turn is a genuine cache workload, read many times a turn, and it already
+ * degrades safely (CLAUDE.md §4). What left Redis is the part where being
+ * wrong costs a shopper money.
  *
  * ## Three things about this connection specifically
  *
@@ -63,7 +60,7 @@ export function db(env: NodeJS.ProcessEnv = process.env): Sql {
     if (cached && !requestId) return cached;
     // Reached only from a money path. The message names the variable because
     // the person reading this log is the person who can set it.
-    throw new Error('DATABASE_URL is not set — the card and order tables are unreachable.');
+    throw new Error('DATABASE_URL is not set — the order tables are unreachable.');
   }
   if (cached && cachedUrl !== undefined) void cached.end({ timeout: 1 });
   cachedUrl = url;
@@ -86,91 +83,6 @@ export function resetDb(next?: Sql): void {
   cached = next;
   cachedUrl = undefined;
   cachedRequest = undefined;
-}
-
-/* ---- the card a customer keeps ------------------------------------------ */
-
-/**
- * The customer's card, or nothing if they have never been issued one.
- *
- * Keyed on (network, address) rather than address alone, so a testnet card
- * funded with play money can never be the one a mainnet deposit tops up.
- */
-export async function cardOf(net: NetworkId, address: string): Promise<string | undefined> {
-  const rows = await db()`
-    select card_id from card_owner where network = ${net} and address = ${address}`;
-  return rows[0]?.card_id as string | undefined;
-}
-
-/** The binding with its cached face, for a panel that only has to name the
- *  card rather than show it. `last4`/`brand` are null on rows written before
- *  0003_card_face.sql and whenever the caller had nothing to cache. */
-export async function cardFaceOf(
-  net: NetworkId,
-  address: string,
-): Promise<{ cardId: string; last4: string | null; brand: string | null } | undefined> {
-  const rows = await db()`
-    select card_id, last4, brand
-      from card_owner where network = ${net} and address = ${address}`;
-  const r = rows[0];
-  if (!r) return undefined;
-  return {
-    cardId: r.card_id as string,
-    last4: (r.last4 as string | null) ?? null,
-    brand: (r.brand as string | null) ?? null,
-  };
-}
-
-/**
- * Bind a freshly created card to a customer, once.
- *
- * Returns the id that ended up bound, which is **not always the one passed in**.
- * Two lambdas can reach `createCard` concurrently for the same wallet — the
- * deposit watcher and a refreshed tab, say — and both will hold a real card
- * from Vyrion. `on conflict do nothing` lets exactly one of them win, and the
- * loser learns it lost by getting back an id that is not theirs. The caller
- * must then terminate the card it created, or the customer is charged for two.
- *
- * That is the same losing-race shape app/api/card/route.ts already implements
- * for the per-deposit claim, and it is here rather than there because the
- * atomicity is a property of the constraint.
- */
-export async function bindCard(
-  net: NetworkId,
-  address: string,
-  cardId: string,
-  /** last4 and brand, so reading the binding back does not cost a provider
-   *  call. Optional because the caller may not have them, and because they are
-   *  a cache rather than the truth — see 0003_card_face.sql. Written on the
-   *  winning insert only: the loser's card is about to be handed back, so its
-   *  face would be a lie the moment it landed. */
-  face?: { last4?: string; brand?: string },
-): Promise<string> {
-  const sql = db();
-  const last4 = /^\d{4}$/.test(face?.last4 ?? '') ? face!.last4! : null;
-  const brand = face?.brand?.trim() || null;
-  const inserted = await sql`
-    insert into card_owner (network, address, card_id, last4, brand)
-    values (${net}, ${address}, ${cardId}, ${last4}, ${brand})
-    on conflict (network, address) do nothing
-    returning card_id`;
-  if (inserted[0]) return inserted[0].card_id as string;
-  const held = await cardOf(net, address);
-  // No row after a conflict means it was deleted between the two statements —
-  // a card terminated at exactly the wrong moment. Ours is as good as any.
-  return held ?? cardId;
-}
-
-/**
- * Forget a card that Vyrion says is gone.
- *
- * Guarded on card_id so a stale read cannot unbind a card the customer was
- * issued after the one being forgotten.
- */
-export async function unbindCard(net: NetworkId, address: string, cardId: string): Promise<void> {
-  await db()`
-    delete from card_owner
-     where network = ${net} and address = ${address} and card_id = ${cardId}`;
 }
 
 /* ---- orders -------------------------------------------------------------- */
@@ -214,8 +126,8 @@ const toOrder = (r: Record<string, unknown>): OrderRow => ({
 /**
  * Open an order when the deposit intent is minted.
  *
- * This is where `rememberDepositor` used to write, and it records the same
- * fact: this memo was issued to a wallet the gate let through. What it adds is
+ * This is where the deposit quote records who the memo was issued to.
+ * What it adds is
  * that the fact no longer expires after 24 hours, so a deposit confirmed late
  * cannot become an unowned memo — which was a 403 to somebody who had paid.
  *
@@ -408,40 +320,13 @@ export async function orderByMemo(net: NetworkId, memo: string): Promise<OrderRo
 }
 
 /**
- * Claim this deposit for a card, exactly once.
- *
- * The conditional update is the whole guarantee, and it is the same one Redis
- * `SET NX` gave: `card_id is null` in the WHERE means two concurrent writers
- * cannot both match, because the first one's commit makes the second's
- * predicate false. An empty result is not an error — it means somebody else
- * claimed it, and `existing` says who with.
- *
- * Unlike the Redis version this leaves a row behind afterwards, so "which
- * deposit paid for which card" is answerable a month later.
- */
-export async function claimOrder(
-  net: NetworkId,
-  memo: string,
-  cardId: string,
-): Promise<{ claimed: boolean; existing?: string }> {
-  const sql = db();
-  const won = await sql`
-    update orders set card_id = ${cardId}, status = 'carded'
-     where network = ${net} and memo = ${memo} and card_id is null
-     returning card_id`;
-  if (won[0]) return { claimed: true };
-  const held = await orderByMemo(net, memo);
-  return { claimed: false, existing: held?.cardId ?? undefined };
-}
-
-/**
  * The deposit landed, and the order says so from now on.
  *
  * Monotonic, and that is the whole design. The browser polls `GET /api/deposit`
  * every four seconds and keeps confirming the same payment for as long as the
- * dialog is open — including after `claimOrder` has moved the order to
- * `carded` — so a plain `set status = 'paid'` would walk a carded order
- * backwards once every four seconds. `case when status = 'quoted'` is what
+ * dialog is open, so a plain `set status = 'paid'` would walk an order
+ * that has already moved on backwards once every four seconds. `case when
+ * status = 'quoted'` is what
  * makes the write safe to repeat.
  *
  * The hash is recorded either way: it is evidence that this memo was paid by

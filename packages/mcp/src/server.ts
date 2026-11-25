@@ -12,10 +12,38 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import { getAdapter, listRetailers, RETAILER_IDS, UNSUPPORTED } from './adapters/registry.js';
-import { defaultSession, type SessionState } from './session.js';
+import { CotoCatalog } from './catalog/coto.js';
+import { addCotoLines, priceCotoCart, setCotoQuantity } from './catalog/coto-cart.js';
+import { defaultSession, type OrderRetailer, type SessionState } from './session.js';
 import { CATALOG_INSTRUCTIONS } from './onboarding.js';
 import { CartLinkOutput, CartOutput, ProductsOutput } from './schemas.js';
 import type { Cart, Product } from './types.js';
+
+const cotoCatalog = new CotoCatalog();
+
+/**
+ * Whether the basket being left has lines. A Día id is read and not replaced:
+ * `ensureCart` would mint a new cart when the old one is stale, which is the
+ * wrong side effect for a question.
+ */
+async function orderHasLines(session: SessionState): Promise<boolean> {
+  if (session.getOrder() === 'coto') return session.cotoLines().length > 0;
+  if (session.getOrder() !== 'dia') return false;
+  const snap = session.snapshot();
+  const id = snap.carts.dia;
+  const location = snap.location;
+  if (!id || !location || location.retailer !== 'dia') return false;
+  try {
+    const cart = await getAdapter('dia').getCart(id, location);
+    return cart.lines.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function cotoCartOf(session: SessionState): Promise<Cart> {
+  return priceCotoCart(session.cotoCartId(), session.cotoLines(), cotoCatalog);
+}
 
 const RetailerId = z.enum(RETAILER_IDS as unknown as [string, ...string[]]);
 
@@ -107,6 +135,11 @@ export function registerCatalogTools(
       },
     },
     async ({ retailer, postal_code }) => {
+      if (!session.getCity()) {
+        return fail(
+          'Ask which city or locality that postal code is in before set_location. Do not guess the city.',
+        );
+      }
       try {
         const ctx = await getAdapter(retailer).resolveLocation(postal_code);
         session.setLocation(ctx);
@@ -227,6 +260,15 @@ export function registerCatalogTools(
     },
     async ({ items }) => {
       try {
+        if (session.getOrder() === 'coto') {
+          const next = addCotoLines(
+            session.cotoLines(),
+            items.map((i) => ({ id: i.sku_id, quantity: i.quantity })),
+          );
+          const cart = await priceCotoCart(session.cotoCartId(), next, cotoCatalog);
+          session.setCotoLines(next);
+          return structured(renderCart(cart), { cart });
+        }
         const { cart: current, ctx } = await session.ensureCart();
         const adapter = getAdapter(ctx.retailer);
         const cart = await adapter.addItems(
@@ -257,6 +299,12 @@ export function registerCatalogTools(
     },
     async ({ index, quantity }) => {
       try {
+        if (session.getOrder() === 'coto') {
+          const next = setCotoQuantity(session.cotoLines(), index, quantity);
+          const cart = await priceCotoCart(session.cotoCartId(), next, cotoCatalog);
+          session.setCotoLines(next);
+          return structured(renderCart(cart), { cart });
+        }
         const { cart: current, ctx } = await session.ensureCart();
         const cart = await getAdapter(ctx.retailer).setQuantity(current.cartId, index, quantity, ctx);
         return structured(renderCart(cart), { cart });
@@ -276,6 +324,10 @@ export function registerCatalogTools(
     },
     async () => {
       try {
+        if (session.getOrder() === 'coto') {
+          const cart = await cotoCartOf(session);
+          return structured(renderCart(cart), { cart });
+        }
         const { cart } = await session.ensureCart();
         return structured(renderCart(cart), { cart });
       } catch (e) {
@@ -296,12 +348,73 @@ export function registerCatalogTools(
     },
     async () => {
       try {
+        if (session.getOrder() === 'coto') {
+          const cart = await cotoCartOf(session);
+          if (!cart.lines.length) {
+            return structured('Cart is empty — add something before handing it over.', { cart });
+          }
+          return structured(
+            `${renderCart(cart)}\nCoto has no cart link yet. Payment is not available.`,
+            { cart },
+          );
+        }
         const { cart, ctx } = await session.ensureCart();
         const url = getAdapter(ctx.retailer).handoffUrl(cart.cartId);
         if (!cart.lines.length) {
           return structured('Cart is empty — add something before handing it over.', { cart });
         }
         return structured(renderCart(cart, url), { cart, handoffUrl: url });
+      } catch (e) {
+        return fail(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  server.registerTool(
+    'choose_retailer',
+    {
+      title: 'Choose Día or Coto for this order',
+      description:
+        'Set which supermarket this order belongs to: dia or coto. The shopper has to name the ' +
+        'store. Do not call this to pick the cheaper chain. If the current basket has lines from ' +
+        'the other store, this fails unless replace_cart is true, and replace_cart is only for ' +
+        'after the shopper confirms. Lines are never merged. A Coto order is a Changuito-held ' +
+        'basket priced from the Coto catalog. It has no store link and cannot be paid yet. ' +
+        'This call does not draw a cart. After it succeeds, in the same turn, call add_to_cart ' +
+        'with ids from that chain, then get_cart_link. Ending the turn here leaves no cart card.',
+      inputSchema: {
+        retailer: z.enum(['dia', 'coto']).describe('The store the shopper named.'),
+        replace_cart: z
+          .boolean()
+          .optional()
+          .describe('True only after the shopper confirms replacing the current basket.'),
+      },
+    },
+    async ({ retailer, replace_cart }) => {
+      try {
+        const next = retailer as OrderRetailer;
+        const hasLines = await orderHasLines(session);
+        const result = session.chooseOrder(next, { replace: replace_cart === true, hasLines });
+        if (result === 'needs_replace') {
+          return fail(
+            'The current basket has lines. Ask the shopper to confirm the switch, then call ' +
+              'choose_retailer again with replace_cart true. Nothing was changed.',
+          );
+        }
+        const cleared =
+          result === 'replaced'
+            ? `Order set to ${next}. The other basket was cleared and its lines were not merged. `
+            : `Order set to ${next}. `;
+        // choose_retailer only records the chain. The card is drawn later, from
+        // lines, and a Día card also needs the handoff URL. The model reads this
+        // result on the next hop and was ending the turn here.
+        const note =
+          cleared +
+          'In this same turn, call add_to_cart with only ids from this chain for what the shopper asked to buy ' +
+          '(pairDia when the order is dia, pairCoto when it is coto, from the last search_compare line when it has them), ' +
+          'then call get_cart_link. Do not end the turn before that. ' +
+          'A Día card is not drawn until get_cart_link returns. A Coto card is drawn from the lines and has no store link.';
+        return text(note);
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e));
       }
@@ -337,8 +450,8 @@ export function registerCatalogTools(
  * here touches an account or spends money.
  *
  * The checkout tools are deliberately NOT reachable from this module. They
- * drive a headed browser and hold an EVM signer, and the binary that wants
- * them imports them itself (see index.ts). Making that a module boundary
+ * drive a headed browser, and the binary that wants them imports them itself
+ * (see index.ts). Making that a module boundary
  * rather than a `checkout: false` option is the difference between a host
  * that does not call Playwright and a host that cannot: a bundler resolves
  * `await import()` statically, so a flag would keep the dependency out of the

@@ -102,9 +102,13 @@ export function ManualPaymentPanel({ orderId, status, onUpdate }: {
       <p className="ck-note">{en ? 'Enter your card in the form. Then review the amount and complete any verification in the DIA session.'
         : 'Ingresá tu tarjeta en el formulario. Después revisá el importe y completá la verificación en la sesión de Día.'}</p>
       <button type="button" className="btn" onClick={() => void connect()}>{en ? 'Open / reconnect browser' : 'Abrir / reconectar navegador'}</button>
-      {src ? <iframe ref={frame} src={src} title={en ? 'Your prepared DIA payment session' : 'Tu sesión de pago preparada en DIA'}
-        style={{ width: '100%', height: 'min(70dvh, 760px)', minHeight: 380, border: '1px solid var(--border, #64748b)' }}
-        referrerPolicy="origin" sandbox="allow-scripts allow-same-origin" /> : null}
+      {src ? (
+        <div className="ph-no-capture">
+          <iframe ref={frame} src={src} title={en ? 'Your prepared DIA payment session' : 'Tu sesión de pago preparada en DIA'}
+            style={{ width: '100%', height: 'min(70dvh, 760px)', minHeight: 380, border: '1px solid var(--border, #64748b)' }}
+            referrerPolicy="origin" sandbox="allow-scripts allow-same-origin" />
+        </div>
+      ) : null}
     </> : m?.preparedAt ? <p>{en ? 'The browser session has ended. A pending or unknown purchase is not proof of payment; check your DIA account before trying again.'
       : 'La sesión del navegador terminó. Una compra pendiente o sin confirmar no prueba el pago; revisá tu cuenta de DIA antes de reintentar.'}</p>
       : <p>{en ? 'Preparation' : 'Preparación'}: {preparationLabels[m?.preparation ?? 'queued']}</p>}

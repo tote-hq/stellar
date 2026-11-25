@@ -10,11 +10,8 @@ const keys = (partial: Partial<PollarKeys>): PollarKeys => ({
 });
 
 describe('loginNetwork', () => {
-  it('picks testnet when only the testnet key is set', () => {
+  it('picks the only network that has a key', () => {
     assert.equal(loginNetwork(keys({ testnet: 'pk_test' })), 'testnet');
-  });
-
-  it('picks mainnet when only the mainnet key is set', () => {
     assert.equal(loginNetwork(keys({ mainnet: 'pk_main' })), 'mainnet');
   });
 

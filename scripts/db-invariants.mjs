@@ -96,13 +96,8 @@ try {
     check('a binding with no face is still allowed', blank[0].last4 === null && blank[0].brand === null);
     await tx`delete from card_owner where address=${B}`;
 
-    // unbindCard, which `POST /api/card/retire` runs after Vyrion has killed
-    // the card, and which `POST /api/card/mine` runs when it finds a binding
-    // that outlived one. Both name the card id in the WHERE clause, and this
-    // is why: the id is the only thing that distinguishes "give back the card
-    // I have" from "give back whatever card this wallet has now", and the two
-    // differ the moment a deposit lands between reading the page and pressing
-    // the button.
+    // The delete names the card id. The id is the only thing that distinguishes
+    // "remove this binding" from "remove whatever binding this wallet has now".
     const unbind = (net, addr, id) => tx`delete from card_owner
        where network=${net} and address=${addr} and card_id=${id} returning card_id`;
     check('unbinding the wrong card id removes nothing', (await unbind('mainnet', A, 'card_loser')).length === 0);
@@ -294,6 +289,9 @@ try {
     await refuses(tx, 'a malformed member address is refused', '23514', (sp) =>
       sp`insert into shared_card_member (network, address) values ('mainnet', 'not-an-address')`);
     await tx`insert into shared_card_member (network, address, note) values ('mainnet', ${A}, 'demo')`;
+    const flags = await tx`select coto_sandbox_enabled, dia_manual_enabled from allowlist where network='mainnet' and user_id=${A}`;
+    check('a new allowlist row starts with both flags off',
+      flags[0]?.coto_sandbox_enabled === false && flags[0]?.dia_manual_enabled === false);
     await refuses(tx, 'the same member twice is refused', '23505', (sp) =>
       sp`insert into shared_card_member (network, address) values ('mainnet', ${A})`);
     check('a member on mainnet is not a member on testnet',
@@ -332,8 +330,8 @@ console.log(`\n${ok.length} ok, ${bad.length} failed  (${at})`);
 const left = await sql`select (select count(*) from card_owner) c,
                               (select count(*) from chat) h,
                               (select count(*) from orders) o,
-                              (select count(*) from shared_card_member) m`;
+                              (select count(*) from allowlist) m`;
 const { c, h, o, m } = left[0];
-console.log(`rows left behind: card_owner=${c} chat=${h} orders=${o} shared_card_member=${m}`);
+console.log(`rows left behind: card_owner=${c} chat=${h} orders=${o} allowlist=${m}`);
 if (bad.length) process.exitCode = 1;
 await sql.end();

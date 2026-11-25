@@ -100,7 +100,7 @@ flowchart TB
         PW[PollarProvider<br/><i>login · address · SEP-53 · pay</i>]
     end
 
-    subgraph N["NEXT.JS ON VERCEL — Node runtime, never edge"]
+    subgraph N["VINEXT ON CLOUDFLARE WORKERS — Node runtime"]
         direction TB
         CHAT["/api/chat<br/><i>Anthropic tool loop, streamed</i>"]
         MCP["MCP Client ⇄ McpServer<br/><i>InMemoryTransport — real tools/call</i>"]
@@ -145,8 +145,9 @@ Model Context Protocol server for four Argentine VTEX supermarkets — it was
 written first, and changuito exists to drive it from something other than a chat
 client. The web app speaks to it over `InMemoryTransport`: the actual protocol
 (`initialize`, `tools/list`, `tools/call`) with a pair of queues instead of a
-pipe. Its checkout half opens a headed browser on the host, so it cannot run on
-Vercel at all — three independent barriers keep Playwright out of the lambda.
+pipe. Its checkout half opens a headed browser on the host, so the web build
+never loads it: `@changuito/mcp/server` has no path to that module, and the
+checkout tools sit behind a dynamic import.
 
 More: **[docs/architecture.md](docs/architecture.md)**.
 
@@ -156,14 +157,11 @@ More: **[docs/architecture.md](docs/architecture.md)**.
 
 Read this before the demo, not after it.
 
-- **The card is not funded by the deposit.** The issuer's API answers `403
-  "Contact support via email to enable your API"` on every endpoint, so no card
-  is minted programmatically. One card exists, made by hand in the issuer's
-  dashboard, and its numbers are read out of a `shared_card` row by the wallets
-  on a member list. The deposit is real, the card is real, and **the link
-  between them is operator-run.** No copy in the app claims a load happened —
-  see [`lib/shared-card.ts`](apps/web/lib/shared-card.ts) and
-  `supabase/migrations/0004_shared_card.sql`.
+- **The app does not issue a card.** Checkout is a deposit into escrow, then
+  either an admitted manual checkout (the shopper pays Día with their own card)
+  or a demo that stops at the payment form. The allowlist is the
+  `shared_card_member` table; the name is historical.
+  `supabase/migrations/0004_shared_card.sql` is unchanged.
 - **A failed order is refunded by hand.** There is no automated outbound payment
   and no Stellar secret in the production deployment. That is a deliberate
   trade: worse product, much smaller blast radius.
@@ -186,10 +184,14 @@ Read this before the demo, not after it.
 
 ## Deployed on testnet
 
-Live since **2026-09-21**. The shop uses the escrow in the table
-(`STELLAR_ESCROW_ID`). `deployments.json` still records the earlier contract
-the generated bindings were built from, and `stellar.test.ts` compares that
-file with those bindings.
+Live since **2026-09-21**. The shop uses the escrow
+[`CA4BDF4U65OHCO6AB4KRJWBRZ4BJBZURDFNFKJDEZAKQRCUNJZFLN72S`](https://stellar.expert/explorer/testnet/contract/CA4BDF4U65OHCO6AB4KRJWBRZ4BJBZURDFNFKJDEZAKQRCUNJZFLN72S)
+(`STELLAR_ESCROW_ID`). `deployments.json` is the single source of truth for
+contract ids, and `stellar.test.ts` compares it against the ids baked into the
+generated bindings — so a redeploy that half-lands fails the suite rather than
+the demo. The September open, settle and refund in
+[Verified on testnet](#verified-on-testnet) were sent to the earlier contract
+`CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX`.
 
 | | |
 |---|---|
@@ -204,7 +206,9 @@ Network passphrase `Test SDF Network ; September 2015`, RPC
 (`DEPOSIT_ADDRESS_TESTNET` / `DEPOSIT_ADDRESS_MAINNET`), not committed — mainnet
 has no contracts deployed and needs none for the payment rail.
 
-Ask the contract who can settle and which token it holds:
+The escrow's constructor wired resolver, treasury and token in at deploy time and
+there is no setter, so who can settle and where the money lands are fixed. You do
+not have to take that from a README — ask the contract:
 
 ```bash
 stellar contract invoke --network testnet \
@@ -221,7 +225,7 @@ account will do as `--source-account`.
 
 ## Verified on testnet
 
-The first open, the settle and the refund below were sent to the earlier
+The September open, settle and refund below were sent to the earlier
 contract `CCA3ES6ANWAAJXB436XTSPGFRGX5GDZLHC7UOF25K4B5OFDJML4JG7EX`. The last
 row is on the escrow the shop uses now.
 
@@ -264,13 +268,13 @@ npm run dev            # http://localhost:3124
 **It degrades rather than breaking.** With only `ANTHROPIC_API_KEY` set you get
 search, comparison, carts and the store handoff. Without
 `NEXT_PUBLIC_POLLAR_API_KEY_MAINNET` the masthead reads *"Billetera: sin
-configurar"* instead of a balance. Without `DATABASE_URL` the card and order
+configurar"* instead of a balance. Without `DATABASE_URL` the order
 tables are simply absent and every reader answers "nothing" — deliberately, not
 defensively. Without `KV_REST_API_*` conversation history falls back to an
 in-process `Map`.
 
 The contracts are already deployed; you only need to redeploy if you change
-them. See **[DEPLOY.md](DEPLOY.md)** for that and for putting it on Vercel.
+them. See **[DEPLOY.md](DEPLOY.md)** for that and for putting it on Cloudflare Workers.
 
 ### Environment
 
@@ -281,8 +285,7 @@ The annotated list is `apps/web/.env.example`. The ones that change what works:
 | `ANTHROPIC_API_KEY` | server | the agent |
 | `NEXT_PUBLIC_POLLAR_API_KEY_MAINNET` | browser | login, wallet, SEP-53, paying |
 | `DEPOSIT_ADDRESS_TESTNET` / `_MAINNET` | server | the deposit rail. Missing → `/api/deposit` 503s and logs the variable name |
-| `DATABASE_URL` | server | orders, kept cards, chat archive, chat and faucet quotas |
-| `VYRION_API_KEY` | server | card issuance (currently 403 — see the honesty section) |
+| `DATABASE_URL` | server | orders, chat archive, chat and faucet quotas |
 | `STELLAR_RESOLVER_SECRET` | server | the testnet faucet and the escrow |
 | `KV_REST_API_URL` / `_TOKEN` | server | conversation history across restarts |
 | `REAL_MODE_ALLOWLIST_ADDRESSES` | server | who may reach mainnet. Empty in production means nobody |
@@ -294,7 +297,7 @@ The annotated list is `apps/web/.env.example`. The ones that change what works:
 ## Tests
 
 ```bash
-npm test                    # 1278: mcp 520 · trust 2 · web 682 · landing 74
+npm test                    # 603: mcp 180 · trust 1 · web 422
 npm run contracts:test      #   34: escrow 19 · mock_usdc 15
 npm run typecheck -w @changuito/web
 npm run build
@@ -318,11 +321,6 @@ Four that guard mistakes which type-check cleanly:
   settles a basket nobody approved.
 - **`stellar.test.ts`** reads the contract ids baked into the generated bindings
   as text and compares them with `deployments.json`.
-- **`app-frame-checkout.spec.ts`** drives the whole checkout in a browser and
-  pins that the basket is quoted **exactly once**, and never before the shopper
-  has signed in — which is the property the envío bug violated. It runs with
-  `trace / video / screenshot` off, because the repo is public and the spec walks
-  past a test PAN.
 
 The contract suite covers what the money depends on: a double open is rejected,
 settling an order that was never opened is rejected, an unauthorized settle is
@@ -332,8 +330,8 @@ and balances reconcile exactly across both `open → settle` and `open → refun
 ### Redis (Testcontainers)
 
 `apps/web/lib/test/kv-stand-in.ts` starts a Redis container behind an
-Upstash-compatible HTTP proxy. That REST shape is what Vercel KV is, so the
-session store can be pointed at the container the same way it is pointed at KV.
+Upstash-compatible HTTP proxy. That REST shape is what Upstash is, so the
+session store can be pointed at the container the same way it is pointed at Upstash.
 `apps/web/lib/test/turn-store.redis.test.ts` is the integration test that uses
 it. It is part of `npm test` and skips when Docker is not available, so a
 machine or a build without Docker still passes.
@@ -350,9 +348,9 @@ node --experimental-strip-types --experimental-test-module-mocks --no-warnings -
 
 ```
 apps/web/            the shopper — chat, checkout, card, API routes (app.changuito.me / ste.changuito.me)
-apps/landing/        marketing site only (www.changuito.me)
+apps/landing/        marketing site and public stats (Worker changuito-landing: www, apex, stats.changuito.me)
 apps/branding/       brand kit (not an npm package): logo, mascot, manuals, social
-packages/mcp/        the supermarket MCP server (vendored, 520 tests)
+packages/mcp/        the supermarket MCP server (vendored, 304 tests)
 packages/trust/      footer trust copy shared by both apps, so they cannot drift
 packages/*-bindings/ generated TypeScript clients for the two contracts
 contracts/escrow/    open / settle / refund, with events — mounted on login-network checkout
@@ -374,5 +372,5 @@ deployments.json     what is deployed, and where — committed on purpose
 | [docs/stellar.md](docs/stellar.md) | every Stellar technology used and what each is doing |
 | [docs/tech-stack.md](docs/tech-stack.md) | the dependency list with versions, and why each one is there |
 | [docs/e2e.md](docs/e2e.md) | Playwright, and the mainnet checks the e2e cannot cover |
-| [DEPLOY.md](DEPLOY.md) | the contracts, then Vercel, then the database |
+| [DEPLOY.md](DEPLOY.md) | the contracts, then Cloudflare Workers, then the database |
 | [CLAUDE.md](CLAUDE.md) | how the agent's behaviour was arrived at, and which decisions not to undo |

@@ -107,10 +107,8 @@ export const MEMO_LENGTH = 8;
 /**
  * A uniform float in [0, 1), from the CSPRNG rather than from `Math.random`.
  *
- * The memo is not only a label. `GET /api/card/3ds` and `POST /api/card/terminate`
- * take it as a bearer token — they have to, since a shopper polling for a
- * one-time code every three seconds cannot sign for each poll — so guessing a
- * live memo is guessing a live card's 3DS feed. `Math.random` is a fast PRNG
+ * The memo is not only a label. It is the tag a deposit is matched on, so
+ * guessing a live memo is guessing somebody else's payment. `Math.random` is a fast PRNG
  * whose internal state is recoverable from a handful of outputs, and this
  * function hands out outputs eight at a time to anyone who opens a checkout.
  *

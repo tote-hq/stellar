@@ -271,15 +271,9 @@ BROWSER                            /api/card                   STELLAR / DB
    stellar.expert and the order at the store (`{orderGroup}-01`)
 ```
 
-- **The PAN, the CVV and the 3DS code never touch storage.** Not localStorage,
-  not sessionStorage, not a Playwright trace — the e2e spec asserts all three
-  and sets `trace: 'off', video: 'off', screenshot: 'off'` because this repo is
-  public.
-- **The card is funded by an operator, not by this code.** Vyrion answers
-  `403 "Contact support via email to enable your API"` on every endpoint, so
-  one card was created by hand and `shared_card` hands it to the wallets on
-  `shared_card_member`. **No copy claims a load happened** — the panel says what
-  the importe is, and stops there.
+- **The app does not issue a card.** An admitted manual checkout lets the
+  shopper type their own card into Día. Everyone else gets a demo that stops
+  at the payment form. The allowlist is `shared_card_member`.
 - **The `-01` suffix on the order link is inferred**, from VTEX's single-seller
   convention. Día is single-seller. A wrong guess degrades to the order *list*,
   which is what shipped before.

@@ -71,7 +71,7 @@ export async function issueUserSession(
   }
 
   const token = await mintUserToken(address, secret, now);
-  return new Response(JSON.stringify({ ok: true, address }), {
+  return new Response(JSON.stringify({ ok: true, address, analyticsId: standing.analyticsId }), {
     status: 200,
     headers: { 'content-type': 'application/json', 'set-cookie': userCookieHeader(token) },
   });

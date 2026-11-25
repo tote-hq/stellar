@@ -44,16 +44,11 @@
  * deliberately; a real fix is a shorter TTL with a refresh, not a popup.
  *
  * Without a session the wallet proof is unchanged, and `orders` is still its
- * own intent: a signature for reading a card cannot list purchases, and one
- * for listing purchases cannot read a card.
+ * own intent.
  *
  * ## What comes back, and what does not
  *
- * Not the row. `card_id` is left out on purpose — the page has no use for it,
- * `POST /api/card/mine` looks the card up from the wallet it authenticated and
- * never takes an id as input, and a value on the wire that nothing consumes is only
- * somewhere for it to leak from. `hasCard` answers the question the page
- * actually asks, which is whether this order ended in a card.
+ * Not the row. `card_id` stays off the wire: nothing on the page reads it.
  */
 import { hasDatabase, ordersOf, type OrderRow, type OrderStatus } from '../../../lib/db.ts';
 import type { NetworkId } from '../../../lib/deployments.ts';
@@ -78,8 +73,6 @@ export interface OrderLine {
   txHash: string | null;
   cartId: string | null;
   handoffUrl: string | null;
-  /** Whether a card was ever issued against it. Never the card's id. */
-  hasCard: boolean;
   createdAt: string;
 }
 
@@ -92,7 +85,6 @@ const line = (o: OrderRow): OrderLine => ({
   txHash: o.txHash,
   cartId: o.cartId,
   handoffUrl: o.handoffUrl,
-  hasCard: Boolean(o.cardId),
   createdAt: o.createdAt.toISOString(),
 });
 

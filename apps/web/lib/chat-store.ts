@@ -1,7 +1,8 @@
 import type { Cart, CartLine, LocationContext, Money, Product, Seller } from '@changuito/mcp/types';
 import type { SessionSnapshot } from '@changuito/mcp/session';
 
-import type { Block, ChatState, ToolRun } from './chat-state.ts';
+import { dualCheckoutOn, type Block, type ChatState, type ToolRun } from './chat-state.ts';
+import type { CompareLineView, CompareOffer, SearchCompareItem } from './protocol';
 
 /**
  * Chats in localStorage.
@@ -91,6 +92,8 @@ export interface StoredChat {
   snapshot: SessionSnapshot | null;
   cart: Cart | null;
   handoffUrl: string | null;
+  /** The open basket is offering the dual mock pay cards. Absent means off. */
+  dualCheckout?: boolean;
   receipt: Receipt | null;
 }
 
@@ -177,10 +180,26 @@ function packBlock(b: Block): Block | null {
       return b.note === undefined
         ? { kind: 'products', id: b.id, items: b.items.map(packProduct) }
         : { kind: 'products', id: b.id, items: b.items.map(packProduct), note: b.note };
-    case 'cart':
-      return b.handoffUrl === undefined
+    case 'cart': {
+      const packed: Extract<Block, { kind: 'cart' }> = b.handoffUrl === undefined
         ? { kind: 'cart', id: b.id, cart: packCart(b.cart) }
         : { kind: 'cart', id: b.id, cart: packCart(b.cart), handoffUrl: b.handoffUrl };
+      if (b.dualCheckout) packed.dualCheckout = true;
+      if (b.orderable === false) packed.orderable = false;
+      return packed;
+    }
+    case 'compare':
+      return packCompare(b);
+    case 'search_compare':
+      return packSearchCompare(b);
+    case 'missing':
+      return {
+        kind: 'missing',
+        id: b.id,
+        query: b.query,
+        retailer: b.retailer,
+        item: b.item,
+      };
     case 'error':
       return { kind: 'error', id: b.id, message: b.message, recoverable: b.recoverable };
     default: {
@@ -191,16 +210,95 @@ function packBlock(b: Block): Block | null {
   }
 }
 
+function packOffer(offer: CompareOffer): CompareOffer {
+  const out: CompareOffer = {
+    id: offer.id,
+    name: offer.name,
+    shelfCentavos: offer.shelfCentavos,
+    lineCentavos: offer.lineCentavos,
+    available: offer.available,
+  };
+  if (offer.url !== undefined && /^https?:\/\//i.test(offer.url)) out.url = offer.url;
+  return out;
+}
+
+function packCompareRow(row: CompareLineView): CompareLineView {
+  const out: CompareLineView = {
+    skuId: row.skuId,
+    name: row.name,
+    quantity: row.quantity,
+    diaLineCentavos: row.diaLineCentavos,
+    confidence: row.confidence,
+  };
+  if (row.coto && row.coto.lineCentavos > 0 && row.coto.shelfCentavos > 0) out.coto = packOffer(row.coto);
+  return out;
+}
+
+function packCompare(b: Extract<Block, { kind: 'compare' }>): Extract<Block, { kind: 'compare' }> {
+  const out: Extract<Block, { kind: 'compare' }> = {
+    kind: 'compare',
+    id: b.id,
+    status: b.status,
+    cartId: b.cartId,
+    handoffUrl: b.handoffUrl,
+    matched: b.matched,
+    lines: b.lines,
+    rows: b.rows.map(packCompareRow),
+  };
+  if (b.gap) {
+    out.gap = {
+      diaSubtotalCentavos: b.gap.diaSubtotalCentavos,
+      cotoSubtotalCentavos: b.gap.cotoSubtotalCentavos,
+      gapCentavos: b.gap.gapCentavos,
+    };
+  }
+  if (b.checkoutDemo) out.checkoutDemo = true;
+  return out;
+}
+
+function packSearchItem(item: SearchCompareItem): SearchCompareItem {
+  return {
+    id: item.id,
+    name: item.name,
+    shelfCentavos: item.shelfCentavos,
+    available: item.available,
+  };
+}
+
+function packSearchCompare(
+  b: Extract<Block, { kind: 'search_compare' }>,
+): Extract<Block, { kind: 'search_compare' }> {
+  const out: Extract<Block, { kind: 'search_compare' }> = {
+    kind: 'search_compare',
+    id: b.id,
+    compareId: b.compareId,
+    status: b.status,
+    query: b.query,
+    dia: b.dia.map(packSearchItem),
+    coto: b.coto.map(packSearchItem),
+  };
+  if (b.postalCode !== undefined) out.postalCode = b.postalCode;
+  if (b.gapCentavos !== undefined) out.gapCentavos = b.gapCentavos;
+  if (b.feeCentavos !== undefined) out.feeCentavos = b.feeCentavos;
+  return out;
+}
+
 /**
  * The snapshot is handed back to the agent verbatim on the next turn, so
  * unlike everything else here it is packed in full rather than trimmed:
  * `sellers`, `salesChannel` and `degraded` are what make prices match what
  * the shopper will actually pay, and a restored snapshot missing them would
- * be a lie the agent then acts on. Still field by field — it is a location
- * and a map of cart ids, and nothing else belongs in it.
+ * be a lie the agent then acts on. Still field by field — it is a location,
+ * a map of cart ids, and — when the shopper has picked — the order and the
+ * Coto line ids. Prices are not stored on those lines.
  */
 function packSnapshot(s: SessionSnapshot): SessionSnapshot {
   const out: SessionSnapshot = { carts: { ...s.carts } };
+  if (s.order === 'dia' || s.order === 'coto') out.order = s.order;
+  if (s.city) out.city = s.city;
+  if (s.coto && s.coto.length) {
+    out.coto = s.coto.map((line) => ({ id: line.id, quantity: line.quantity }));
+  }
   const l = s.location;
   if (l) {
     out.location = {
@@ -307,6 +405,127 @@ function asTool(v: unknown): ToolRun | null {
   return out;
 }
 
+const COMPARE_STATUS = new Set(['pending', 'ok', 'degraded', 'timed_out']);
+const COMPARE_CONFIDENCE = new Set(['ean', 'brand_size_unit', 'none', 'failed']);
+
+function httpUrl(value: unknown): string | undefined {
+  return typeof value === 'string' && /^https?:\/\//i.test(value) ? value : undefined;
+}
+
+function asOffer(value: unknown): CompareOffer | undefined {
+  if (!isObj(value)) return undefined;
+  const id = str(value.id);
+  const name = str(value.name);
+  const shelfCentavos = num(value.shelfCentavos);
+  const lineCentavos = num(value.lineCentavos);
+  if (id === null || name === null || shelfCentavos === null || lineCentavos === null) return undefined;
+  if (shelfCentavos <= 0 || lineCentavos <= 0) return undefined;
+  const offer: CompareOffer = {
+    id,
+    name,
+    shelfCentavos,
+    lineCentavos,
+    available: value.available === true,
+  };
+  const url = httpUrl(value.url);
+  if (url) offer.url = url;
+  return offer;
+}
+
+function asCompareRow(value: unknown): CompareLineView | null {
+  if (!isObj(value)) return null;
+  const skuId = str(value.skuId);
+  const name = str(value.name);
+  const quantity = num(value.quantity);
+  const diaLineCentavos = num(value.diaLineCentavos);
+  const confidence = str(value.confidence);
+  if (skuId === null || name === null || quantity === null || diaLineCentavos === null) return null;
+  if (confidence === null || !COMPARE_CONFIDENCE.has(confidence)) return null;
+  const row: CompareLineView = {
+    skuId,
+    name,
+    quantity,
+    diaLineCentavos,
+    confidence: confidence as CompareLineView['confidence'],
+  };
+  const coto = asOffer(value.coto);
+  if (coto) row.coto = coto;
+  return row;
+}
+
+function asCompare(v: Record<string, unknown>, id: string): Extract<Block, { kind: 'compare' }> | null {
+  const status = str(v.status);
+  const cartId = str(v.cartId);
+  const handoffUrl = str(v.handoffUrl);
+  const matched = num(v.matched);
+  const lines = num(v.lines);
+  if (status === null || !COMPARE_STATUS.has(status) || cartId === null || handoffUrl === null) return null;
+  if (matched === null || lines === null) return null;
+  const block: Extract<Block, { kind: 'compare' }> = {
+    kind: 'compare',
+    id,
+    status: status as Extract<Block, { kind: 'compare' }>['status'],
+    cartId,
+    handoffUrl,
+    matched,
+    lines,
+    rows: arr(v.rows).map(asCompareRow).filter((row): row is CompareLineView => row !== null),
+  };
+  if (isObj(v.gap)) {
+    const diaSubtotalCentavos = num(v.gap.diaSubtotalCentavos);
+    const cotoSubtotalCentavos = num(v.gap.cotoSubtotalCentavos);
+    const gapCentavos = num(v.gap.gapCentavos);
+    if (diaSubtotalCentavos !== null && cotoSubtotalCentavos !== null && gapCentavos !== null && gapCentavos >= 0) {
+      block.gap = { diaSubtotalCentavos, cotoSubtotalCentavos, gapCentavos };
+    }
+  }
+  if (v.checkoutDemo === true && (block.status === 'ok' || block.status === 'degraded') && block.matched >= 1) {
+    block.checkoutDemo = true;
+  }
+  return block;
+}
+
+function asSearchItem(v: unknown): SearchCompareItem | null {
+  if (!isObj(v)) return null;
+  const id = str(v.id);
+  const name = str(v.name);
+  const shelfCentavos = num(v.shelfCentavos);
+  if (id === null || name === null || shelfCentavos === null || shelfCentavos <= 0) return null;
+  return { id, name, shelfCentavos, available: v.available === true };
+}
+
+function asSearchCompare(v: Record<string, unknown>, id: string): Extract<Block, { kind: 'search_compare' }> | null {
+  const compareId = str(v.compareId);
+  const query = str(v.query);
+  const status = v.status;
+  const allowed =
+    status === 'pending' ||
+    status === 'ok' ||
+    status === 'coto_empty' ||
+    status === 'coto_error' ||
+    status === 'coto_timed_out' ||
+    status === 'dia_error';
+  if (compareId === null || query === null || !allowed) return null;
+  const dia = arr(v.dia).map(asSearchItem).filter((item): item is SearchCompareItem => item !== null);
+  const coto = arr(v.coto).map(asSearchItem).filter((item): item is SearchCompareItem => item !== null);
+  const block: Extract<Block, { kind: 'search_compare' }> = {
+    kind: 'search_compare',
+    id,
+    compareId,
+    status,
+    query,
+    dia,
+    coto,
+  };
+  const postalCode = str(v.postalCode);
+  if (postalCode !== null) block.postalCode = postalCode;
+  const gapCentavos = num(v.gapCentavos);
+  if (gapCentavos !== null && gapCentavos >= 0) block.gapCentavos = gapCentavos;
+  const feeCentavos = num(v.feeCentavos);
+  if (feeCentavos !== null && feeCentavos >= 0) block.feeCentavos = feeCentavos;
+  return block;
+}
+
 /** Anything that does not parse is dropped, not repaired. A half-block is worse than a gap. */
 function asBlock(v: unknown): Block | null {
   if (!isObj(v)) return null;
@@ -338,7 +557,23 @@ function asBlock(v: unknown): Block | null {
       const cart = asCart(v.cart);
       if (!cart) return null;
       const handoffUrl = str(v.handoffUrl);
-      return handoffUrl === null ? { kind: 'cart', id, cart } : { kind: 'cart', id, cart, handoffUrl };
+      const block: Extract<Block, { kind: 'cart' }> = handoffUrl === null
+        ? { kind: 'cart', id, cart }
+        : { kind: 'cart', id, cart, handoffUrl };
+      if (v.dualCheckout === true) block.dualCheckout = true;
+      if (v.orderable === false) block.orderable = false;
+      return block;
+    }
+    case 'compare':
+      return asCompare(v, id);
+    case 'search_compare':
+      return asSearchCompare(v, id);
+    case 'missing': {
+      const query = str(v.query);
+      const item = str(v.item);
+      const retailer = v.retailer === 'dia' || v.retailer === 'coto' ? v.retailer : null;
+      if (query === null || item === null || retailer === null) return null;
+      return { kind: 'missing', id, query, retailer, item };
     }
     case 'error': {
       const message = str(v.message);
@@ -387,6 +622,17 @@ function asSnapshot(v: unknown): SessionSnapshot | null {
       out.location = location;
     }
   }
+  if (v.order === 'dia' || v.order === 'coto') out.order = v.order;
+  const city = str(v.city);
+  if (city) out.city = city;
+  const coto = arr(v.coto).flatMap((line) => {
+    if (!isObj(line)) return [];
+    const id = str(line.id);
+    const quantity = num(line.quantity);
+    if (id === null || quantity === null || !Number.isInteger(quantity) || quantity < 1) return [];
+    return [{ id, quantity }];
+  });
+  if (coto.length) out.coto = coto;
   return out;
 }
 
@@ -513,6 +759,7 @@ export function loadChat(id: string): StoredChat | null {
     snapshot: asSnapshot(v.snapshot),
     cart: asCart(v.cart),
     handoffUrl: str(v.handoffUrl),
+    ...(v.dualCheckout === true ? { dualCheckout: true } : {}),
     receipt: asReceipt(v.receipt),
   };
 }
@@ -553,6 +800,7 @@ export function saveChat(input: SaveInput): ChatSummary | null {
     snapshot: state.snapshot ? packSnapshot(state.snapshot) : null,
     cart: state.cart ? packCart(state.cart.cart) : null,
     handoffUrl: state.cart?.handoffUrl ?? null,
+    ...(dualCheckoutOn(state) ? { dualCheckout: true } : {}),
     receipt: input.receipt ? packReceipt(input.receipt) : null,
   };
   if (!write(chatKey(id), record)) return null;

@@ -12,20 +12,23 @@
  * and is dropped — never written to the checkout record, never logged. A
  * password in a cache with a 24 hour expiry is still a password in a cache.
  *
- * A wallet that may not pay with the shared card gets the demo run instead
- * (lib/shared-card.ts `checkoutMode`, asked again here because this is the
- * check that counts): the mock, stopping at payment, so the order refunds and
- * the modal hands off to the cart link. It needs no Día login.
+ * A non-manual checkout is `mock` when the sandbox mock is on and `demo`
+ * otherwise (lib/checkout/mode.ts). Demo stops at payment, so the order
+ * refunds and the modal hands off to the cart link. It needs no Día login.
+ * The mock still reads the Día login. Neither path sends a card.
  *
  * Idempotent: a second call for an order that already has a job returns the
  * same status rather than starting a second job.
  */
 import { readOrder } from '../../../../lib/checkout/escrow-server.ts';
+import { admitCotoRequest } from '../../../../lib/checkout/coto-admit.ts';
+import { startCotoRealCheckout } from '../../../../lib/checkout/coto-real-start.ts';
+import { cotoCheckoutBlocked, cotoDemoPayRecord, cotoRealRecord } from '../../../../lib/checkout/coto-guard.ts';
 import { startJob } from '../../../../lib/checkout/sandbox.ts';
 import { readShopper } from '../../../../lib/checkout/shopper.ts';
+import { checkoutMode } from '../../../../lib/checkout/mode.ts';
 import { sandboxFlags } from '../../../../lib/config.ts';
 import { getProfile } from '../../../../lib/profile.ts';
-import { cardAccess, checkoutCardFor, checkoutMode } from '../../../../lib/shared-card.ts';
 import type { SandboxShopper } from '../../../../lib/checkout/sandbox.ts';
 import { checkoutStore } from '../../../../lib/checkout/store.ts';
 import type { StatusResponse } from '../../../../lib/checkout/types.ts';
@@ -52,19 +55,31 @@ export async function POST(req: Request): Promise<Response> {
   const store = checkoutStore();
   const rec = await store.get(orderId);
   if (!rec || rec.buyer !== user.address) return Response.json({ error: 'No encontramos ese pedido.' }, { status: 404 });
+  if (cotoRealRecord(rec)) {
+    if (!(await admitCotoRequest(user.address))) {
+      return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
+    }
+    return startCotoRealCheckout(rec, typeof body?.openSig === 'string' ? body.openSig : undefined);
+  }
+  if (cotoCheckoutBlocked(rec.retailer) && !cotoDemoPayRecord(rec)) {
+    return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
+  }
   if (rec.checkoutKind === 'manual_fee_v1') return startManual(rec, body);
 
   if (!rec.jobId) {
     const flags = await sandboxFlags();
-    // Fails closed: an unreadable member list is a demo, never the card.
-    const mode = checkoutMode(await cardAccess(user.address, flags.mock).catch(() => 'not-member' as const));
+    // A Coto mock keeps the mode the quote stored. Reading the 15s cache here
+    // would turn it into `demo` (mock-h, refund-always) the moment the flag flips.
+    const cotoDemo = cotoDemoPayRecord(rec);
+    const mode = cotoDemo ? rec.mode! : checkoutMode({ mock: flags.mock, manual: false });
 
     // A login typed into the modal wins for this one checkout; otherwise the
     // saved profile, decrypted here and nowhere else (lib/profile.ts). The
-    // demo run never logs in, so it asks for neither.
+    // demo run never logs in, so it asks for neither. A Coto mock does not
+    // log into Día either: the lines were priced from the catalog.
     let shopper: SandboxShopper | undefined;
-    if (mode !== 'demo') shopper = readShopper(body?.dia, body?.address, rec.postalCode);
-    if (mode !== 'demo' && !shopper) {
+    if (!cotoDemo && mode !== 'demo') shopper = readShopper(body?.dia, body?.address, rec.postalCode);
+    if (!cotoDemo && mode !== 'demo' && !shopper) {
       try {
         shopper = readShopper(await getProfile(user.address), body?.address, rec.postalCode);
       } catch (err) {
@@ -72,7 +87,7 @@ export async function POST(req: Request): Promise<Response> {
         return Response.json({ error: 'No pudimos leer tu perfil. Probá de nuevo en un rato.' }, { status: 503 });
       }
     }
-    if (mode !== 'demo' && !shopper) {
+    if (!cotoDemo && mode !== 'demo' && !shopper) {
       return Response.json({ error: 'Completá tu email, contraseña y DNI de Día.' }, { status: 400 });
     }
     // A just-confirmed transaction can lag one RPC node behind another.
@@ -90,36 +105,17 @@ export async function POST(req: Request): Promise<Response> {
     }
 
     rec.openSig = typeof body?.openSig === 'string' ? body.openSig : rec.openSig;
-    rec.mode = mode;
+    if (!cotoDemo) rec.mode = mode;
     const items = rec.lines.map((l) => ({ name: l.name, quantity: l.quantity, sku: l.skuId }));
     try {
-      if (mode === 'demo') {
+      if (cotoDemo) {
+        // mock-k places and settles. mock-f is sandbox_mock_fail and refunds. Never mock-h.
+        rec.jobId = await startJob(orderId, items, undefined, undefined, { mock: true, mockFail: flags.mockFail });
+      } else if (mode === 'demo') {
         rec.jobId = await startJob(orderId, items, undefined, undefined, flags, process.env, { demo: true });
-        console.log('[checkout/start] demo run: not a card member');
+        console.log('[checkout/start] demo run');
       } else {
-        // The operator's card, from shared_card, and only for a wallet on its
-        // member list (the quote already said so; this is the check that
-        // counts). None means the run stops at the payment step and refunds;
-        // a failed read is the same, not a 500.
-        const card = await checkoutCardFor(user.address).catch((err) => {
-          console.error('[checkout/start] card', err instanceof Error ? err.name : 'read failed');
-          return undefined;
-        });
-        if (card) console.log('[checkout/start] paying with the shared card on', card.network);
-        rec.jobId = await startJob(
-          orderId,
-          items,
-          shopper,
-          card && {
-            pan: card.pan,
-            cvv: card.cvv,
-            exp_month: card.exp_month,
-            exp_year: card.exp_year,
-            holder: card.holder,
-            kind: card.kind,
-          },
-          flags,
-        );
+        rec.jobId = await startJob(orderId, items, shopper, undefined, flags);
       }
     } catch (err) {
       // No job means nothing will settle it: the status poll refunds.

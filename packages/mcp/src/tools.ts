@@ -4,8 +4,8 @@ import { z } from 'zod';
 import { linkAccount, sessionStatus, unlinkAccount } from './checkout/auth.js';
 import { vaultExists } from './secure/vault.js';
 import { withSession } from './checkout/browser.js';
-import { buildCart, describeCart, handoffUrl } from './checkout/cart.js';
-import { driveToPayment, isEscalation, payAndConfirm } from './checkout/purchase.js';
+import { buildCart, describeCart } from './checkout/cart.js';
+import { driveToPayment, isEscalation } from './checkout/purchase.js';
 import {
   type AppConfig,
   ConfigError,
@@ -16,7 +16,6 @@ import {
 } from './config.js';
 import {
   advance,
-  checkApproval,
   describeDraft,
   getDraft,
   invalidateApprovals,
@@ -24,27 +23,19 @@ import {
   setDraft,
   updateDraft,
 } from './order.js';
-import { EphemeralCard } from './pay/ephemeral-card.js';
-import { decideFunding, explainFunding } from './pay/funding.js';
-import { getArsPerUsd } from './pay/fx.js';
-import type { Bin } from './pay/types.js';
-import { formatUsd, VyrionClient } from './pay/vyrion.js';
 import { ensureCart, getLocation } from './session.js';
 import type { DeliveryAddress } from './types.js';
-import { describeTransfer, sendFunds, viewWallet } from './wallet/evm.js';
-import { formatARS, parseARS } from './util/money.js';
+import { formatARS } from './util/money.js';
 import { canPurchase, readiness, renderReadiness, setupGuidePath, setupRef } from './onboarding.js';
 
 /**
  * The checkout half of the MCP surface.
  *
  * It lives apart from index.ts for two reasons. The read-only search tools must
- * keep working when the checkout configuration is absent or wrong — a missing
- * VYRION_API_KEY should not stop anyone searching for milk — so the config is
- * loaded lazily, per call, rather than at import. And every tool here is a thin
- * shell over something already tested: the gating is `order.ts`, the money is
- * `funding.ts`, the driving is `purchase.ts`. The handlers below decide
- * nothing; they translate.
+ * keep working when the checkout configuration is absent or wrong, so the
+ * config is loaded lazily, per call, rather than at import. And every tool
+ * here is a thin shell over something already tested: the gating is `order.ts`,
+ * the driving is `purchase.ts`. The handlers below decide nothing; they translate.
  */
 
 type ToolResult = { content: Array<{ type: 'text'; text: string }>; isError?: boolean };
@@ -86,39 +77,6 @@ export function assertCheckoutSupported(cfg: AppConfig): void {
         `${cfg.host}. Set RETAILER=dia to use the checkout tools.`,
     );
   }
-}
-
-export function vyrionFrom(cfg: AppConfig): VyrionClient {
-  return new VyrionClient({
-    apiKey: cfg.vyrion.apiKey,
-    baseUrl: cfg.vyrion.baseUrl,
-    allowLive: cfg.vyrion.allowLive,
-  });
-}
-
-/**
- * `bins()` already returns 3DS-capable BINs ranked best-first, so "the first
- * one" is the right default. An explicit id wins, because walking down the list
- * after a decline is a thing the user does by hand.
- */
-export function pickBin(bins: Bin[], preferredId?: string): Bin {
-  if (preferredId) {
-    const hit = bins.find((b) => b.id === preferredId);
-    if (!hit) {
-      throw new Error(
-        `BIN "${preferredId}" is not in the 3DS-capable list. Available: ${bins.map((b) => b.id).join(', ') || '(none)'}.`,
-      );
-    }
-    return hit;
-  }
-  const first = bins[0];
-  if (!first) {
-    throw new Error(
-      'Vyrion returned no 3DS-capable BINs. A card without 3DS will be refused at ' +
-        'an Argentine gateway, so there is nothing safe to create here.',
-    );
-  }
-  return first;
 }
 
 export interface AddressInput {
@@ -190,29 +148,6 @@ export function postalCodeNote(addr: DeliveryAddress, searchedCp?: string): stri
  * including another unreadable string — because `Number('')` is 0 and an empty
  * confirmation must never read as a match.
  */
-export function sameAmount(a: string, b: string): boolean {
-  const n = (s: string): number | undefined => {
-    const cleaned = String(s).replace(/[\s,_]/g, '');
-    return /^\d+(\.\d+)?$/.test(cleaned) ? Number(cleaned) : undefined;
-  };
-  const x = n(a);
-  const y = n(b);
-  return x !== undefined && y !== undefined && x === y;
-}
-
-/** The cardholder name the payment form wants, read from the store's own profile. */
-export function holderNameFrom(profile: { firstName?: string; lastName?: string } | undefined): string {
-  const name = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ').trim();
-  if (!name) {
-    throw new Error(
-      'Your Día profile does not give a first and last name, and the card form ' +
-        'requires one. Add it to your account at the store and re-run ' +
-        'link_marketplace_account.',
-    );
-  }
-  return name;
-}
-
 // ---------------------------------------------------------------- tools
 
 export function registerCheckoutTools(server: McpServer): void {
@@ -494,221 +429,10 @@ export function registerCheckoutTools(server: McpServer): void {
             r.summary,
             ...(rows.length ? ['', ...rows] : []),
             '',
-            `To pay, restate this exact amount: ${formatARS(r.totalCentavos)}`,
-            'Next: check_funds.',
+            'This server stops here. Nothing was typed into the payment form.',
           ].join('\n'),
         );
       }),
   );
 
-  server.registerTool(
-    'check_funds',
-    {
-      title: 'Is there enough settled balance to pay?',
-      description:
-        'Convert the reviewed ARS total to USD, add the FX buffer, and compare it against the ' +
-        'SETTLED Vyrion balance. Pending deposits are shown but never counted — an unconfirmed ' +
-        'deposit is not money you have.',
-      inputSchema: {},
-    },
-    async () =>
-      guard(async () => {
-        const cfg = loadConfig();
-        const draft = requireStage('check_funds');
-        if (draft.totalCentavos === undefined) {
-          return fail('No reviewed total. Run review_order first.');
-        }
-
-        const client = vyrionFrom(cfg);
-        const [balance, fx] = await Promise.all([
-          client.walletBalance(),
-          getArsPerUsd({ override: cfg.fx.override }),
-        ]);
-
-        const plan = decideFunding({
-          arsTotal: draft.totalCentavos,
-          arsPerUsd: fx.arsPerUsd,
-          settledUsdCents: balance.settled,
-          pendingUsdCents: balance.pending,
-          buffer: cfg.fx.buffer,
-        });
-
-        setDraft(advance({ ...getDraft(), plan }, 'funds_checked'));
-
-        const next =
-          plan.status === 'ready'
-            ? `\nNext: approve_payment, restating ${formatARS(draft.totalCentavos)} exactly.`
-            : '\nNothing will be charged until this says ready.';
-        return text(`${explainFunding(plan)}\n(rate from ${fx.source})${next}`);
-      }),
-  );
-
-  server.registerTool(
-    'replenish_wallet',
-    {
-      title: 'Top up the Vyrion wallet from your own wallet',
-      description:
-        'Send funds from your encrypted EOA keystore to your Vyrion deposit address. ' +
-        'Independent of any order and non-blocking: it returns the transaction hash without ' +
-        'waiting for confirmations. Called without confirm_amount it only quotes the transfer.',
-      inputSchema: {
-        amount: z.string().describe('Amount in the funding asset, e.g. "25" or "25.5".'),
-        confirm_amount: z
-          .string()
-          .optional()
-          .describe('Restate the same amount to actually send it. Omit to see a quote first.'),
-      },
-    },
-    async ({ amount, confirm_amount }) =>
-      guard(async () => {
-        const cfg = loadConfig();
-        if (cfg.wallet.asset !== 'eth' && cfg.wallet.asset !== 'usdt') {
-          return fail(
-            `FUNDING_ASSET is "${cfg.wallet.asset}". This server can only sign EVM transfers ` +
-              '(eth, usdt). Send that deposit by hand, or set FUNDING_ASSET=usdt.',
-          );
-        }
-
-        const client = vyrionFrom(cfg);
-        const [deposit, view] = await Promise.all([
-          client.depositAddress(cfg.wallet.asset),
-          viewWallet(cfg),
-        ]);
-
-        if (!confirm_amount) {
-          return text(
-            [
-              describeTransfer(view, deposit.address, amount),
-              '',
-              'Nothing has been sent. To send it, call replenish_wallet again with ' +
-                `confirm_amount: "${amount}".`,
-            ].join('\n'),
-          );
-        }
-
-        if (!sameAmount(amount, confirm_amount)) {
-          return fail(
-            `You asked to send ${amount} but confirmed ${confirm_amount}. Nothing was sent.`,
-          );
-        }
-
-        const passphrase = requirePassphrase('WALLET_PASSPHRASE');
-        const receipt = await sendFunds(cfg, { to: deposit.address, amount, passphrase });
-
-        return text(
-          [
-            `Sent ${receipt.amount} ${receipt.symbol} to your Vyrion deposit address.`,
-            `Transaction: ${receipt.hash}`,
-            receipt.explorerUrl ? `Watch it: ${receipt.explorerUrl}` : '',
-            '',
-            'This was not waited on — it settles in the background. It will not count towards ' +
-              'check_funds until Vyrion confirms it, which is why a purchase never waits on it.',
-          ]
-            .filter(Boolean)
-            .join('\n'),
-        );
-      }),
-  );
-
-  server.registerTool(
-    'approve_payment',
-    {
-      title: 'Pay for the order',
-      description:
-        'THE ONE TOOL THAT SPENDS MONEY. Creates a single-use virtual card funded from the ' +
-        'settled Vyrion balance, pays for the reviewed cart, answers the 3D Secure challenge, ' +
-        'and terminates the card so anything left over returns to the wallet. Requires the ' +
-        'exact ARS total from review_order, restated by the user.',
-      inputSchema: {
-        confirm_total_ars: z
-          .string()
-          .describe('The exact total review_order showed, e.g. "12345,67". A mismatch aborts.'),
-        bin_id: z
-          .string()
-          .optional()
-          .describe('Force a specific Vyrion BIN. Defaults to the best-accepting 3DS-capable one.'),
-      },
-    },
-    async ({ confirm_total_ars, bin_id }) =>
-      guard(async () => {
-        const cfg = loadConfig();
-        assertCheckoutSupported(cfg);
-        const draft = requireStage('approve_payment');
-        const restated = parseARS(confirm_total_ars);
-        checkApproval(draft, restated);
-
-        const plan = draft.plan!;
-        const passphrase = requirePassphrase('SESSION_PASSPHRASE');
-        const client = vyrionFrom(cfg);
-        const bin = pickBin(await client.bins(), bin_id);
-
-        const result = await withSession(cfg, passphrase, async (run) => {
-          // Re-drive rather than trusting the earlier review: the browser from
-          // review_order is long closed, and the store may have moved on.
-          const review = await driveToPayment(run, cfg, {
-            orderFormId: draft.orderFormId,
-            address: draft.address,
-          });
-          if (!review.flow.reached) {
-            throw new Error(
-              `${review.summary}\n\nNo card was created and nothing was paid.`,
-            );
-          }
-
-          const holderName = holderNameFrom(run.profile);
-
-          // The card is created only once the payment form is genuinely on
-          // screen, so a failed drive never leaves funded plastic behind.
-          const card = await EphemeralCard.create({
-            client,
-            binId: bin.id,
-            amountCents: plan.requiredUsdCents,
-            label: 'grocery order',
-            allowedCategories: cfg.vyrion.allowedCategories,
-            metadata: { orderFormId: draft.orderFormId ?? '', retailer: cfg.retailer },
-          });
-
-          try {
-            return await payAndConfirm(run, cfg, {
-              approvedTotalCentavos: restated,
-              card,
-              holderName,
-              document: run.profile?.document,
-              orderFormId: draft.orderFormId,
-              address: draft.address,
-            });
-          } finally {
-            // Always, on every path: an un-terminated card still holds money.
-            await card.terminate();
-          }
-        });
-
-        if (result.placed) {
-          setDraft(
-            advance(
-              {
-                ...getDraft(),
-                confirmation: result.confirmation,
-                placedAt: new Date().toISOString(),
-              },
-              'order_placed',
-            ),
-          );
-        }
-
-        return text(
-          [
-            result.summary,
-            '',
-            `Card funded with ${formatUsd(plan.requiredUsdCents)} on BIN ${bin.id} (${bin.network}), ` +
-              'now terminated — whatever was not spent is back in the wallet.',
-            result.placed
-              ? `Verify it yourself: ${result.confirmation?.statusUrl ?? `https://${cfg.host}/account#/orders`}`
-              : `Your cart is untouched and still here: ${draft.cartUrl ?? handoffUrl(cfg, draft.orderFormId ?? '')}`,
-          ]
-            .filter(Boolean)
-            .join('\n'),
-        );
-      }),
-  );
 }

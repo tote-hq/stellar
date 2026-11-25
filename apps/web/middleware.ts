@@ -1,11 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { decideAdmin } from './lib/admin/gate';
 import {
   AI_BOT_UA,
   hasBrowserFetchHints,
   HUMAN_COOKIE,
-  humanGateMode,
   readCookie,
+  resolveHumanGateMode,
   turnstileSecret,
   verifyHumanToken,
 } from './lib/human-gate';
@@ -18,6 +19,27 @@ function humansOnly(message: string) {
 }
 
 export async function middleware(req: NextRequest) {
+  const admin = await decideAdmin(req);
+  if (admin?.handled) {
+    if (admin.rewrite) {
+      const url = req.nextUrl.clone();
+      url.pathname = admin.rewrite;
+      return NextResponse.rewrite(url);
+    }
+    if (admin.status === 200 && admin.body === undefined) return NextResponse.next();
+    return new NextResponse(admin.body ?? null, { status: admin.status, headers: admin.headers });
+  }
+
+  const path = req.nextUrl.pathname;
+  // The probe authenticates with its own bearer and answers 404 without it.
+  // The smoke script has no Turnstile cookie and no browser hints.
+  // Kept inline so this edge middleware does not import node:crypto.
+  if (path === '/api/compare/probe' && req.method === 'GET') {
+    const res = NextResponse.next();
+    res.headers.set('Cache-Control', 'no-store');
+    return res;
+  }
+
   const ua = req.headers.get('user-agent') ?? '';
   if (AI_BOT_UA.test(ua)) {
     return new NextResponse('Solo humanos.', {
@@ -26,8 +48,6 @@ export async function middleware(req: NextRequest) {
     });
   }
 
-  const path = req.nextUrl.pathname;
-
   // Conservative non-browser reject on APIs (keep UI fetch working).
   if (path.startsWith('/api/') && path !== '/api/human') {
     if (!hasBrowserFetchHints(req)) {
@@ -35,7 +55,7 @@ export async function middleware(req: NextRequest) {
     }
 
     // Early cookie check when enforcing (route handlers re-check).
-    const mode = humanGateMode(process.env);
+    const mode = await resolveHumanGateMode(process.env);
     if (mode === 'closed') {
       return humansOnly('Changuito es solo para personas. Completá la verificación.');
     }

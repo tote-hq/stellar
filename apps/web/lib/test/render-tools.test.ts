@@ -7,9 +7,13 @@ import type { UiEvent } from '../protocol.ts';
 import {
   autoRenderCart,
   cartLink,
+  cartWriteNeedsChoice,
   emptyCache,
+  foreignCartSku,
   rememberStructured,
   runRenderTool,
+  searchedEmpty,
+  shopperNamedRetailer,
   type RenderCache,
 } from '../agent/render-tools.ts';
 
@@ -226,5 +230,84 @@ describe('product cards', () => {
     const res = runRenderTool(cache, { id: 'u1', name: 'render_products', input: { sku_ids: ['nope'] } }, emit);
     assert.equal(res.is_error, true);
     assert.equal(events.length, 0);
+  });
+
+  it('marks the cart when the dual checkout flag is on for this hop', () => {
+    const cache = emptyCache();
+    cache.dualCheckout = true;
+    const { events, emit } = recorder();
+    rememberStructured(cache, getCartLink(cart()));
+    assert.equal(autoRenderCart(cache, emit), true);
+    const drawn = events.find((e) => e.t === 'cart');
+    assert.equal(drawn?.t === 'cart' && drawn.dualCheckout, true);
+  });
+
+  it('draws a Coto basket with no link and not orderable, and still hides a Día basket without a link', () => {
+    const cache = emptyCache();
+    const { events, emit } = recorder();
+    const coto = cart([line('c1', 1, 1000)]);
+    coto.retailer = 'coto';
+    coto.cartId = 'coto-1';
+    rememberStructured(cache, { cart: coto });
+    assert.equal(autoRenderCart(cache, emit), true);
+    const drawn = events.find((e) => e.t === 'cart');
+    assert.equal(drawn?.t === 'cart' && drawn.handoffUrl, undefined);
+    assert.equal(drawn?.t === 'cart' && drawn.orderable, false);
+
+    const dia = emptyCache();
+    const rec = recorder();
+    rememberStructured(dia, addToCart(cart()));
+    assert.equal(autoRenderCart(dia, rec.emit), false);
+    assert.equal(rec.events.length, 0);
+  });
+
+  it('render_missing accepts only a searched query that returned nothing available', () => {
+    const cache = emptyCache();
+    cache.searches = [{ query: 'leche de almendras', retailer: 'coto', available: 0 }];
+    const { events, emit } = recorder();
+    const ok = runRenderTool(
+      cache,
+      { id: 'm1', name: 'render_missing', input: { query: 'Leche de almendras', retailer: 'coto' } },
+      emit,
+    );
+    assert.equal(ok.is_error, undefined);
+    assert.equal(events[0]?.t === 'missing' && events[0].item, 'Leche de almendras');
+    const rejected = runRenderTool(
+      cache,
+      { id: 'm2', name: 'render_missing', input: { query: 'yerba', retailer: 'dia' } },
+      emit,
+    );
+    assert.equal(rejected.is_error, true);
+    assert.equal(searchedEmpty(cache, 'leche de almendras', 'coto'), true);
+  });
+
+  it('refuses a cart write before a choice and a sku from the other chain', () => {
+    assert.equal(cartWriteNeedsChoice(true, undefined), true);
+    assert.equal(cartWriteNeedsChoice(true, 'coto'), false);
+    assert.equal(cartWriteNeedsChoice(false, undefined), false);
+    const dia = new Set(['d1']);
+    const coto = new Set(['c1']);
+    assert.equal(foreignCartSku('dia', 'c1', dia, coto), true);
+    assert.equal(foreignCartSku('coto', 'd1', dia, coto), true);
+    assert.equal(foreignCartSku('dia', 'd1', dia, coto), false);
+    assert.equal(foreignCartSku('coto', 'c1', dia, coto), false);
+  });
+
+  it('refuses choose_retailer unless the shopper or the question just before named the store', () => {
+    assert.equal(shopperNamedRetailer('coto', 'el más barato', 'Acá están los precios.'), false);
+    assert.equal(shopperNamedRetailer('coto', 'Quiero pedir en Coto.', ''), true);
+    assert.equal(shopperNamedRetailer('dia', 'Quiero pedir en Coto.', ''), false);
+    assert.equal(shopperNamedRetailer('coto', 'sí', '¿Confirmás Coto?'), true);
+  });
+
+  it('names Día only as a whole word', () => {
+    assert.equal(shopperNamedRetailer('dia', 'media docena', ''), false);
+    assert.equal(shopperNamedRetailer('dia', 'todos los días', ''), false);
+    assert.equal(shopperNamedRetailer('dia', 'diario', ''), false);
+    assert.equal(shopperNamedRetailer('dia', 'agregá media docena de huevos', ''), false);
+    assert.equal(shopperNamedRetailer('dia', 'inmediato', ''), false);
+    assert.equal(shopperNamedRetailer('dia', 'Día', ''), true);
+    assert.equal(shopperNamedRetailer('dia', 'dia', ''), true);
+    assert.equal(shopperNamedRetailer('dia', 'en Día.', ''), true);
   });
 });

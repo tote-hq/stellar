@@ -10,7 +10,7 @@ SDK, the chain SDK, the agent SDK — and left as ranges where it would not.
 | **Next.js** | 16.3.5 | App Router, route handlers and streaming responses in one place. Every API route is `runtime = 'nodejs'` — XDR encoding and the MCP server's `node:url` import both fail on edge, and they fail at *import* time, which is a confusing way to find out. |
 | **React** | 19.2.0 | |
 | **TypeScript** | 5.9.3 | `strict`, `target: ES2022`. ES2023 methods like `findLastIndex` do **not** typecheck here. |
-| **Node** | ≥ 22.12 (`.nvmrc`: 22.12.0) | `@stellar/stellar-sdk@17` requires it. On Vercel the project's Node version must be set explicitly or the install fails. |
+| **Node** | ≥ 22.12 (`.nvmrc` pins 22.23.4) | `@stellar/stellar-sdk@17` requires ≥ 22.12. Workers Builds reads `.nvmrc`; the vinext config loader needs 22.18 or newer. |
 | **`postgres`** | ^3.4.9 | the order and card records. A plain SQL client, no ORM — the schema is four migrations and the queries are the interesting part |
 | **npm workspaces** | — | `apps/*`, `packages/*`. No Turborepo, no pnpm: three apps and four packages do not need a build graph. |
 
@@ -98,7 +98,7 @@ Four things changed on the way in, all of them improvements upstream would want:
 | Change | Why |
 |---|---|
 | `name` → `@changuito/mcp` | workspace resolution |
-| `playwright`, `ethers` → `optionalDependencies` | they belong to the checkout half. Vercel installs with `--omit=optional`, so neither reaches the lambda |
+| `playwright`, `ethers` → `optionalDependencies` | they belong to the checkout half, which the web build never loads |
 | `createSupermercadoServer()` factory added | the web app connects a `Client` over an in-memory transport instead of spawning a process |
 | checkout tools became a lazy `await import()` | keeps Playwright out of the read-only import graph |
 
@@ -107,17 +107,16 @@ here, for the factory, the session state it takes, a cart total that turned out
 to be the pre-discount subtotal, and the `payableTotal` / `totalizerBreakdown` /
 `classifyOrderForm` trio the checkout reads through the `./orderform` subpath.
 
-### Keeping the browser engine out of the lambda
+### Keeping the browser engine out of the web build
 
-Three independent barriers, because one is a boundary and three is a guarantee:
+The web build never loads the checkout half.
 
 1. `@changuito/mcp/server` has **no reference** to the checkout module, not even
-   a dynamic one.
-2. `optionalDependencies` + Vercel's `--omit=optional` means Playwright is not
-   installed there at all.
-3. `next.config.ts` sets `outputFileTracingExcludes` for `/api/**` on
+   a dynamic one. Checkout tools sit behind a lazy `await import()` that only
+   the CLI path reaches.
+2. `next.config.ts` sets `outputFileTracingExcludes` for `/api/**` on
    `playwright`, `playwright-core`, `ethers`, and the compiled `checkout/` and
-   `wallet/` directories.
+   `wallet/` directories, for the local `next build`.
 
 `transpilePackages` carries all four workspace packages. The MCP package is
 compiled ESM and gets **bundled rather than marked external**: a symlinked
@@ -139,28 +138,52 @@ here.
 
 | | |
 |---|---|
-| **Vercel** | the Next apps. Node runtime, `maxDuration = 300` on `/api/chat` — a basket is a dozen HTTPS round trips to a storefront |
+| **Cloudflare Workers** | the shopper app, via vinext. Node runtime (`nodejs_compat`). `maxDuration = 300` on `/api/chat` — a basket is a dozen HTTPS round trips to a storefront |
 | **Postgres** | orders, deposits, cards, archived chats, and the chat and faucet quotas, over `DATABASE_URL` |
 | **Upstash Redis** | optional. The in-flight turn only (`lib/agent/turn-store.ts`), 1h TTL, falling back to memory. `KV_REST_API_URL` / `KV_REST_API_TOKEN`, or the `UPSTASH_REDIS_REST_*` pair. Not the quotas |
 | **Cloudflare Turnstile** | the human gate in `middleware.ts`. Unset in production it fails **shut**: every `/api/*` route but `/api/human` answers 403 |
 | **Stellar** | Horizon on both networks; Soroban RPC and friendbot on testnet |
 | **stellar.expert** | explorer links |
 
-`@vercel/kv` is deliberately **not** used: it is deprecated, and Vercel moved
-existing KV stores to Upstash in December 2024.
+No hosted KV client is used. That client is deprecated, and those stores moved
+to Upstash in December 2024. This app talks to Upstash's REST API directly.
 
 ## Tests
 
 ```
-npm test                          # 1178 — mcp 520 · trust 2 · web 583 · landing 73
-npm test -w @changuito/mcp        #  520 — adapters, money, FX, cart maths
-npm test -w @changuito/web        #  583 — chat-state, order-check, deposit, copy, …
+npm test                          # 720: mcp 209 · trust 1 · web 510
+npm test -w @changuito/mcp        # 209 — adapters, money, FX, cart maths
+npm test -w @changuito/web        # 510 — chat-state, order-check, deposit, copy, …
 npm run contracts:test            #   34 — escrow 19 · mock_usdc 15
 npm run typecheck -w @changuito/web
 npm run build
+npm run smoke:compare             # 20 hits on GET /api/compare/probe; not part of npm test
 ```
 
-`npm run test:e2e` runs Playwright. Two specs set
+`GET /api/compare/probe` runs a fixed Día basket against the Coto catalog and
+returns match rate and latency. It answers 404 unless `COMPARE_PROBE_TOKEN`
+matches. `npm run smoke:compare` calls it 20 times and exits non-zero on any
+non-200 or when client p95 is over 10s.
+
+`chat_dual_compare` is a row in the existing `config` table (migration 0008).
+A missing row is off. When the row is on, a Día basket draws the in-chat Día
+vs Coto card after the cart link. It is not a Worker variable. A person turns
+it on with `npm run config -- set chat_dual_compare true`.
+
+`chat_dual_checkout_demo` is another row in that table. A missing row is off.
+When it is on, and `sandbox_mock` is on, the compare card can offer a mock pay
+for the full Día basket and for the matched Coto lines. It is not a Worker
+variable. A person turns the show on with `npm run config -- set chat_dual_compare true`,
+`npm run config -- set chat_dual_checkout_demo true`, and
+`npm run config -- set sandbox_mock true`.
+
+`npm run test:e2e` runs Playwright. `npm run test:e2e:compare` is the opt-in
+Día vs Coto card proof (`COMPARE_E2E=1`, project `compare`).
+`npm run test:e2e:dual-checkout` is the opt-in pay-card proof
+(`DUAL_CHECKOUT_E2E=1`, project `dual-checkout`). These opt-in runs are not part
+of `npm test` or GitHub Actions.
+
+Two specs set
 `test.use({ trace: 'off', video: 'off', screenshot: 'off' })` and must keep it:
 the repo is public and one of them walks past a card number.
 
@@ -185,14 +208,12 @@ in `apps/web/.env.example`; setup in [`../DEPLOY.md`](../DEPLOY.md).
 |---|---|---|
 | `ANTHROPIC_API_KEY` | yes | the agent |
 | `NEXT_PUBLIC_POLLAR_API_KEY_MAINNET` | no | the wallet. Without it preview still works end to end; what is missing is the way *out* of preview |
-| `DATABASE_URL`, `DIRECT_URL` | for orders and the faucet | orders, cards, the chat archive, quotas, and who may use the faucet. Unset, the faucet is closed |
+| `DATABASE_URL`, `DIRECT_URL` | for orders and the faucet | orders, the chat archive, quotas, and who may use the faucet. Unset, the faucet is closed |
 | `DEPOSIT_ADDRESS_TESTNET` / `_MAINNET` | for checkout | where a deposit is paid. A `C…` contract address is refused — it cannot take a memo. Unset, the deposit screen answers 503 |
 | `DEMO_WALLET_SECRET` | for preview pay | lets preview settle a real testnet payment for a visitor with no wallet. Unset, the button answers 503 and says so |
-| `VYRION_API_KEY` | for the card | unset, the card button is never rendered rather than rendered and broken |
-| `ALLOW_LIVE` | no | an `sk_live_` key is refused unless this is exactly `1` |
 | `STELLAR_RESOLVER_SECRET` | for faucet + settle | the testnet signing key. Read at call time, never at import, so a build without it succeeds |
 | `STELLAR_RESOLVER_SECRET_MAINNET` | no | must be a *different* key; checked against `deployments.json` and refused on mismatch |
-| `REAL_MODE_ALLOWLIST_ADDRESSES` | for modo real | deny-by-default: empty in production means nobody, Vercel previews included |
+| `REAL_MODE_ALLOWLIST_ADDRESSES` | for modo real | deny-by-default: empty in production means nobody. The Worker sets `NODE_ENV=production` |
 | `REAL_MODE_OPEN_TO_ALL` | no | drops the allowlist, **not** the SEP-53 signature |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | in production | the human gate. The secret alone decides it, and unset in production it fails shut |
 | `CHG_SESSION_SECRET` | in production | signs the httpOnly login cookie. Unset, nobody can sign in |
