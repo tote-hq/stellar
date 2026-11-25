@@ -11,15 +11,15 @@ const verify = {
   errorName: 'CompileError',
 };
 
-mock.module('hash-wasm', {
+mock.module('@noble/hashes/argon2', {
   namedExports: {
-    argon2Verify: async () => {
+    argon2id: () => {
       if (verify.mode === 'throw') {
         const err = new Error('wasm');
         err.name = verify.errorName;
         throw err;
       }
-      return verify.mode === 'true';
+      return new Uint8Array(32).fill(1);
     },
   },
 });
@@ -44,7 +44,8 @@ mock.module(new URL('../admin/store.ts', import.meta.url).href, {
 });
 
 const PASSWORD = 'wrong-probe';
-const HASH = 'hash-should-not-leak';
+const HASH =
+  '$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0c2E$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const SECRET = 'test-admin-session';
 
 describe('POST /api/admin/login 401 branch', () => {
@@ -103,7 +104,7 @@ describe('POST /api/admin/login 401 branch', () => {
     assertSafe();
   });
 
-  it('logs verify_false when the user exists and argon2Verify returns false', async () => {
+  it('logs verify_false when the user exists and the verifier rejects the password', async () => {
     db.user = { id: 'user-1', passwordHash: HASH };
     const res = await post();
     assert.equal(res.status, 401);
@@ -113,7 +114,7 @@ describe('POST /api/admin/login 401 branch', () => {
     assertSafe();
   });
 
-  it('logs verify_threw plus the error name when argon2Verify throws', async () => {
+  it('logs verify_threw plus the error name when the verifier throws', async () => {
     db.user = { id: 'user-1', passwordHash: HASH };
     verify.mode = 'throw';
     const res = await post();
