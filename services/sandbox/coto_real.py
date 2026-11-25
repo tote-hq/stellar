@@ -190,6 +190,8 @@ async def run_coto_real(job, driver, *, now_ms: Now, sleep: Sleep, log: Log, car
     if login:
         return emit(login)
     delivery_input = dict(job.get("delivery") or {})
+    if not str(delivery_input.get("city") or "").strip() and str(job.get("city") or "").strip():
+        delivery_input["city"] = str(job.get("city")).strip()
     delivery_input["fulfillment"] = job.get("fulfillment") or delivery_input.get("fulfillment") or "home"
     job["_delivery_input"] = delivery_input
     delivery = await one("delivery", await driver.delivery(delivery_input))

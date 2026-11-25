@@ -4,7 +4,7 @@
  */
 import { readOrder } from './escrow-server.ts';
 import { loadSharedCard } from './coto-admit.ts';
-import { MISSING_CARD_COPY, cotoShopperBody } from './coto-real.ts';
+import { MISSING_CARD_COPY, MISSING_CITY_COPY, cotoShopperBody } from './coto-real.ts';
 import { startCotoRealJob } from './sandbox.ts';
 import { checkoutStore, type CheckoutRecord } from './store.ts';
 
@@ -12,6 +12,8 @@ export async function startCotoRealCheckout(rec: CheckoutRecord, openSig: string
   if (rec.fulfillment !== 'pickup' && !rec.resolvedAddress) {
     return Response.json({ error: 'Falta la dirección de esta compra.' }, { status: 400 });
   }
+  const city = rec.city?.trim() || rec.resolvedAddress?.city?.trim() || '';
+  if (!city) return Response.json({ error: MISSING_CITY_COPY }, { status: 400 });
   if (!rec.jobId) {
     let order = await readOrder(rec.orderId);
     for (let i = 0; !order && i < 4; i++) {
@@ -40,6 +42,7 @@ export async function startCotoRealCheckout(rec: CheckoutRecord, openSig: string
     try {
       rec.jobId = await startCotoRealJob(rec.orderId, items, {
         fulfillment: rec.fulfillment ?? 'home',
+        city,
         ...(rec.resolvedAddress ? { delivery: rec.resolvedAddress } : {}),
         card: opsCard,
       });

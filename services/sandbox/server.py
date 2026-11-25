@@ -123,6 +123,7 @@ class JobIn(BaseModel):
     card: Card | None = None
     mode: Literal['legacy', 'manual', 'coto_real'] = 'legacy'
     fulfillment: Literal['home', 'pickup'] = 'home'
+    city: str | None = Field(default=None, max_length=80, repr=False)
     buyer: str | None = Field(default=None, pattern=r'^[1-9A-HJ-NP-Za-km-z]{32,44}$')
     escrow_deadline: int | None = None
     flow: Literal['viewer', 'guided', 'headless'] = 'viewer'
@@ -232,7 +233,8 @@ async def health() -> dict:
 async def create(body: JobIn) -> dict:
     if body.mode == 'coto_real':
         home = body.fulfillment != 'pickup'
-        if body.shopper is not None or body.card is None or (home and body.delivery is None):
+        city = (body.city or '').strip() or (body.delivery.city.strip() if body.delivery else '')
+        if body.shopper is not None or body.card is None or (home and body.delivery is None) or not city:
             print("POST /jobs rejected coto_real field=delivery", flush=True)
             raise HTTPException(422, 'invalid coto job')
         for existing in jobs.values():
@@ -243,6 +245,7 @@ async def create(body: JobIn) -> dict:
             "job_id": job_id, "order_id": body.order_id, "status": "queued", "phase": "queued",
             "mode": "coto_real", "items": [i.model_dump() for i in body.items], "created": time.time(),
             "fulfillment": body.fulfillment,
+            "city": city,
             "delivery": body.delivery.model_dump() if body.delivery else None,
             "card": body.card.model_dump(),
         }

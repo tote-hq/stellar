@@ -184,6 +184,23 @@ class CotoRealTest(unittest.TestCase):
         self.assertEqual(answered.answer, ("butcher_notes", "picada"))
         self.assertEqual(out2["result"]["store_order_id"], "C-9")
 
+    def test_pickup_sends_the_city_without_a_street(self):
+        driver = Scripted()
+        clock = {"t": 0}
+        job = {"job_id": "job4", "fulfillment": "pickup", "city": "CABA", "items": [{"sku": "1"}]}
+
+        async def pause(_seconds):
+            clock["t"] += 1_000
+
+        asyncio.run(run_coto_real(
+            job, driver, now_ms=lambda: clock["t"], sleep=pause, log=lambda _line: None,
+            card={"pan": "4242424242424242"}, token="", origin="https://sandbox.example",
+        ))
+        self.assertEqual(driver.address.get("city"), "CABA")
+        self.assertEqual(driver.address.get("fulfillment"), "pickup")
+        self.assertNotIn("street", driver.address)
+        self.assertNotIn("city", public_job(job))
+
     def test_a_delivery_answer_runs_delivery_again_before_shop(self):
         driver = Scripted({"delivery": {"needs_shopper": {
             "label": "¿En qué sucursal retirás?",
@@ -201,6 +218,7 @@ class CotoRealTest(unittest.TestCase):
             job, driver, now_ms=lambda: clock["t"], sleep=reply, log=lambda _line: None,
             card={"pan": "4242424242424242"}, token="", origin="https://sandbox.example",
         ))
+        self.assertEqual(driver.address.get("city"), "CABA")
         self.assertGreaterEqual(driver.delivery_calls, 2)
         self.assertEqual(driver.address.get("pickup_branch"), "ABASTO")
         self.assertLess(driver.calls.index("delivery"), driver.calls.index("shop"))

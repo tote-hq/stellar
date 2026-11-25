@@ -170,11 +170,12 @@ export interface CotoRealDelivery {
 export function cotoRealJobBody(
   orderId: string,
   items: SandboxItem[],
-  input: { fulfillment: 'home' | 'pickup'; delivery?: CotoRealDelivery; card?: SandboxCard },
+  input: { fulfillment: 'home' | 'pickup'; city: string; delivery?: CotoRealDelivery; card?: SandboxCard },
 ): {
   mode: 'coto_real';
   order_id: string;
   fulfillment: 'home' | 'pickup';
+  city: string;
   items: { name: string; quantity: number; sku: string }[];
   delivery?: CotoRealDelivery;
   card?: SandboxCard;
@@ -183,6 +184,7 @@ export function cotoRealJobBody(
     mode: 'coto_real',
     order_id: orderId,
     fulfillment: input.fulfillment,
+    city: input.city,
     items: items.map((item) => ({ name: item.name, quantity: item.quantity, sku: item.sku })),
     ...(input.delivery ? { delivery: input.delivery } : {}),
     ...(input.card ? { card: input.card } : {}),
@@ -192,7 +194,7 @@ export function cotoRealJobBody(
 export async function startCotoRealJob(
   orderId: string,
   items: SandboxItem[],
-  input: { fulfillment: 'home' | 'pickup'; delivery?: CotoRealDelivery; card?: SandboxCard },
+  input: { fulfillment: 'home' | 'pickup'; city: string; delivery?: CotoRealDelivery; card?: SandboxCard },
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string> {
   if (!env.SANDBOX_URL) throw new Error('checkout is off: no SANDBOX_URL');
