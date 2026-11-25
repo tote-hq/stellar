@@ -53,10 +53,10 @@ const hyperdriveId = process.env.CHG_HYPERDRIVE_ID?.trim();
 
 export default defineConfig({
   worker: defineWorker({
-    // The Worker that owns app.changuito.me. Deployed by Workers Builds from
-    // this repo's main branch. admin.changuito.me is the same Worker, attached
-    // by a person in the dashboard. It is not listed in `domains` here, and it
-    // is not added to the Turnstile hostname list.
+    // The Worker that owns app.changuito.me and admin.changuito.me. Deployed
+    // by Workers Builds from this repo's main branch. Both hostnames are
+    // listed so a deploy does not detach the admin desk. Turnstile's hostname
+    // list is separate and is left as it is.
     name: "changuito-web",
     entrypoint: "./worker.ts",
     compatibilityDate: "2026-11-02",
@@ -71,6 +71,7 @@ export default defineConfig({
     // changuito-ste.
     domains: [
       { hostname: "app.changuito.me", production: true, previews: false },
+      { hostname: "admin.changuito.me", production: true, previews: false },
     ],
     workersDev: true,
     previewUrls: false,
