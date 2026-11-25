@@ -374,7 +374,9 @@ export function registerCatalogTools(
         'store. Do not call this to pick the cheaper chain. If the current basket has lines from ' +
         'the other store, this fails unless replace_cart is true, and replace_cart is only for ' +
         'after the shopper confirms. Lines are never merged. A Coto order is a Changuito-held ' +
-        'basket priced from the Coto catalog. It has no store link and cannot be paid yet.',
+        'basket priced from the Coto catalog. It has no store link and cannot be paid yet. ' +
+        'This call does not draw a cart. After it succeeds, in the same turn, call add_to_cart ' +
+        'with ids from that chain, then get_cart_link. Ending the turn here leaves no cart card.',
       inputSchema: {
         retailer: z.enum(['dia', 'coto']).describe('The store the shopper named.'),
         replace_cart: z
@@ -394,10 +396,19 @@ export function registerCatalogTools(
               'choose_retailer again with replace_cart true. Nothing was changed.',
           );
         }
-        const note =
+        const cleared =
           result === 'replaced'
-            ? `Order set to ${next}. The other basket was cleared and its lines were not merged.`
-            : `Order set to ${next}.`;
+            ? `Order set to ${next}. The other basket was cleared and its lines were not merged. `
+            : `Order set to ${next}. `;
+        // choose_retailer only records the chain. The card is drawn later, from
+        // lines, and a Día card also needs the handoff URL. The model reads this
+        // result on the next hop and was ending the turn here.
+        const note =
+          cleared +
+          'In this same turn, call add_to_cart with only ids from this chain for what the shopper asked to buy ' +
+          '(pairDia when the order is dia, pairCoto when it is coto, from the last search_compare line when it has them), ' +
+          'then call get_cart_link. Do not end the turn before that. ' +
+          'A Día card is not drawn until get_cart_link returns. A Coto card is drawn from the lines and has no store link.';
         return text(note);
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e));

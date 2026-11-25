@@ -58,4 +58,14 @@ describe('topic guard', () => {
     assert.equal(es.includes('out of scope'), true);
     assert.equal(en.includes('out of scope'), true);
   });
+
+  it('tells the model to add and link in the same turn as the chain choice', () => {
+    for (const prompt of [CHANGUITO_PROMPT, CHANGUITO_PROMPT_EN]) {
+      const flat = prompt.replace(/\s+/g, ' ');
+      assert.match(flat, /choose_retailer.{0,220}add_to_cart.{0,80}get_cart_link/);
+      assert.match(flat, /Do not end the turn after choose_retailer/);
+      assert.match(flat, /pairDia/);
+      assert.match(flat, /pairCoto/);
+    }
+  });
 });

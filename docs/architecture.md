@@ -189,8 +189,10 @@ The eleven tools the agent sees: `list_retailers`, `set_location`,
 `where_am_i`.
 
 `choose_retailer` is how the shopper picks Día or Coto after a search that
-queried both. A Coto order is a Changuito-held basket of Coto catalog lines.
-It has no store link and cannot be paid. A Día cart is never labeled as Coto.
+queried both. It only records the chain. The same turn then calls `add_to_cart`
+and `get_cart_link`, or the cart card is never drawn. A Coto order is a
+Changuito-held basket of Coto catalog lines. It has no store link and cannot
+be paid. A Día cart is never labeled as Coto.
 
 ### Two kinds of tool, and the split is the design
 

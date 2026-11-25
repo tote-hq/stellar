@@ -72,7 +72,10 @@ describe('dual search', () => {
     assert.equal(cache.cart, undefined);
     const finished = events[1];
     assert.equal(finished?.t === 'search_compare' && finished.status, 'ok');
-    assert.match(note, /\[search_compare: id=sc1 dia=1 coto=1 matched=1 gapCentavos=18500\]/);
+    assert.match(
+      note,
+      /\[search_compare: id=sc1 dia=1 coto=1 matched=1 gapCentavos=18500 pairDia=d1 pairCoto=c1\]/,
+    );
     assert.match(note, /c1 · Leche Protein 1 L/);
     if (finished?.t === 'search_compare' && finished.status === 'ok') {
       assert.equal(finished.feeCentavos, feeCentavosOf(18500));
@@ -140,6 +143,18 @@ describe('dual search', () => {
     const note = await slow.finish({ products: [dia(1000)], failed: false });
     assert.match(note, /gap=unknown/);
     assert.match(searchCompareNote({ id: 'x', dia: 1, coto: 0, matched: 0, hits: [] }), /gap=unknown/);
+    assert.match(
+      searchCompareNote({
+        id: 'x',
+        dia: 1,
+        coto: 1,
+        matched: 1,
+        gapCentavos: 100,
+        pair: { diaSkuId: 'd1', cotoId: 'c9' },
+        hits: [],
+      }),
+      /pairDia=d1 pairCoto=c9/,
+    );
   });
 
   it('does not choose a retailer', async () => {
