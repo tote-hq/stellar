@@ -241,7 +241,7 @@ async def coto_real_worker(job: dict) -> None:
             password=password,
             card=card,
             token=env.get("SANDBOX_TOKEN") or "",
-            origin=env.get("SANDBOX_PUBLIC_ORIGIN") or "https://sandbox.local",
+            origin=env.get("SANDBOX_PUBLIC_URL") or "https://sandbox.local",
         )
         job.update(status=out["status"], phase=out["phase"], result=out["result"])
     except Exception:

@@ -307,7 +307,7 @@ async def job_viewer(job_id: str) -> dict:
     now = int(time.time() * 1000)
     if not isinstance(exp, int) or not (now < exp <= now + 60_000):
         raise HTTPException(404, "viewer closed")
-    origin = os.environ.get("SANDBOX_PUBLIC_ORIGIN") or "https://sandbox.local"
+    origin = os.environ.get("SANDBOX_PUBLIC_URL") or "https://sandbox.local"
     return {"url": viewer_url(job_id, TOKEN, origin, exp)}
 
 
