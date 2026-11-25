@@ -44,8 +44,13 @@ export async function POST(req: Request): Promise<Response> {
     console.error('[admin/login]', err instanceof Error ? err.name : 'query');
     return Response.json({ error: 'No pudimos entrar.' }, { status: 503, headers: PRIVATE });
   }
-  const ok = await passwordMatches(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
-  if (!user || !ok) {
+  const check = await passwordMatches(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
+  if (!user || !check.ok) {
+    // The failure row already proves the other 401s did not run. Name only.
+    let branch = 'verify_false';
+    if (!user) branch = 'user_missing';
+    else if (!check.ok && check.reason === 'threw') branch = `verify_threw:${check.errorName}`;
+    console.error('[admin/login] 401', branch);
     try {
       await adminStore().recordFailure(ip);
     } catch (err) {
