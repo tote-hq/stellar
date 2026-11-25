@@ -237,4 +237,18 @@ export async function compareDiaToCoto(
 }
 
 export { PROBE_BASKET, PROBE_POSTAL } from './probe-basket.js';
+export {
+  assembleSearchCompare,
+  lookupCoto,
+  searchCompare,
+} from './search-compare.js';
+export type {
+  CotoLookup,
+  SearchCompareResult,
+  SearchCompareStatus,
+  SearchHit,
+  SearchPair,
+} from './search-compare.js';
+export type { CotoSearcher } from './match.js';
+export type { CatalogItem } from './coto.js';
 export { compareForCard } from './compare-card.js';

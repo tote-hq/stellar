@@ -90,7 +90,12 @@ fingerprint has changed since the last card. Four parts hold it up:
   records which cartId `handoffUrl` belongs to, at `get_cart_link`, the one
   moment the pairing is known. A card whose only actionable control is missing
   is the first bug again; a link carried onto a different basket opens somebody
-  else's.
+  else's. A Coto basket is the exception, and it does not reopen that bug. It
+  has no store link and no pay control — Coto payment is not implemented — so
+  the card draws from the lines alone and says the order cannot be paid yet.
+  A Día cart without a link still does not draw. The link rule exists because
+  a Día card's action is that link. A card that is not allowed to spend
+  anything is not missing its only control.
 - **`drawn` and `handoffFor` ride in `turn-store.ts` as optional fields**, not a
   `v: 2`. A version bump resets every conversation in flight at deploy time,
   which is a worse trade than one redundant card.
@@ -343,6 +348,26 @@ the message, which is what used to happen to every message.
 
 ---
 
+## 8. A search can ask both chains, and a Coto basket draws without a link
+
+When `chat_dual_compare` is on, `retailer_search.enabled.coto` is true, and the
+session retailer is Día, `search_products` also queries the Coto catalog
+in-process, in parallel with the Día call, with a 10s cap. The Coto lookup is
+not an MCP call and gets no trail row (§3). The shopper picks the chain with
+`choose_retailer`. The model cannot `add_to_cart` before that choice, and it
+cannot pick the cheaper chain: the chosen store has to be named in the
+shopper's message or in the assistant question just before it.
+
+A Coto basket is lines held on the session snapshot (`order`, `coto`) and
+priced from `CotoCatalog.getProduct` on every read. The id is a stable
+`coto-<uuid>`. Oracle ATG, the store link and payment are not implemented.
+`getAdapter('coto')` still throws. `autoCompare` stays Día-only.
+
+`render_missing` takes a query and a retailer, and only when that query was
+searched this turn on that store and came back with no available hit.
+
+---
+
 ## Things that are the way they are on purpose
 
 - **`MAX_HOPS = 12`.** A basket takes a handful of searches. Past this the model
@@ -369,7 +394,7 @@ the message, which is what used to happen to every message.
 ## Before you commit
 
 ```
-npm test                        # 603: mcp 180 · trust 1 · web 422
+npm test                        # 718: mcp 209 · trust 1 · web 508
 npm run typecheck -w @changuito/web
 npm run build
 ```

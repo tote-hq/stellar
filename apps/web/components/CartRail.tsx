@@ -40,7 +40,15 @@ export function CartRail() {
           height={609}
         />
         <header className="rail-cart-head">
-          <span className="rail-cart-title">{receipt ? copy.paidTitle : copy.cartTitle}</span>
+          <span className="rail-cart-title">
+            {receipt
+              ? copy.paidTitle
+              : store === 'coto'
+                ? copy.cotoTitle
+                : store === 'dia'
+                  ? copy.diaTitle
+                  : copy.cartTitle}
+          </span>
           {store ? <span className="rail-cart-store">{RETAILER_NAMES[store] ?? store}</span> : null}
         </header>
         {receipt ? (
@@ -48,7 +56,12 @@ export function CartRail() {
         ) : cart && cart.lines.length > 0 ? (
           // Pagar under the basket too, not only on the card in the thread,
           // which has usually scrolled away by the time the basket is ready.
-          <RailLines cart={cart} onPay={shop?.canOrder && !shop.dualCheckout ? shop.requestPay : undefined} />
+          <RailLines
+            cart={cart}
+            onPay={
+              shop?.canOrder && !shop.dualCheckout && cart.retailer !== 'coto' ? shop.requestPay : undefined
+            }
+          />
         ) : (
           <EmptyRail />
         )}
@@ -141,6 +154,11 @@ function RailLines({ cart, onPay }: { cart: Cart; onPay?: () => void }) {
           <span>{copy.total}</span>
           <strong>{cart.total.display}</strong>
         </div>
+        {cart.retailer === 'coto' ? (
+          <p className="rail-cart-warn" data-testid="rail-coto-unpayable">
+            {copy.notPayable}
+          </p>
+        ) : null}
         {onPay && payable ? (
           <button type="button" className="btn btn-pay rail-cart-pay" data-testid="rail-pay" onClick={onPay}>
             {uiCopy(lang).cart.payCta}

@@ -5,6 +5,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Cart } from '@changuito/mcp/types';
 
 import { starters } from '../lib/agent/prompt';
+import { composerControls } from '../lib/composer.ts';
+import {
+  choiceMessage,
+  confirmSwitchMessage,
+  dropMessage,
+  needsSwitchConfirm,
+  substituteMessage,
+  type Chain,
+} from '../lib/retailer-choice.ts';
+import { RETAILER_NAMES } from '../lib/retailers.ts';
 import { errorCode, track, trackLoginStart } from '../lib/analytics';
 import type { ChatImage } from '../lib/chat-image.ts';
 import { canRetry, type Block, type ChatState } from '../lib/chat-state';
@@ -27,6 +37,8 @@ import { useChat } from '../lib/use-chat';
 import { useWallet } from '../lib/use-wallet.ts';
 import { CartCard } from './CartCard';
 import { ComparisonCard } from './ComparisonCard';
+import { Modal } from './Modal';
+import { MissingCard, SearchCompareCard } from './SearchCompareCard';
 import { useLang } from './LangProvider';
 import { useNetwork } from './NetworkProvider';
 import { CameraIcon, ImageIcon, MicIcon, RetryIcon } from './icons';
@@ -129,6 +141,7 @@ function ChatCore({
   const { state, send, retry, stop, loginRequired, clearLoginRequired, resume, reset, currentSessionId } =
     useChat({ isAuthenticated, address, sign, network, lang });
   const [draft, setDraft] = useState('');
+  const [switchAsk, setSwitchAsk] = useState<{ from: Chain; to: Chain } | null>(null);
   const [photo, setPhoto] = useState<ChatImage | null>(null);
   const [readingPhoto, setReadingPhoto] = useState(false);
   const [photoNote, setPhotoNote] = useState<string | null>(null);
@@ -332,6 +345,13 @@ function ChatCore({
   const voiceNote =
     dictation.error === null ? null : copy[VOICE_NOTE[dictation.error]];
   const composerNote = dictation.listening ? copy.listening : (voiceNote ?? cameraNote ?? photoNote);
+  const controls = composerControls({
+    streaming: state.streaming,
+    gated,
+    readOnly,
+    readingPhoto,
+    hasDraft: Boolean(draft.trim() || photo),
+  });
 
   const closeCamera = () => {
     for (const track of streamRef.current?.getTracks() ?? []) track.stop();
@@ -499,7 +519,7 @@ function ChatCore({
                     // what was bought, and a Pagar on it invites paying twice.
                     // A dual-checkout basket pays from the cards under the compare.
                     // Solo Día (demo on, Coto search off): one PayCard, still fees.
-                    canOrder && !b.dualCheckout
+                    canOrder && !b.dualCheckout && b.cart.retailer !== 'coto' && b.orderable !== false
                       ? (cart) => {
                           track('payment_start', { flow: 'frame' });
                           setPaying(
@@ -515,6 +535,35 @@ function ChatCore({
                         }
                       : undefined
                   }
+                />
+              );
+            case 'search_compare':
+              return (
+                <SearchCompareCard
+                  key={b.id}
+                  block={b}
+                  onChoose={(next) => {
+                    const current = state.cart?.cart;
+                    const lines = current?.lines.length ?? 0;
+                    if (
+                      current &&
+                      needsSwitchConfirm({ retailer: current.retailer, lines }, next) &&
+                      (current.retailer === 'dia' || current.retailer === 'coto')
+                    ) {
+                      setSwitchAsk({ from: current.retailer, to: next });
+                      return;
+                    }
+                    submit(choiceMessage(next));
+                  }}
+                />
+              );
+            case 'missing':
+              return (
+                <MissingCard
+                  key={b.id}
+                  block={b}
+                  onSubstitute={() => submit(substituteMessage(b.item, b.retailer))}
+                  onDrop={() => submit(dropMessage(b.item))}
                 />
               );
             case 'compare':
@@ -677,6 +726,7 @@ function ChatCore({
         <textarea
           ref={composer}
           className="composer-input"
+          data-testid="chat-input"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -688,23 +738,25 @@ function ChatCore({
           placeholder={placeholder}
           rows={2}
           enterKeyHint="send"
-          disabled={state.streaming || gated}
+          disabled={controls.inputDisabled}
           autoFocus
         />
-        {state.streaming ? (
-          <button type="button" className="btn btn-ghost" onClick={stop} aria-label={copy.stopAria}>
-            {copy.stop}
-          </button>
-        ) : (
+        <div className="composer-actions">
+          {controls.showStop ? (
+            <button type="button" className="btn btn-ghost" onClick={stop} aria-label={copy.stopAria}>
+              {copy.stop}
+            </button>
+          ) : null}
           <button
             type="submit"
             className="btn"
             data-testid="composer-send"
-            disabled={(!draft.trim() && !photo) || gated || readingPhoto}
+            disabled={controls.sendDisabled}
+            aria-disabled={controls.sendDisabled ? 'true' : undefined}
           >
             {copy.send}
           </button>
-        )}
+        </div>
         <div className="composer-tools">
           <button
             type="button"
@@ -743,6 +795,11 @@ function ChatCore({
             {composerNote}
           </p>
         ) : null}
+        {controls.hint ? (
+          <p className="composer-hint" role="status" data-testid="composer-send-hint">
+            {copy.sendDisabledHint}
+          </p>
+        ) : null}
         <input
           ref={fileRef}
           className="composer-file ph-no-capture"
@@ -779,6 +836,38 @@ function ChatCore({
             </button>
           </div>
         </div>
+      ) : null}
+
+      {switchAsk ? (
+        <Modal
+          title={uiCopy(lang).switch.confirmTitle}
+          onClose={() => setSwitchAsk(null)}
+          testId="switch-confirm"
+        >
+          <p>{uiCopy(lang).switch.confirmBody(RETAILER_NAMES[switchAsk.from], RETAILER_NAMES[switchAsk.to])}</p>
+          <div className="missing-actions">
+            <button
+              type="button"
+              className="btn"
+              data-testid="switch-confirm-yes"
+              onClick={() => {
+                const message = confirmSwitchMessage(switchAsk.from, switchAsk.to);
+                setSwitchAsk(null);
+                submit(message);
+              }}
+            >
+              {uiCopy(lang).switch.confirm}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              data-testid="switch-cancel"
+              onClick={() => setSwitchAsk(null)}
+            >
+              {uiCopy(lang).switch.cancel(RETAILER_NAMES[switchAsk.from])}
+            </button>
+          </div>
+        </Modal>
       ) : null}
 
       {paying ? (

@@ -68,6 +68,52 @@ describe('snapshot and restore', () => {
     assert.equal(after.snapshot().carts.dia, 'cart-9');
   });
 
+  it('keeps order and coto lines across a JSON round trip, and drops them on a retailer change', async () => {
+    const before = createSessionState();
+    before.setLocation(ctx('dia'));
+    before.rememberCart('dia', 'cart-9');
+    assert.equal(before.chooseOrder('coto', { hasLines: false }), 'set');
+    before.setCotoLines([{ id: 'c1', quantity: 2 }]);
+    const id = before.cotoCartId();
+
+    const after = createSessionState();
+    after.restore(JSON.parse(JSON.stringify(before.snapshot())));
+    assert.equal(after.getOrder(), 'coto');
+    assert.deepEqual(after.cotoLines(), [{ id: 'c1', quantity: 2 }]);
+    assert.equal(after.cotoCartId(), id);
+
+    const copy = after.snapshot();
+    copy.coto![0]!.quantity = 9;
+    assert.equal(after.cotoLines()[0]!.quantity, 2);
+
+    after.setLocation(ctx('jumbo'));
+    assert.equal(after.getOrder(), undefined);
+    assert.deepEqual(after.cotoLines(), []);
+    assert.deepEqual(after.snapshot().carts, {});
+  });
+
+  it('refuses to leave a Coto basket with lines unless replace is set', () => {
+    const s = createSessionState();
+    s.chooseOrder('coto');
+    s.setCotoLines([{ id: 'c1', quantity: 1 }]);
+    assert.equal(s.chooseOrder('dia', { hasLines: true }), 'needs_replace');
+    assert.equal(s.getOrder(), 'coto');
+    assert.equal(s.cotoLines().length, 1);
+    assert.equal(s.chooseOrder('dia', { replace: true, hasLines: true }), 'replaced');
+    assert.equal(s.getOrder(), 'dia');
+    assert.deepEqual(s.cotoLines(), []);
+  });
+
+  it('drops the Día cart id when replace leaves Día', () => {
+    const s = createSessionState();
+    s.setLocation(ctx('dia'));
+    s.rememberCart('dia', 'cart-1');
+    s.chooseOrder('dia');
+    assert.equal(s.chooseOrder('coto', { replace: true, hasLines: true }), 'replaced');
+    assert.equal(s.snapshot().carts.dia, undefined);
+    assert.match(s.snapshot().carts.coto ?? '', /^coto-/);
+  });
+
   it('hands out a copy, so mutating a snapshot cannot reach back into the session', () => {
     const s = createSessionState();
     s.setLocation(ctx('dia'));

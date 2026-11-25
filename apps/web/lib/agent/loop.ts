@@ -5,6 +5,8 @@ import type { Session } from '../mcp/session';
 import { DEFAULT_LANG, inLang, type Lang } from '../lang.ts';
 import type { ChatImage } from '../chat-image.ts';
 import { chatDualCheckoutDemoEnabled, chatDualCompareEnabled, getRetailerSearch } from '../config.ts';
+import type { Product } from '@changuito/mcp/types';
+
 import type { UiEvent } from '../protocol';
 import { autoCompare } from './auto-compare';
 import { earlyLocationAsk } from './early-ask';
@@ -13,13 +15,17 @@ import { classifyTopic, offTopicRefusal } from './topic-guard.ts';
 import { anthropicProvider } from './providers/anthropic';
 import { openaiProvider } from './providers/openai';
 import type { HopResult } from './providers/types';
+import { beginDualSearch, dualSearchOn } from './search-compare';
 import {
   autoRenderCart,
+  cartWriteNeedsChoice,
   emptyCache,
+  foreignCartSku,
   RENDER_TOOLS,
   RENDER_TOOL_NAMES,
   rememberStructured,
   runRenderTool,
+  shopperNamedRetailer,
   type RenderCache,
 } from './render-tools';
 
@@ -114,6 +120,90 @@ function cacheable(messages: Anthropic.MessageParam[]): Anthropic.MessageParam[]
   return copy;
 }
 
+function textOf(content: Anthropic.MessageParam['content']): string {
+  if (typeof content === 'string') return content;
+  return content.map((block) => (block.type === 'text' ? block.text : '')).join('\n');
+}
+
+/** The assistant message immediately before the shopper's latest turn. */
+function assistantBeforeLatestUser(messages: Anthropic.MessageParam[]): string {
+  let seenUser = false;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (!message) continue;
+    if (!seenUser) {
+      if (message.role === 'user') seenUser = true;
+      continue;
+    }
+    if (message.role === 'assistant') return textOf(message.content);
+  }
+  return '';
+}
+
+function productsOf(structured: unknown): Product[] {
+  if (!structured || typeof structured !== 'object') return [];
+  const products = (structured as { products?: Product[] }).products;
+  return Array.isArray(products) ? products : [];
+}
+
+function skuIdsOf(input: unknown): string[] {
+  const items = (input as { items?: Array<{ sku_id?: unknown }> } | null)?.items;
+  if (!Array.isArray(items)) return [];
+  return items.flatMap((item) => (typeof item?.sku_id === 'string' && item.sku_id ? [item.sku_id] : []));
+}
+
+function toolError(id: string, message: string): Anthropic.ToolResultBlockParam {
+  return { type: 'tool_result', tool_use_id: id, content: message, is_error: true };
+}
+
+/**
+ * Cart writes the loop refuses before they reach a store. A refusal is an
+ * error result, so the model reads it and the basket is unchanged.
+ */
+function refusedCartCall(
+  use: Anthropic.ToolUseBlockParam,
+  ctx: {
+    dual: boolean;
+    order: string | undefined;
+    userText: string;
+    priorAssistant: string;
+    cache: RenderCache;
+  },
+): Anthropic.ToolResultBlockParam | undefined {
+  if (use.name === 'choose_retailer') {
+    if (!ctx.dual) {
+      return toolError(use.id, 'choose_retailer is off. Día and Coto search is not on for this session.');
+    }
+    const retailer = (use.input as { retailer?: unknown } | null)?.retailer;
+    if (retailer !== 'dia' && retailer !== 'coto') {
+      return toolError(use.id, 'choose_retailer needs retailer dia or coto.');
+    }
+    if (!shopperNamedRetailer(retailer, ctx.userText, ctx.priorAssistant)) {
+      return toolError(
+        use.id,
+        'The shopper has not named that store. Ask them, and do not pick the cheaper chain.',
+      );
+    }
+    return undefined;
+  }
+  if (use.name !== 'add_to_cart') return undefined;
+  if (cartWriteNeedsChoice(ctx.dual, ctx.order)) {
+    return toolError(
+      use.id,
+      'Ask the shopper to pick Día or Coto before adding to the cart. Call choose_retailer with the store they name. Nothing was added.',
+    );
+  }
+  if (ctx.order !== 'dia' && ctx.order !== 'coto') return undefined;
+  const diaIds = new Set(ctx.cache.products.keys());
+  const cotoIds = new Set(Object.keys(ctx.cache.coto ?? {}));
+  const foreign = skuIdsOf(use.input).filter((id) => foreignCartSku(ctx.order as 'dia' | 'coto', id, diaIds, cotoIds));
+  if (!foreign.length) return undefined;
+  return toolError(
+    use.id,
+    `${foreign.join(', ')} is from the other supermarket. A ${ctx.order} order only takes ${ctx.order} ids. Nothing was added.`,
+  );
+}
+
 /**
  * One user message, start to finish.
  *
@@ -158,6 +248,7 @@ export async function runTurn(
             cartLines: cart?.lines.length,
             cartTotal: cart?.total.display,
             searchOrder: search.order,
+            order: session.state.getOrder(),
           }),
           image,
         ),
@@ -202,10 +293,12 @@ export async function runTurn(
         cartLines: cart?.lines.length,
         cartTotal: cart?.total.display,
         searchOrder: search.order,
+        order: session.state.getOrder(),
       }),
       image,
     ),
   });
+  const priorAssistant = assistantBeforeLatestUser(turn.messages);
 
   // The server's own instructions, then ours. Cached: both are stable for the
   // whole conversation, and they sit ahead of the messages that are not.
@@ -238,10 +331,21 @@ export async function runTurn(
 
     emit({ t: 'status', stage: 'thinking', hop });
 
+    const retailers = await getRetailerSearch();
+    const compareOn = await chatDualCompareEnabled();
+    const demoOn = await chatDualCheckoutDemoEnabled();
+    const dualNow = () =>
+      dualSearchOn({
+        compareOn,
+        cotoEnabled: retailers.enabled.coto === true,
+        retailer: session.state.getLocation()?.retailer,
+      });
+    const hopTools = dualNow() ? tools : tools.filter((tool) => tool.name !== 'choose_retailer');
+
     // Whatever this throws is the end of the turn: there is nothing left to
     // fall back to, and the route turns it into one message.
     const msg: HopResult = await brain.hop(
-      { system, tools, messages: cacheable(turn.messages), budgetMs: remaining },
+      { system, tools: hopTools, messages: cacheable(turn.messages), budgetMs: remaining },
       cb,
     );
 
@@ -277,8 +381,6 @@ export async function runTurn(
     const results: Anthropic.ToolResultBlockParam[] = [];
     // Once per hop, before any cart card. The bit is not stored on the turn.
     // retailer_search.enabled.coto off turns off compare + Coto pay; Día stays on.
-    const retailers = await getRetailerSearch();
-    const demoOn = await chatDualCheckoutDemoEnabled();
     // Dual UI needs Coto on. Solo Día keeps the demo fee path with Coto off.
     turn.cache.dualCheckout = demoOn && retailers.enabled.coto;
     turn.cache.soloDia = demoOn && !retailers.enabled.coto;
@@ -292,14 +394,44 @@ export async function runTurn(
       const traced = !RENDER_TOOL_NAMES.has(use.name);
       if (traced) emit({ t: 'tool_start', id: use.id, name: use.name });
       const t = Date.now();
+      const dual = dualNow();
 
       let result: Anthropic.ToolResultBlockParam;
-      if (RENDER_TOOL_NAMES.has(use.name)) {
+      const refused = refusedCartCall(use, {
+        dual,
+        order: session.state.getOrder(),
+        userText,
+        priorAssistant,
+        cache: turn.cache,
+      });
+      if (refused) {
+        result = refused;
+      } else if (RENDER_TOOL_NAMES.has(use.name)) {
         result = runRenderTool(turn.cache, use, emit);
       } else {
+        const query = typeof (use.input as { query?: unknown } | null)?.query === 'string'
+          ? (use.input as { query: string }).query
+          : '';
+        const dualSearch =
+          use.name === 'search_products' && dual
+            ? beginDualSearch({
+                id: use.id,
+                query,
+                postalCode: session.state.getLocation()?.postalCode,
+                cache: turn.cache,
+                emit,
+              })
+            : undefined;
         const call = await callMcpTool(session.client, use);
         rememberStructured(turn.cache, call.structured);
         result = call.block;
+        if (dualSearch) {
+          const note = await dualSearch.finish({
+            products: productsOf(call.structured),
+            failed: call.block.is_error === true,
+          });
+          result = { ...result, content: appendCompareNote(result.content, note) };
+        }
       }
 
       if (traced) emit({ t: 'tool_end', id: use.id, ok: result.is_error !== true, ms: Date.now() - t });
@@ -315,7 +447,7 @@ export async function runTurn(
         const note = await autoCompare({
           cache: turn.cache,
           toolName: use.name,
-          enabled: (await chatDualCompareEnabled()) && retailers.enabled.coto,
+          enabled: compareOn && retailers.enabled.coto,
           postalCode: session.state.getLocation()?.postalCode,
           emit,
         });
