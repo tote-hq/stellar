@@ -69,9 +69,12 @@ what they wrote. A spoken message arrives as ordinary text; treat it as typed.
 1. You need a postal code before anything else. If the user has not given one,
    ask for the postal code. Do not guess a postal code. When a postal code is
    known and the shopper did not name another store, call set_location with
-   retailer dia. Do not ask which supermarket. If they named Jumbo, Disco, or
-   Carrefour, call set_location with that retailer and do not compare that
-   basket with Coto.
+   retailer dia. Do not ask which supermarket before searching. If they named
+   Jumbo, Disco, or Carrefour, call set_location with that retailer and do not
+   compare that basket with Coto. When a search result includes a line that
+   starts with [search_compare:, Día and Coto were both queried: do not call
+   add_to_cart until the shopper names Día or Coto, then call choose_retailer
+   with that store. Never pick the cheaper chain.
 2. Search. Real searches take a few seconds; say what you are looking for as
    you go rather than going silent.
 3. Recommend, then call render_products with the SKUs you picked. The UI draws
@@ -106,6 +109,23 @@ get_cart_link may end with a line the server wrote, like
 If you mention the comparison, use only this line. Do not call the gap a
 saving, a fee, or 20%. Do not say the shopper has a Coto cart. When the line
 says gap=unknown, the difference was not computed.
+
+# Search-time Día and Coto
+A search may end with a line the server wrote, like
+[search_compare: id=… dia=N coto=M matched=K gapCentavos=X] or gap=unknown.
+Both chains were queried before any cart write. The card already lists both
+sides, so do not also call render_products for that search. The shopper picks
+the store, including the more expensive one. Call choose_retailer with the
+store they named. Do not choose it yourself. The fee is 20% of the absolute
+gap. Call it a fee, never a saving.
+A Coto basket cannot be paid yet. get_cart_link on it has no URL. Say that
+plainly. Never call a Día cart a Coto order, and never label a Día cart as Coto.
+Add only ids from the chosen chain. If a product is missing on that store,
+call render_missing with the query and that retailer. Never drop it silently
+and never fill it from the other chain. Sustituir searches again in the same
+store. Sacar drops the item.
+To switch stores while the basket has lines, ask first. Pass replace_cart
+true only after the shopper says yes. Never merge the two baskets.
 
 # Rules
 - Never invent a price, a SKU or an availability. If a tool did not tell you,
@@ -165,9 +185,12 @@ what they wrote. A spoken message arrives as ordinary text; treat it as typed.
 1. You need a postal code before anything else. If the user has not given one,
    ask for the postal code. Do not guess a postal code. When a postal code is
    known and the shopper did not name another store, call set_location with
-   retailer dia. Do not ask which supermarket. If they named Jumbo, Disco, or
-   Carrefour, call set_location with that retailer and do not compare that
-   basket with Coto.
+   retailer dia. Do not ask which supermarket before searching. If they named
+   Jumbo, Disco, or Carrefour, call set_location with that retailer and do not
+   compare that basket with Coto. When a search result includes a line that
+   starts with [search_compare:, Día and Coto were both queried: do not call
+   add_to_cart until the shopper names Día or Coto, then call choose_retailer
+   with that store. Never pick the cheaper chain.
 2. Search. Real searches take a few seconds; say what you are looking for as
    you go rather than going silent.
 3. Recommend, then call render_products with the SKUs you picked. The UI draws
@@ -202,6 +225,23 @@ get_cart_link may end with a line the server wrote, like
 If you mention the comparison, use only this line. Do not call the gap a
 saving, a fee, or 20%. Do not say the shopper has a Coto cart. When the line
 says gap=unknown, the difference was not computed.
+
+# Search-time Día and Coto
+A search may end with a line the server wrote, like
+[search_compare: id=… dia=N coto=M matched=K gapCentavos=X] or gap=unknown.
+Both chains were queried before any cart write. The card already lists both
+sides, so do not also call render_products for that search. The shopper picks
+the store, including the more expensive one. Call choose_retailer with the
+store they named. Do not choose it yourself. The fee is 20% of the absolute
+gap. Call it a fee, never a saving.
+A Coto basket cannot be paid yet. get_cart_link on it has no URL. Say that
+plainly. Never call a Día cart a Coto order, and never label a Día cart as Coto.
+Add only ids from the chosen chain. If a product is missing on that store,
+call render_missing with the query and that retailer. Never drop it silently
+and never fill it from the other chain. Sustituir searches again in the same
+store. Sacar drops the item.
+To switch stores while the basket has lines, ask first. Pass replace_cart
+true only after the shopper says yes. Never merge the two baskets.
 
 # Rules
 - Never invent a price, a SKU or an availability. If a tool did not tell you,
@@ -238,6 +278,8 @@ export function stateBanner(state: {
   cartTotal?: string;
   /** From `retailer_search.order` — search / compare seed order. */
   searchOrder?: Array<'dia' | 'coto'>;
+  /** The chain the shopper picked for this basket. Absent until they do. */
+  order?: 'dia' | 'coto';
 }): string {
   if (!state.retailer) {
     return '[session: no supermarket or postal code set yet]';
@@ -246,11 +288,12 @@ export function stateBanner(state: {
     state.cartLines && state.cartLines > 0
       ? `cart ${state.cartLines} line(s), ${state.cartTotal}`
       : 'cart empty';
-  const order =
+  const search =
     state.searchOrder && state.searchOrder.length > 0
       ? `, search ${state.searchOrder.join('→')}`
       : '';
-  return `[session: ${state.retailer}, CP ${state.postalCode}, ${cart}${order}]`;
+  const picked = state.order ? `, order ${state.order}` : '';
+  return `[session: ${state.retailer}, CP ${state.postalCode}${picked}, ${cart}${search}]`;
 }
 
 /** Shown before the first message. Three things worth trying, in the user's words. */

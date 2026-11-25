@@ -2,7 +2,7 @@ import type { Cart, CartLine, LocationContext, Money, Product, Seller } from '@c
 import type { SessionSnapshot } from '@changuito/mcp/session';
 
 import { dualCheckoutOn, type Block, type ChatState, type ToolRun } from './chat-state.ts';
-import type { CompareLineView, CompareOffer } from './protocol';
+import type { CompareLineView, CompareOffer, SearchCompareItem } from './protocol';
 
 /**
  * Chats in localStorage.
@@ -185,10 +185,21 @@ function packBlock(b: Block): Block | null {
         ? { kind: 'cart', id: b.id, cart: packCart(b.cart) }
         : { kind: 'cart', id: b.id, cart: packCart(b.cart), handoffUrl: b.handoffUrl };
       if (b.dualCheckout) packed.dualCheckout = true;
+      if (b.orderable === false) packed.orderable = false;
       return packed;
     }
     case 'compare':
       return packCompare(b);
+    case 'search_compare':
+      return packSearchCompare(b);
+    case 'missing':
+      return {
+        kind: 'missing',
+        id: b.id,
+        query: b.query,
+        retailer: b.retailer,
+        item: b.item,
+      };
     case 'error':
       return { kind: 'error', id: b.id, message: b.message, recoverable: b.recoverable };
     default: {
@@ -245,16 +256,48 @@ function packCompare(b: Extract<Block, { kind: 'compare' }>): Extract<Block, { k
   return out;
 }
 
+function packSearchItem(item: SearchCompareItem): SearchCompareItem {
+  return {
+    id: item.id,
+    name: item.name,
+    shelfCentavos: item.shelfCentavos,
+    available: item.available,
+  };
+}
+
+function packSearchCompare(
+  b: Extract<Block, { kind: 'search_compare' }>,
+): Extract<Block, { kind: 'search_compare' }> {
+  const out: Extract<Block, { kind: 'search_compare' }> = {
+    kind: 'search_compare',
+    id: b.id,
+    compareId: b.compareId,
+    status: b.status,
+    query: b.query,
+    dia: b.dia.map(packSearchItem),
+    coto: b.coto.map(packSearchItem),
+  };
+  if (b.postalCode !== undefined) out.postalCode = b.postalCode;
+  if (b.gapCentavos !== undefined) out.gapCentavos = b.gapCentavos;
+  if (b.feeCentavos !== undefined) out.feeCentavos = b.feeCentavos;
+  return out;
+}
+
 /**
  * The snapshot is handed back to the agent verbatim on the next turn, so
  * unlike everything else here it is packed in full rather than trimmed:
  * `sellers`, `salesChannel` and `degraded` are what make prices match what
  * the shopper will actually pay, and a restored snapshot missing them would
- * be a lie the agent then acts on. Still field by field — it is a location
- * and a map of cart ids, and nothing else belongs in it.
+ * be a lie the agent then acts on. Still field by field — it is a location,
+ * a map of cart ids, and — when the shopper has picked — the order and the
+ * Coto line ids. Prices are not stored on those lines.
  */
 function packSnapshot(s: SessionSnapshot): SessionSnapshot {
   const out: SessionSnapshot = { carts: { ...s.carts } };
+  if (s.order === 'dia' || s.order === 'coto') out.order = s.order;
+  if (s.coto && s.coto.length) {
+    out.coto = s.coto.map((line) => ({ id: line.id, quantity: line.quantity }));
+  }
   const l = s.location;
   if (l) {
     out.location = {
@@ -441,6 +484,47 @@ function asCompare(v: Record<string, unknown>, id: string): Extract<Block, { kin
   return block;
 }
 
+function asSearchItem(v: unknown): SearchCompareItem | null {
+  if (!isObj(v)) return null;
+  const id = str(v.id);
+  const name = str(v.name);
+  const shelfCentavos = num(v.shelfCentavos);
+  if (id === null || name === null || shelfCentavos === null || shelfCentavos <= 0) return null;
+  return { id, name, shelfCentavos, available: v.available === true };
+}
+
+function asSearchCompare(v: Record<string, unknown>, id: string): Extract<Block, { kind: 'search_compare' }> | null {
+  const compareId = str(v.compareId);
+  const query = str(v.query);
+  const status = v.status;
+  const allowed =
+    status === 'pending' ||
+    status === 'ok' ||
+    status === 'coto_empty' ||
+    status === 'coto_error' ||
+    status === 'coto_timed_out' ||
+    status === 'dia_error';
+  if (compareId === null || query === null || !allowed) return null;
+  const dia = arr(v.dia).map(asSearchItem).filter((item): item is SearchCompareItem => item !== null);
+  const coto = arr(v.coto).map(asSearchItem).filter((item): item is SearchCompareItem => item !== null);
+  const block: Extract<Block, { kind: 'search_compare' }> = {
+    kind: 'search_compare',
+    id,
+    compareId,
+    status,
+    query,
+    dia,
+    coto,
+  };
+  const postalCode = str(v.postalCode);
+  if (postalCode !== null) block.postalCode = postalCode;
+  const gapCentavos = num(v.gapCentavos);
+  if (gapCentavos !== null && gapCentavos >= 0) block.gapCentavos = gapCentavos;
+  const feeCentavos = num(v.feeCentavos);
+  if (feeCentavos !== null && feeCentavos >= 0) block.feeCentavos = feeCentavos;
+  return block;
+}
+
 /** Anything that does not parse is dropped, not repaired. A half-block is worse than a gap. */
 function asBlock(v: unknown): Block | null {
   if (!isObj(v)) return null;
@@ -476,10 +560,20 @@ function asBlock(v: unknown): Block | null {
         ? { kind: 'cart', id, cart }
         : { kind: 'cart', id, cart, handoffUrl };
       if (v.dualCheckout === true) block.dualCheckout = true;
+      if (v.orderable === false) block.orderable = false;
       return block;
     }
     case 'compare':
       return asCompare(v, id);
+    case 'search_compare':
+      return asSearchCompare(v, id);
+    case 'missing': {
+      const query = str(v.query);
+      const item = str(v.item);
+      const retailer = v.retailer === 'dia' || v.retailer === 'coto' ? v.retailer : null;
+      if (query === null || item === null || retailer === null) return null;
+      return { kind: 'missing', id, query, retailer, item };
+    }
     case 'error': {
       const message = str(v.message);
       return message === null ? null : { kind: 'error', id, message, recoverable: v.recoverable === true };
@@ -527,6 +621,15 @@ function asSnapshot(v: unknown): SessionSnapshot | null {
       out.location = location;
     }
   }
+  if (v.order === 'dia' || v.order === 'coto') out.order = v.order;
+  const coto = arr(v.coto).flatMap((line) => {
+    if (!isObj(line)) return [];
+    const id = str(line.id);
+    const quantity = num(line.quantity);
+    if (id === null || quantity === null || !Number.isInteger(quantity) || quantity < 1) return [];
+    return [{ id, quantity }];
+  });
+  if (coto.length) out.coto = coto;
   return out;
 }
 

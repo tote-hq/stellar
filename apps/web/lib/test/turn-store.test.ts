@@ -103,6 +103,21 @@ test('compare fields round-trip, a turn without them still decodes, and v stays 
   assert.equal(back?.cache.compareResult?.status, 'ok');
 });
 
+test('coto cache and searches round-trip, and an older turn still decodes', () => {
+  const older = decodeTurn({ v: 1, messages: [], products: [] });
+  assert.ok(older);
+  assert.equal(older.cache.coto, undefined);
+  assert.equal(older.cache.searches, undefined);
+
+  const turn = newTurnState();
+  turn.cache.coto = { c1: { id: 'c1', name: 'Yerba', shelfCentavos: 1000, available: true } };
+  turn.cache.searches = [{ query: 'yerba', retailer: 'coto', available: 1 }];
+  const back = decodeTurn(JSON.parse(JSON.stringify(encodeTurn(turn))) as unknown);
+  assert.equal(back?.cache.coto?.c1?.name, 'Yerba');
+  assert.equal(back?.cache.searches?.[0]?.available, 1);
+  assert.equal(encodeTurn(turn).v, 1);
+});
+
 test('an empty conversation round trips to an empty one, not to undefined', () => {
   const back = decodeTurn(JSON.parse(JSON.stringify(encodeTurn(newTurnState()))) as unknown);
 

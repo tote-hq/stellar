@@ -2,7 +2,7 @@ import type { Cart, Product } from '@changuito/mcp/types';
 import type { SessionSnapshot } from '@changuito/mcp/session';
 
 import type { ChatImage } from './chat-image.ts';
-import type { CompareCard, CompareLineView, TurnStage, UiEvent } from './protocol';
+import type { CompareCard, CompareLineView, SearchCompareItem, SearchCompareStatus, TurnStage, UiEvent } from './protocol';
 
 /**
  * The transcript, as a reducer over UiEvents.
@@ -47,7 +47,16 @@ export type Block =
   | { kind: 'user'; id: string; text: string; failed?: SendFailure; image?: ChatImage }
   | { kind: 'say'; id: string; text: string; thinking: string; tools: ToolRun[] }
   | { kind: 'products'; id: string; items: Product[]; note?: string }
-  | { kind: 'cart'; id: string; cart: Cart; handoffUrl?: string; dualCheckout?: boolean; soloDia?: boolean }
+  | {
+      kind: 'cart';
+      id: string;
+      cart: Cart;
+      handoffUrl?: string;
+      dualCheckout?: boolean;
+      soloDia?: boolean;
+      /** False when this basket cannot be paid. A Coto order. */
+      orderable?: boolean;
+    }
   | {
       kind: 'compare';
       id: string;
@@ -61,6 +70,20 @@ export type Block =
       /** Set when this card may offer the dual mock pay. Pending and timed out never do. */
       checkoutDemo?: boolean;
     }
+  | {
+      kind: 'search_compare';
+      id: string;
+      /** The server id that pairs pending with the finished card. */
+      compareId: string;
+      status: SearchCompareStatus;
+      query: string;
+      postalCode?: string;
+      dia: SearchCompareItem[];
+      coto: SearchCompareItem[];
+      gapCentavos?: number;
+      feeCentavos?: number;
+    }
+  | { kind: 'missing'; id: string; query: string; retailer: 'dia' | 'coto'; item: string }
   | { kind: 'error'; id: string; message: string; recoverable: boolean };
 
 export interface ChatState {
@@ -263,6 +286,7 @@ export function applyEvent(state: ChatState, e: UiEvent): ChatState {
         // The flag is read every hop. A later card without it is the flag off.
         ...(e.dualCheckout ? { dualCheckout: true } : {}),
         ...(e.soloDia ? { soloDia: true } : {}),
+        ...(e.orderable === false ? { orderable: false } : {}),
       });
 
       const blocks = prior
@@ -325,6 +349,52 @@ export function applyEvent(state: ChatState, e: UiEvent): ChatState {
         : [...state.blocks, block];
       return { ...state, blocks };
     }
+
+    case 'search_compare': {
+      // Same rule as the cart card: pending becomes the finished card in place.
+      const turnStart = lastIndexWhere(state.blocks, (b) => b.kind === 'user');
+      const existing = lastIndexWhere(
+        state.blocks,
+        (b, i) => i > turnStart && b.kind === 'search_compare' && b.compareId === e.id,
+      );
+      const prior = existing === -1 ? undefined : (state.blocks[existing] as Extract<Block, { kind: 'search_compare' }>);
+      const block: Extract<Block, { kind: 'search_compare' }> = e.status === 'pending'
+        ? {
+            kind: 'search_compare',
+            id: prior?.id ?? nextId(),
+            compareId: e.id,
+            status: 'pending',
+            query: e.query,
+            ...(e.postalCode ? { postalCode: e.postalCode } : {}),
+            dia: [],
+            coto: [],
+          }
+        : {
+            kind: 'search_compare',
+            id: prior?.id ?? nextId(),
+            compareId: e.id,
+            status: e.status,
+            query: e.query,
+            ...(e.postalCode || prior?.postalCode ? { postalCode: e.postalCode ?? prior?.postalCode } : {}),
+            dia: e.dia,
+            coto: e.coto,
+            ...(e.gapCentavos === undefined ? {} : { gapCentavos: e.gapCentavos }),
+            ...(e.feeCentavos === undefined ? {} : { feeCentavos: e.feeCentavos }),
+          };
+      const blocks = prior
+        ? state.blocks.map((b, i) => (i === existing ? block : b))
+        : [...state.blocks, block];
+      return { ...state, blocks };
+    }
+
+    case 'missing':
+      return {
+        ...state,
+        blocks: [
+          ...state.blocks,
+          { kind: 'missing', id: nextId(), query: e.query, retailer: e.retailer, item: e.item },
+        ],
+      };
 
     case 'error': {
       const blocks: Block[] = [

@@ -592,6 +592,51 @@ body:not(:has(.topbar)) .shell {
   }
 }
 
+/* Search-time Día and Coto. Two columns from 720px, stacked below that.
+   Tokens stay the brand plate in dark mode, same as .compare-card. */
+.search-compare,
+.missing-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  margin: 8px 0;
+  padding: 12px 14px;
+}
+.search-compare-title { font-weight: 650; margin: 0 0 8px; font-size: 17px; }
+.search-compare-sub,
+.search-compare-note,
+.search-compare-fee { margin: 8px 0 0; font-size: 14px; color: var(--text); }
+.search-compare-cols { display: grid; gap: 12px; margin-top: 12px; }
+.search-compare-store { margin: 0 0 8px; font-size: 15px; }
+.search-compare-list { list-style: none; margin: 0; padding: 0; }
+.search-compare-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 14px;
+}
+.search-compare-name { flex: 1 1 8rem; }
+.search-compare-price { font-variant-numeric: tabular-nums; }
+.search-compare-col .btn,
+.missing-actions .btn { min-height: 44px; min-width: 44px; margin-top: 8px; }
+.missing-card p { margin: 0; }
+.missing-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.composer-actions { display: flex; gap: 8px; align-items: center; }
+.composer-actions .btn { min-height: 44px; }
+@media (min-width: 720px) {
+  .search-compare-cols { grid-template-columns: 1fr 1fr; }
+}
+@media (prefers-color-scheme: dark) {
+  .search-compare,
+  .missing-card {
+    background: var(--surface);
+    color: var(--text);
+    border-color: var(--border);
+  }
+}
+
 /* The cart offer sits in the thread, after the products. It is a normal
    button, not one of the 44px composer icons. */
 .chat-build { display: flex; margin: 8px 0 4px; }

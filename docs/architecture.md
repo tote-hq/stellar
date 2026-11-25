@@ -183,9 +183,14 @@ host** so a human can type their supermarket password. That cannot run in the we
 module at all — the checkout tools sit behind a dynamic `import()`, so nothing in
 the web app's import graph can even resolve Playwright.
 
-The ten tools the agent sees: `list_retailers`, `set_location`,
+The eleven tools the agent sees: `list_retailers`, `set_location`,
 `search_products`, `get_product`, `price_check`, `add_to_cart`,
-`update_cart_item`, `view_cart`, `get_cart_link`, `where_am_i`.
+`update_cart_item`, `view_cart`, `get_cart_link`, `choose_retailer`,
+`where_am_i`.
+
+`choose_retailer` is how the shopper picks Día or Coto after a search that
+queried both. A Coto order is a Changuito-held basket of Coto catalog lines.
+It has no store link and cannot be paid. A Día cart is never labeled as Coto.
 
 ### Two kinds of tool, and the split is the design
 

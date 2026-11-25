@@ -379,3 +379,44 @@ describe('dual checkout flags on the transcript', () => {
     assert.equal(row?.kind === 'compare' && row.checkoutDemo, undefined);
   });
 });
+
+describe('search compare and missing blocks', () => {
+  it('replaces a pending search compare in place and keeps its id', () => {
+    resetIds();
+    const pending = {
+      t: 'search_compare' as const,
+      id: 'sc1',
+      status: 'pending' as const,
+      query: 'leche',
+    };
+    const done = {
+      t: 'search_compare' as const,
+      id: 'sc1',
+      status: 'ok' as const,
+      query: 'leche',
+      dia: [{ id: 'd1', name: 'Leche', shelfCentavos: 1000, available: true }],
+      coto: [{ id: 'c1', name: 'Leche', shelfCentavos: 800, available: true }],
+      gapCentavos: 200,
+      feeCentavos: 40,
+    };
+    const s = run([pending, done], sendUser(initialState, 'leche'));
+    const cards = s.blocks.filter((b) => b.kind === 'search_compare');
+    assert.equal(cards.length, 1);
+    assert.equal(cards[0]?.kind === 'search_compare' && cards[0].status, 'ok');
+    assert.equal(cards[0]?.kind === 'search_compare' && cards[0].id, 'b2');
+    assert.equal(cards[0]?.kind === 'search_compare' && cards[0].gapCentavos, 200);
+  });
+
+  it('appends a missing block after the search card', () => {
+    resetIds();
+    const s = run(
+      [
+        { t: 'search_compare', id: 'sc1', status: 'coto_empty', query: 'tofu', dia: [], coto: [] },
+        { t: 'missing', query: 'tofu', retailer: 'coto', item: 'tofu' },
+      ],
+      sendUser(initialState, 'tofu'),
+    );
+    const kinds = s.blocks.map((b) => b.kind);
+    assert.deepEqual(kinds, ['user', 'search_compare', 'missing']);
+  });
+});
