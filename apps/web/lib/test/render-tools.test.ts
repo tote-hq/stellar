@@ -299,4 +299,15 @@ describe('product cards', () => {
     assert.equal(shopperNamedRetailer('dia', 'Quiero pedir en Coto.', ''), false);
     assert.equal(shopperNamedRetailer('coto', 'sí', '¿Confirmás Coto?'), true);
   });
+
+  it('names Día only as a whole word', () => {
+    assert.equal(shopperNamedRetailer('dia', 'media docena', ''), false);
+    assert.equal(shopperNamedRetailer('dia', 'todos los días', ''), false);
+    assert.equal(shopperNamedRetailer('dia', 'diario', ''), false);
+    assert.equal(shopperNamedRetailer('dia', 'agregá media docena de huevos', ''), false);
+    assert.equal(shopperNamedRetailer('dia', 'inmediato', ''), false);
+    assert.equal(shopperNamedRetailer('dia', 'Día', ''), true);
+    assert.equal(shopperNamedRetailer('dia', 'dia', ''), true);
+    assert.equal(shopperNamedRetailer('dia', 'en Día.', ''), true);
+  });
 });

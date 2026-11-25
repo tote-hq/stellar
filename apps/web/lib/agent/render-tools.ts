@@ -201,8 +201,11 @@ export function foreignCartSku(
   return onDia && !onCoto;
 }
 
-const DIA_NAME = /d[ií]a/i;
-const COTO_NAME = /\bcoto\b/i;
+// Whole word only. `\b` is an ASCII boundary, and `í` is not a word character,
+// so "días" and a letter glued to "Día" both go wrong. A letter or digit
+// on either side is the boundary.
+const DIA_NAME = /(?<![\p{L}\p{N}])d[ií]a(?![\p{L}\p{N}])/iu;
+const COTO_NAME = /(?<![\p{L}\p{N}])coto(?![\p{L}\p{N}])/iu;
 
 export function textNamesRetailer(text: string, retailer: 'dia' | 'coto'): boolean {
   return (retailer === 'dia' ? DIA_NAME : COTO_NAME).test(text);
