@@ -5,7 +5,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { ACCESSORY_PX, keyboardInset, scrollDeltaToClear } from '../../lib/bug-report/keyboard-inset.ts';
 import { track } from '../../lib/analytics.ts';
 import { firstFieldMessage, SERVER_ERROR, TURNSTILE_MISSING } from '../../lib/waitlist/messages.ts';
-import { OTHER_SOURCE, SOURCE_GROUPS } from '../../lib/waitlist/options.ts';
+import { OTHER_SOURCE, SOURCE_GROUPS, SOURCE_QUESTION } from '../../lib/waitlist/options.ts';
 import { validateWaitlist, type FieldErrors } from '../../lib/waitlist/validate.ts';
 import styles from './waitlist.module.css';
 
@@ -318,7 +318,7 @@ export function WaitlistForm({ notice }: { notice?: string }) {
 
       <div className={`${styles.field} ${styles.fieldSource}`}>
         <label className={styles.label} htmlFor={`${baseId}-source`}>
-          ¿Dónde te enteraste de nosotros?
+          {SOURCE_QUESTION.es}
         </label>
         <select
           id={`${baseId}-source`}
