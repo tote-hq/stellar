@@ -306,6 +306,7 @@ The service builds from `services/sandbox/Dockerfile`:
 `mcr.microsoft.com/playwright/python:v1.63.0-noble` (Chromium system
 dependencies included) + `uv`, `uv sync --frozen --no-dev`, `playwright install
 chromium`, then `uvicorn server:app` on `$PORT` (default 8080).
+The image copies every top-level `*.py` in `services/sandbox` except `test_*.py`, so a new module needs no Dockerfile edit.
 `railway.json`: Dockerfile builder, healthcheck `/health`, restart on failure,
 1 replica.
 
