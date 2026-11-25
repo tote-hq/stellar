@@ -15,7 +15,7 @@
     "build:vinext": "vite build",
     "postbuild:vinext": "node ../../scripts/migrate-on-build.mjs",
     "start:vinext": "vinext start",
-    "deploy:vinext": "vinext-cloudflare deploy --skip-build"
+    "deploy:vinext": "node ../../scripts/deploy-vinext.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.127.0",
