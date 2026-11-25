@@ -24,7 +24,8 @@
  */
 import { createHash } from 'node:crypto';
 
-import { cotoDemoPayRecord, settleBasis } from '../../../../lib/checkout/coto-guard.ts';
+import { cotoDemoPayRecord, cotoRealRecord, settleBasis } from '../../../../lib/checkout/coto-guard.ts';
+import { COTO_REAL_WAIT, cotoRealOutcome, cotoShopperBody, shopperCopy } from '../../../../lib/checkout/coto-real.ts';
 import { readOrder, refundOrder, settleOrder } from '../../../../lib/checkout/escrow-server.ts';
 import { refundReason } from '../../../../lib/checkout/failure.ts';
 import { checkoutAlert, resolverFailureCode, resolverLogLine } from '../../../../lib/checkout/resolver-alert.ts';
@@ -44,7 +45,10 @@ export const dynamic = 'force-dynamic';
 const g = globalThis as { __chgClosing?: Set<string> };
 const closing = (g.__chgClosing ??= new Set());
 
-function reply(rec: CheckoutRecord, stage: StatusResponse['stage']): Response {
+function reply(rec: CheckoutRecord, stage: StatusResponse['stage'], note?: string | null): Response {
+  if (cotoRealRecord(rec)) {
+    return Response.json(cotoShopperBody(rec, stage, note ?? null), { headers: { 'cache-control': 'no-store' } });
+  }
   const res: StatusResponse = {
     orderId: rec.orderId,
     stage,
@@ -102,13 +106,31 @@ export async function GET(req: Request): Promise<Response> {
   if (!rec.jobId) return reply(rec, 'quoted');
 
   let finished: 'settle' | 'refund' | null = null;
+  let note: string | null = null;
   if (rec.jobId === 'none') {
     finished = 'refund';
+    if (cotoRealRecord(rec)) rec.error = rec.error ?? shopperCopy(null);
   } else {
     try {
       const job = await readJob(rec.jobId);
       rec.phase = job.phase;
-      if (job.status === 'done' || job.status === 'failed') {
+      if (cotoRealRecord(rec)) {
+        const decision = cotoRealOutcome({
+          status: job.status,
+          payment: job.result?.payment ?? null,
+          storeOrderId: job.result?.store_order_id ?? null,
+        });
+        if (job.status === 'running' && job.phase === 'needs_human') note = COTO_REAL_WAIT;
+        if (decision === 'settle') {
+          finished = 'settle';
+          rec.storeOrderId = job.result?.store_order_id ?? undefined;
+          rec.payment = 'placed';
+        } else if (decision === 'refund') {
+          finished = 'refund';
+          rec.payment = job.result?.payment ?? 'not_attempted';
+          rec.error = shopperCopy(job.result?.code, job.result?.payment);
+        }
+      } else if (job.status === 'done' || job.status === 'failed') {
         rec.payment = job.result?.payment ?? 'not_attempted';
         // A Coto mock must not inherit the Día order form or the payment URL
         // the in-process mock stamps on every job. Those belong to Día.
@@ -149,7 +171,7 @@ export async function GET(req: Request): Promise<Response> {
   if (!finished || closing.has(orderId)) {
     noteAlert(rec);
     await store.set(rec);
-    return reply(rec, 'shopping');
+    return reply(rec, 'shopping', note);
   }
 
   closing.add(orderId);

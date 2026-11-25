@@ -1,17 +1,22 @@
 /**
  * The quote branch for checkoutKind coto_real_v1.
- * It does not write a checkout record and it does not call the demo quote.
+ * It stores the lock the escrow will open. It does not call the demo quote.
  */
 import { arsToUsdCents } from '@changuito/mcp/fx';
 import { cotoPricer, priceCotoCart } from '@changuito/mcp/compare';
 import type { Cart } from '@changuito/mcp/types';
 
 import { turnStore, type TurnStore } from '../agent/turn-store.ts';
+import { contractIds } from '../contract-ids.ts';
+import { DEFAULT_NETWORK } from '../deployments.ts';
+import { basketHash, DEFAULT_TIMEOUT_SECS, newOrderId, toHex } from '../order.ts';
 import { centsToUnits } from '../stellar.ts';
+import { checkoutStore } from './store.ts';
 import { quoteRate } from './rate.ts';
 import {
   admitCotoReal,
   COTO_REAL_KIND,
+  coverageAddress,
   normalizePostal,
   parseAllowlist,
   parseCpTable,
@@ -76,11 +81,13 @@ export async function postCotoRealQuote(
   const postalCode = normalizePostal(rawPostal);
   if (!postalCode) return Response.json({ error: 'Ese código postal no es válido.' }, { status: 400 });
 
-  const coverage = resolveCoverage(postalCode, {
+  const coverageOpts = {
     ops: parseOpsAddress(process.env.COTO_REAL_OPS_ADDRESS),
     table: parseCpTable(process.env.COTO_REAL_CP_TABLE),
-  });
-  if (!coverage.ok) return Response.json({ error: 'No tenemos cobertura para ese CP' }, { status: 400 });
+  };
+  const resolved = coverageAddress(postalCode, coverageOpts);
+  const coverage = resolveCoverage(postalCode, coverageOpts);
+  if (!resolved || !coverage.ok) return Response.json({ error: 'No tenemos cobertura para ese CP' }, { status: 400 });
 
   let lines: PricedLine[];
   try {
@@ -118,14 +125,64 @@ export async function postCotoRealQuote(
   }
   const amountCents = arsToUsdCents(quoted.quote.lockCentavos as never, rate.arsPerUsd, 0);
   const amount = centsToUnits(amountCents).toString();
+  const orderId = toHex(newOrderId());
+  const hash = toHex(await basketHash(pricedCart(cart.cartId, lines, quoted.quote.cotoTicketCentavos)));
+  const ids = contractIds(DEFAULT_NETWORK);
+  await checkoutStore().set({
+    checkoutKind: COTO_REAL_KIND,
+    orderId,
+    buyer: address,
+    amount,
+    amountCents,
+    basketHash: hash,
+    arsPerUsd: rate.arsPerUsd,
+    rateSource: rate.source,
+    postalCode,
+    resolvedAddress: resolved,
+    totalDisplay: quoted.quote.lockCentavos.toString(),
+    retailer: 'coto',
+    lines: lines.map((line) => ({
+      name: line.name,
+      skuId: line.skuId,
+      quantity: line.quantity,
+      lineTotal: String(line.unitCentavos * line.quantity),
+    })),
+    handoffUrl: null,
+    createdAt: Date.now(),
+    mode: 'live',
+  });
   return Response.json({
     ...quoted.quote,
     checkoutKind: COTO_REAL_KIND,
     coverage: 'ok',
+    orderId,
+    basketHash: hash,
+    timeoutSecs: DEFAULT_TIMEOUT_SECS,
+    programId: ids.escrowId,
+    usdcMint: ids.usdcId,
     amount,
     amountCents,
     amountDisplay: `${(amountCents / 100).toFixed(2)} USDC`,
     arsPerUsd: rate.arsPerUsd,
     rateSource: rate.source,
   });
+}
+
+function pricedCart(cartId: string, lines: readonly PricedLine[], ticketCentavos: number): Cart {
+  return {
+    retailer: 'coto',
+    cartId,
+    messages: [],
+    total: { centavos: ticketCentavos, display: String(ticketCentavos) },
+    lines: lines.map((line, index) => ({
+      index,
+      skuId: line.skuId,
+      name: line.name,
+      quantity: line.quantity,
+      sellerId: 'coto',
+      unitPrice: { centavos: line.unitCentavos, display: String(line.unitCentavos) },
+      lineTotal: { centavos: line.unitCentavos * line.quantity, display: String(line.unitCentavos * line.quantity) },
+      available: line.available,
+    })),
+  };
 }
