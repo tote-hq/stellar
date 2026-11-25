@@ -94,8 +94,8 @@ export function Fixtures() {
 
   return (
     <>
-      {/* Reaching an undelivered message for real costs three free turns and
-          a logged-out browser, so the states live here instead. */}
+      {/* Reaching an undelivered message for real costs the free guest turns
+          and a logged-out browser, so the states live here instead. */}
       <UserBubble block={DELIVERED} canRetry={false} onRetry={noop} />
       <UserBubble block={FAILED_LOGIN} canRetry onRetry={noop} />
       <UserBubble block={FAILED_OLD} canRetry={false} onRetry={noop} />

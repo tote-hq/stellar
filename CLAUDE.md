@@ -403,7 +403,7 @@ searched this turn on that store and came back with no available hit.
 ## Before you commit
 
 ```
-npm test                        # 719: mcp 209 · trust 1 · web 509
+npm test                        # 720: mcp 209 · trust 1 · web 510
 npm run typecheck -w @changuito/web
 npm run build
 ```

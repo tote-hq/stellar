@@ -49,6 +49,15 @@ describe('login-gate', () => {
     assert.equal(blocked.reason, 'login_required');
   });
 
+  it('still accepts the confirmed store switch after search, postal code and a choice', () => {
+    // Those three POSTs leave sessionCount at 3. The confirm is the fourth,
+    // and it has to reach the agent or the composer latches the login gate.
+    const confirm = guestChatVerdict({ loggedIn: false, sessionCount: 3 });
+    assert.equal(confirm.allow, true);
+    assert.equal(confirm.turnsUsed, 4);
+    assert.ok(FREE_TURNS >= 4);
+  });
+
   it('shows the login banner only to an anonymous shopper after the free turns', () => {
     for (const turnsUsed of [FREE_TURNS, 99]) {
       const banner = loginGateBannerText({ isAuthenticated: true, loginRequired: true, turnsUsed });
