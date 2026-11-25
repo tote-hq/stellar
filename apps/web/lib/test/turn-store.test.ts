@@ -112,8 +112,12 @@ test('coto cache and searches round-trip, and an older turn still decodes', () =
   const turn = newTurnState();
   turn.cache.coto = { c1: { id: 'c1', name: 'Yerba', shelfCentavos: 1000, available: true } };
   turn.cache.searches = [{ query: 'yerba', retailer: 'coto', available: 1 }];
+  turn.cache.diaPairs = [{ cotoId: 'c1', diaSkuId: 'd1', diaCentavos: 1100, confidence: 'ean' }];
+  turn.cache.cotoRealDia = { pairs: turn.cache.diaPairs, buyer: 'GABC' };
   const back = decodeTurn(JSON.parse(JSON.stringify(encodeTurn(turn))) as unknown);
   assert.equal(back?.cache.coto?.c1?.name, 'Yerba');
+  assert.equal(back?.cache.diaPairs?.[0]?.diaSkuId, 'd1');
+  assert.equal(back?.cache.cotoRealDia?.buyer, 'GABC');
   assert.equal(back?.cache.searches?.[0]?.available, 1);
   assert.equal(encodeTurn(turn).v, 1);
 });

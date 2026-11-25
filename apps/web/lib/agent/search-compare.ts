@@ -9,6 +9,7 @@ import type { CotoSearcher } from '@changuito/mcp/compare';
 import type { Product } from '@changuito/mcp/types';
 
 import { feeCentavosOf } from '../checkout/compare-fee.ts';
+import { mergeDiaPair } from '../checkout/coto-real.ts';
 import type { SearchCompareItem, UiEvent } from '../protocol.ts';
 import type { RenderCache } from './render-tools.ts';
 
@@ -154,6 +155,19 @@ export function beginDualSearch(args: {
         };
       }
       args.cache.coto = cotoCache;
+      if (
+        folded.pair &&
+        (folded.pair.confidence === 'ean' || folded.pair.confidence === 'brand_size_unit') &&
+        Number.isSafeInteger(folded.pair.diaCentavos) &&
+        folded.pair.diaCentavos > 0
+      ) {
+        args.cache.diaPairs = mergeDiaPair(args.cache.diaPairs ?? [], {
+          cotoId: folded.pair.cotoId,
+          diaSkuId: folded.pair.diaSkuId,
+          diaCentavos: folded.pair.diaCentavos,
+          confidence: folded.pair.confidence,
+        });
+      }
       recordSearch(args.cache, args.query, 'dia', diaView.length);
       recordSearch(args.cache, args.query, 'coto', cotoView.length);
 

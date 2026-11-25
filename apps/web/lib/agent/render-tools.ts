@@ -1,6 +1,8 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Cart, Product } from '@changuito/mcp/types';
 
+import type { CotoRealDia, DiaPair } from '../checkout/coto-real.ts';
+
 import type { CompareCard, UiEvent } from '../protocol';
 
 /**
@@ -62,6 +64,13 @@ export interface RenderCache {
   coto?: Record<string, CotoCacheItem>;
   /** Queries searched this turn, and how many available hits came back. */
   searches?: SearchRecord[];
+  /**
+   * Día shelf pairs from search, merged by Coto id. A plain array: a Map
+   * would encode as `{}`. Not on the browser session snapshot.
+   */
+  diaPairs?: DiaPair[];
+  /** Frozen when the shopper confirms Coto. Authorization is the cookie, not this stamp. */
+  cotoRealDia?: CotoRealDia;
 }
 
 /** A Coto catalog row the render tools may cite. Prices stay off the model input. */

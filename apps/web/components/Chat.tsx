@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Cart } from '@changuito/mcp/types';
 
 import { starters } from '../lib/agent/prompt';
+import { cotoPayTarget } from '../lib/checkout/coto-real.ts';
 import { composerControls } from '../lib/composer.ts';
 import {
   choiceMessage,
@@ -43,6 +44,7 @@ import { useLang } from './LangProvider';
 import { useNetwork } from './NetworkProvider';
 import { CameraIcon, ImageIcon, MicIcon, RetryIcon } from './icons';
 import { CheckoutModal } from './CheckoutModal';
+import { CotoRealModal } from './CotoRealModal';
 import { PayCard, type PayCardLine } from './PayCard';
 import { ProductGrid } from './ProductGrid';
 import { useShop } from './ShopProvider';
@@ -163,6 +165,7 @@ function ChatCore({
     checkoutPath?: 'solo_dia' | 'solo_coto' | 'dual';
     receiptLines?: { name: string; quantity: number; lineTotal: string }[];
   } | null>(null);
+  const [cotoModal, setCotoModal] = useState<Cart | null>(null);
   /** Which pay started. Cleared if the modal closes before escrow open. */
   const [payLock, setPayLock] = useState<null | 'dia' | 'coto'>(null);
   const payOpened = useRef(false);
@@ -187,10 +190,31 @@ function ChatCore({
   // basket as it is now. Keyed on the counter so a re-render does not reopen it.
   const payRequest = shop?.payRequest ?? 0;
   const seenPay = useRef(payRequest);
+  const setCotoReal = shop?.setCotoReal;
+  useEffect(() => {
+    if (!setCotoReal) return;
+    let gone = false;
+    fetch('/api/checkout/coto-real')
+      .then((res) => res.json())
+      .then((body: { allowed?: boolean }) => {
+        if (!gone) setCotoReal(body.allowed === true);
+      })
+      .catch(() => {
+        if (!gone) setCotoReal(false);
+      });
+    return () => {
+      gone = true;
+    };
+  }, [address, setCotoReal]);
   useEffect(() => {
     if (payRequest === seenPay.current) return;
     seenPay.current = payRequest;
     if (!shop?.canOrder || !shop.cart || shop.dualCheckout) return;
+    if (shop.cart.retailer === 'coto') {
+      if (!shop.cotoReal) return;
+      setCotoModal(shop.cart);
+      return;
+    }
     track('payment_start', { flow: 'rail' });
     setPaying({ cart: shop.cart, handoffUrl: shop.handoffUrl ?? undefined });
   }, [payRequest, shop]);
@@ -503,12 +527,22 @@ function ChatCore({
               );
             case 'products':
               return <ProductGrid key={b.id} items={b.items} note={b.note} />;
-            case 'cart':
+            case 'cart': {
+              const cotoTarget = cotoPayTarget(
+                state.blocks.map((block) => ({
+                  id: block.id,
+                  kind: block.kind,
+                  retailer: block.kind === 'cart' ? block.cart.retailer : undefined,
+                })),
+                shop?.cotoReal === true,
+              );
+              const thisCoto = b.cart.retailer === 'coto' && b.id === cotoTarget;
               return (
                 <CartCard
                   key={b.id}
                   cart={b.cart}
                   handoffUrl={b.handoffUrl}
+                  cotoPay={thisCoto}
                   // No longer gated on a wallet. The frame-checkout flow asks
                   // for an importe and a code, and the shopper pays the súper
                   // themselves — there is nothing here to sign, so requiring a
@@ -519,8 +553,14 @@ function ChatCore({
                     // what was bought, and a Pagar on it invites paying twice.
                     // A dual-checkout basket pays from the cards under the compare.
                     // Solo Día (demo on, Coto search off): one PayCard, still fees.
-                    canOrder && !b.dualCheckout && b.cart.retailer !== 'coto' && b.orderable !== false
+                    // A Coto cart pays only when this block is the current one
+                    // and the wallet is allowlisted. That is not the demo PayCard.
+                    canOrder && !b.dualCheckout && b.orderable !== false && (b.cart.retailer !== 'coto' || thisCoto)
                       ? (cart) => {
+                          if (cart.retailer === 'coto') {
+                            setCotoModal(cart);
+                            return;
+                          }
                           track('payment_start', { flow: 'frame' });
                           setPaying(
                             b.soloDia
@@ -537,6 +577,7 @@ function ChatCore({
                   }
                 />
               );
+            }
             case 'search_compare':
               return (
                 <SearchCompareCard
@@ -868,6 +909,15 @@ function ChatCore({
             </button>
           </div>
         </Modal>
+      ) : null}
+
+      {cotoModal && currentSessionId() ? (
+        <CotoRealModal
+          cart={cotoModal}
+          sessionId={currentSessionId() as string}
+          postalCode={state.snapshot?.location?.postalCode}
+          onClose={() => setCotoModal(null)}
+        />
       ) : null}
 
       {paying ? (

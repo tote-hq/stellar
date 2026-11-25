@@ -158,7 +158,7 @@ export async function POST(req: Request): Promise<Response> {
               );
             }
           }
-          brain = (await runTurn(session, turn, body.message, emit, lang, body.image)).brain;
+          brain = (await runTurn(session, turn, body.message, emit, lang, body.image, owner)).brain;
 
           // Only after a clean return. A turn that threw mid-hop can leave an
           // assistant `tool_use` with no matching `tool_result`, and the API

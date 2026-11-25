@@ -18,10 +18,13 @@ export function CartCard({
   cart,
   handoffUrl,
   onPay,
+  cotoPay = false,
 }: {
   cart: Cart;
   handoffUrl?: string;
   onPay?: (cart: Cart) => void;
+  /** Allowlisted wallet, and this is the current turn's Coto cart. */
+  cotoPay?: boolean;
 }) {
   const copy = uiCopy(useLang()).cart;
   const unavailable = cart.lines.filter((l) => !l.available);
@@ -63,7 +66,7 @@ export function CartCard({
             {unavailable.length === 1 ? copy.oosOne : copy.oosMany(unavailable.length)}
           </p>
         ) : null}
-        {coto ? (
+        {coto && !cotoPay ? (
           <p className="cart-warn" data-testid="cart-coto-unpayable">
             {copy.notPayable}
           </p>
@@ -71,6 +74,17 @@ export function CartCard({
         <div className="cart-actions">
           {onPay && !coto ? (
             <button type="button" className="btn btn-pay" onClick={() => onPay(cart)}>
+              {copy.payCta}
+            </button>
+          ) : null}
+          {onPay && coto && cotoPay ? (
+            <button
+              type="button"
+              className="btn btn-pay"
+              data-testid="cart-coto-pay"
+              style={{ minHeight: 44, minWidth: 44 }}
+              onClick={() => onPay(cart)}
+            >
               {copy.payCta}
             </button>
           ) : null}

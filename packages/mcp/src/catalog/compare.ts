@@ -6,6 +6,7 @@
 import { getAdapter } from '../adapters/registry.js';
 import type { Product } from '../types.js';
 import { CotoCatalog, discoverPublicKey } from './coto.js';
+import { priceCotoCart, type CotoPricer, type CotoQty } from './coto-cart.js';
 import { matchDiaToCoto, type CotoSearcher, type MatchConfidence } from './match.js';
 
 export interface CompareLine {
@@ -219,6 +220,11 @@ export function cotoSearcher(): CotoSearcher {
   return new CotoCatalog();
 }
 
+/** Exact id or EAN lookup. The quote reprices a Coto basket through this. */
+export function cotoPricer(): CotoPricer {
+  return new CotoCatalog();
+}
+
 /**
  * The quote route, the probe and the chat card all enter here.
  * A lookup failure rejects. `opts` is omitted by the quote route, which keeps
@@ -252,3 +258,5 @@ export type {
 export type { CotoSearcher } from './match.js';
 export type { CatalogItem } from './coto.js';
 export { compareForCard } from './compare-card.js';
+export { priceCotoCart };
+export type { CotoPricer, CotoQty };

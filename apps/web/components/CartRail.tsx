@@ -58,8 +58,11 @@ export function CartRail() {
           // which has usually scrolled away by the time the basket is ready.
           <RailLines
             cart={cart}
+            cotoPay={Boolean(shop?.cotoReal && cart.retailer === 'coto')}
             onPay={
-              shop?.canOrder && !shop.dualCheckout && cart.retailer !== 'coto' ? shop.requestPay : undefined
+              shop?.canOrder && !shop.dualCheckout && (cart.retailer !== 'coto' || shop.cotoReal)
+                ? shop.requestPay
+                : undefined
             }
           />
         ) : (
@@ -125,7 +128,7 @@ function EmptyRail() {
   return <p className="rail-cart-empty">{uiCopy(useLang()).rail.empty}</p>;
 }
 
-function RailLines({ cart, onPay }: { cart: Cart; onPay?: () => void }) {
+function RailLines({ cart, onPay, cotoPay = false }: { cart: Cart; onPay?: () => void; cotoPay?: boolean }) {
   const lang = useLang();
   const copy = uiCopy(lang).rail;
   const payable = cart.lines.some((l) => l.available && l.quantity > 0) && cart.total.centavos > 0;
@@ -154,13 +157,24 @@ function RailLines({ cart, onPay }: { cart: Cart; onPay?: () => void }) {
           <span>{copy.total}</span>
           <strong>{cart.total.display}</strong>
         </div>
-        {cart.retailer === 'coto' ? (
+        {cart.retailer === 'coto' && !cotoPay ? (
           <p className="rail-cart-warn" data-testid="rail-coto-unpayable">
             {copy.notPayable}
           </p>
         ) : null}
-        {onPay && payable ? (
+        {onPay && payable && cart.retailer !== 'coto' ? (
           <button type="button" className="btn btn-pay rail-cart-pay" data-testid="rail-pay" onClick={onPay}>
+            {uiCopy(lang).cart.payCta}
+          </button>
+        ) : null}
+        {onPay && payable && cotoPay ? (
+          <button
+            type="button"
+            className="btn btn-pay rail-cart-pay"
+            data-testid="rail-coto-pay"
+            style={{ minHeight: 44, minWidth: 44 }}
+            onClick={onPay}
+          >
             {uiCopy(lang).cart.payCta}
           </button>
         ) : null}
