@@ -251,7 +251,7 @@ export async function runTurn(
           userText,
           stateBanner({
             retailer: location?.retailer,
-            postalCode: location?.postalCode,
+            postalCode: location?.postalCode ?? session.state.getPendingPostal(),
             city: session.state.getCity(),
             cartLines: cart?.lines.length,
             cartTotal: cart?.total.display,
@@ -312,7 +312,7 @@ export async function runTurn(
       userText,
       stateBanner({
         retailer: location?.retailer,
-        postalCode: location?.postalCode,
+        postalCode: location?.postalCode ?? session.state.getPendingPostal(),
         city: session.state.getCity(),
         cartLines: cart?.lines.length,
         cartTotal: cart?.total.display,

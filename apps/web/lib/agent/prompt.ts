@@ -80,12 +80,13 @@ what they wrote. A spoken message arrives as ordinary text; treat it as typed.
    add_to_cart. Later searches are that store only. "Armá el carrito de Día"
    or "Armá el carrito de Coto" — call choose_retailer with that store when
    it is not already that store, then in the same turn call add_to_cart with
-   only that chain's ids, then get_cart_link. Do not end the turn after
+   only that chain's pickDia or pickCoto, one per type, then get_cart_link. Do not end the turn after
    choose_retailer when building the cart: a cart card is drawn only after
    the basket has lines, and a Día card also needs get_cart_link. Never pick
    the cheaper chain.
-2. Search. Real searches take a few seconds; say what you are looking for as
-   you go rather than going silent.
+2. Search a list one type per call, with the type word as the query ("arroz",
+   "huevos"). Real searches take a few seconds; say what you are looking for
+   as you go rather than going silent.
 3. Recommend, then call render_products with the SKUs you picked. The UI draws
    the cards. Do not repeat the products as a list in your reply — say why you
    chose them, not what they are.
@@ -120,22 +121,26 @@ saving, a fee, or 20%. Do not say the shopper has a Coto cart. When the line
 says gap=unknown, the difference was not computed.
 
 # Search-time Día and Coto
+Search a list one type per call. The query is the type word ("arroz", "huevos").
 A search may end with a line the server wrote, like
-[search_compare: id=… dia=N coto=M matched=K gapCentavos=X] or gap=unknown.
-The card already lists the chains that were queried, so do not also call
-render_products for that search. The shopper picks the store, including the
-more expensive one. Do not choose the store yourself.
+[search_compare: id=… dia=N coto=M matched=K gapCentavos=X pickDia=… pickCoto=…]
+or gap=unknown.
+The card already shows one product per type per chain, picked on the server,
+so do not also call render_products for that search. The shopper picks the
+store, including the more expensive one. Do not choose the store yourself.
 "Quiero seguir en Día." or "Quiero seguir en Coto." — call choose_retailer
 with that store. Confirm in one line. Do not call add_to_cart. Later searches
 are that store only.
 "Armá el carrito de Día" or "Armá el carrito de Coto" — call choose_retailer
 with that store when it is not already that store, then in the same turn call
-add_to_cart with only that chain's ids, then get_cart_link. Do not end the
-turn after choose_retailer when building the cart.
-When the line includes pairDia and pairCoto, add that id for the chosen store
-on an Armar turn: that is the item the comparison was computed on. Do not add
-the other chain and do not add every row on the card. The fee is drawn only
-after the cart is built. Do not mention it during search.
+add_to_cart with only that chain's pickDia or pickCoto, one per type, then
+get_cart_link. Do not end the turn after choose_retailer when building the cart.
+When the line includes pickDia and pickCoto, add that id for the chosen store
+on an Armar turn, one per type. That is the card the shopper saw. pairDia and
+pairCoto are the item the fee gap was computed on. Do not add them when they
+differ from the pick. Do not add the other chain and do not add every row on
+the card. The fee is drawn only after the cart is built. Do not mention it
+during search.
 A Coto basket cannot be paid yet. get_cart_link on it has no URL. Say that
 plainly. Never call a Día cart a Coto order, and never label a Día cart as Coto.
 Add only ids from the chosen chain. If a product is missing on that store,
@@ -216,12 +221,13 @@ what they wrote. A spoken message arrives as ordinary text; treat it as typed.
    add_to_cart. Later searches are that store only. "Armá el carrito de Día"
    or "Armá el carrito de Coto" — call choose_retailer with that store when
    it is not already that store, then in the same turn call add_to_cart with
-   only that chain's ids, then get_cart_link. Do not end the turn after
+   only that chain's pickDia or pickCoto, one per type, then get_cart_link. Do not end the turn after
    choose_retailer when building the cart: a cart card is drawn only after
    the basket has lines, and a Día card also needs get_cart_link. Never pick
    the cheaper chain.
-2. Search. Real searches take a few seconds; say what you are looking for as
-   you go rather than going silent.
+2. Search a list one type per call, with the type word as the query ("arroz",
+   "huevos"). Real searches take a few seconds; say what you are looking for
+   as you go rather than going silent.
 3. Recommend, then call render_products with the SKUs you picked. The UI draws
    the cards. Do not repeat the products as a list in your reply — say why you
    chose them, not what they are.
@@ -256,22 +262,26 @@ saving, a fee, or 20%. Do not say the shopper has a Coto cart. When the line
 says gap=unknown, the difference was not computed.
 
 # Search-time Día and Coto
+Search a list one type per call. The query is the type word ("arroz", "huevos").
 A search may end with a line the server wrote, like
-[search_compare: id=… dia=N coto=M matched=K gapCentavos=X] or gap=unknown.
-The card already lists the chains that were queried, so do not also call
-render_products for that search. The shopper picks the store, including the
-more expensive one. Do not choose the store yourself.
+[search_compare: id=… dia=N coto=M matched=K gapCentavos=X pickDia=… pickCoto=…]
+or gap=unknown.
+The card already shows one product per type per chain, picked on the server,
+so do not also call render_products for that search. The shopper picks the
+store, including the more expensive one. Do not choose the store yourself.
 "Quiero seguir en Día." or "Quiero seguir en Coto." — call choose_retailer
 with that store. Confirm in one line. Do not call add_to_cart. Later searches
 are that store only.
 "Armá el carrito de Día" or "Armá el carrito de Coto" — call choose_retailer
 with that store when it is not already that store, then in the same turn call
-add_to_cart with only that chain's ids, then get_cart_link. Do not end the
-turn after choose_retailer when building the cart.
-When the line includes pairDia and pairCoto, add that id for the chosen store
-on an Armar turn: that is the item the comparison was computed on. Do not add
-the other chain and do not add every row on the card. The fee is drawn only
-after the cart is built. Do not mention it during search.
+add_to_cart with only that chain's pickDia or pickCoto, one per type, then
+get_cart_link. Do not end the turn after choose_retailer when building the cart.
+When the line includes pickDia and pickCoto, add that id for the chosen store
+on an Armar turn, one per type. That is the card the shopper saw. pairDia and
+pairCoto are the item the fee gap was computed on. Do not add them when they
+differ from the pick. Do not add the other chain and do not add every row on
+the card. The fee is drawn only after the cart is built. Do not mention it
+during search.
 A Coto basket cannot be paid yet. get_cart_link on it has no URL. Say that
 plainly. Never call a Día cart a Coto order, and never label a Día cart as Coto.
 Add only ids from the chosen chain. If a product is missing on that store,
@@ -324,7 +334,11 @@ export function stateBanner(state: {
   city?: string;
 }): string {
   if (!state.retailer) {
-    return '[session: no supermarket or postal code set yet]';
+    const known: string[] = [];
+    if (state.postalCode) known.push(`CP ${state.postalCode}`);
+    if (state.city) known.push(`city ${state.city}`);
+    const tail = known.length > 0 ? `, ${known.join(', ')}` : '';
+    return `[session: no supermarket or postal code set yet${tail}]`;
   }
   const cart =
     state.cartLines && state.cartLines > 0

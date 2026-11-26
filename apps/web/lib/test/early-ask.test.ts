@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { STARTERS } from '../agent/prompt.ts';
+import { STARTERS, stateBanner } from '../agent/prompt.ts';
 import {
   CITY_ASK,
+  canonicalCity,
   cityFromAnswer,
   earlyCityAsk,
   EARLY_LOCATION_ASK,
@@ -72,5 +73,35 @@ describe('earlyCityAsk', () => {
     assert.equal(isCityQuestion(CITY_ASK), true);
     rememberCity(state, [{ role: 'assistant', content: [{ type: 'text', text: CITY_ASK }] }], 'Villa Crespo');
     assert.equal(state.city, 'Villa Crespo');
+  });
+
+  it('stores CABA as Ciudad de Buenos Aires and leaves any other city', () => {
+    for (const text of ['caba', 'CABA', 'C.A.B.A.', ' ciudad  de buenos aires ', 'Ciudad de Buenos Aíres']) {
+      assert.equal(canonicalCity(text), 'Ciudad de Buenos Aires', text);
+      assert.equal(cityFromAnswer(text), 'Ciudad de Buenos Aires', text);
+    }
+    assert.equal(cityFromAnswer('Rosario'), 'Rosario');
+    assert.equal(canonicalCity('  Rosario  '), 'Rosario');
+    assert.equal(earlyCityAsk({ hasLocation: false, hasCity: true, knownPostal: true }), null);
+    const state: { city?: string; getCity: () => string | undefined; setCity: (city: string) => void } = {
+      getCity: () => state.city,
+      setCity: (city) => {
+        state.city = city;
+      },
+    };
+    rememberCity(state, [{ role: 'assistant', content: [{ type: 'text', text: CITY_ASK }] }], 'caba');
+    assert.equal(state.city, 'Ciudad de Buenos Aires');
+  });
+
+  it('names a known city and pending postal code before a retailer is set', () => {
+    assert.equal(stateBanner({}), '[session: no supermarket or postal code set yet]');
+    assert.equal(
+      stateBanner({ postalCode: '1425', city: 'Ciudad de Buenos Aires' }),
+      '[session: no supermarket or postal code set yet, CP 1425, city Ciudad de Buenos Aires]',
+    );
+    assert.equal(
+      stateBanner({ retailer: 'dia', postalCode: '1425', city: 'Rosario' }),
+      '[session: dia, CP 1425, Rosario, cart empty]',
+    );
   });
 });

@@ -214,6 +214,45 @@ function lastIndexWhere(blocks: Block[], match: (b: Block, i: number) => boolean
   return -1;
 }
 
+/**
+ * The search cards of the turn that owns `index`, in emit order.
+ *
+ * The turn is the blocks after the user message at or before `index` and
+ * before the next user message, the same boundary the cart dedupe uses.
+ * Only the first search card of that turn gets the row. Later cards of the
+ * turn return `[]`, so the UI draws the row once. A card from an earlier
+ * turn is not included: that row stays as it was drawn.
+ */
+export function searchRowAt(
+  blocks: Block[],
+  index: number,
+): Extract<Block, { kind: 'search_compare' }>[] {
+  let turnStart = -1;
+  for (let i = Math.min(index, blocks.length - 1); i >= 0; i--) {
+    if (blocks[i]?.kind === 'user') {
+      turnStart = i;
+      break;
+    }
+  }
+  let turnEnd = blocks.length;
+  for (let i = turnStart + 1; i < blocks.length; i++) {
+    if (blocks[i]?.kind === 'user') {
+      turnEnd = i;
+      break;
+    }
+  }
+  const row: Extract<Block, { kind: 'search_compare' }>[] = [];
+  let first = -1;
+  for (let i = turnStart + 1; i < turnEnd; i++) {
+    const block = blocks[i];
+    if (block?.kind !== 'search_compare') continue;
+    if (first === -1) first = i;
+    row.push(block);
+  }
+  if (index !== first) return [];
+  return row;
+}
+
 export function applyEvent(state: ChatState, e: UiEvent): ChatState {
   switch (e.t) {
     case 'status':

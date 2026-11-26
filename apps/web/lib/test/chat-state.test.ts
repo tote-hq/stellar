@@ -11,6 +11,7 @@ import {
   omitErrorMessage,
   resetIds,
   retryUser,
+  searchRowAt,
   sendUser,
   type ChatState,
 } from '../chat-state.ts';
@@ -446,5 +447,48 @@ describe('search compare and missing blocks', () => {
     );
     const kinds = s.blocks.map((b) => b.kind);
     assert.deepEqual(kinds, ['user', 'search_compare', 'missing']);
+  });
+});
+
+describe('searchRowAt', () => {
+  it('returns the turn in order at the first index and nothing at the later ones', () => {
+    resetIds();
+    const s = run(
+      [
+        { t: 'search_compare', id: 'a', status: 'ok', query: 'arroz', dia: [], coto: [] },
+        { t: 'search_compare', id: 'b', status: 'ok', query: 'huevos', dia: [], coto: [] },
+      ],
+      sendUser(initialState, 'lista'),
+    );
+    const first = s.blocks.findIndex((b) => b.kind === 'search_compare');
+    const later = s.blocks.findIndex((b, i) => i > first && b.kind === 'search_compare');
+    const row = searchRowAt(s.blocks, first);
+    assert.deepEqual(
+      row.map((b) => b.query),
+      ['arroz', 'huevos'],
+    );
+    assert.deepEqual(searchRowAt(s.blocks, later), []);
+  });
+
+  it('does not reach into the previous turn', () => {
+    resetIds();
+    const firstTurn = run(
+      [{ t: 'search_compare', id: 'a', status: 'ok', query: 'arroz', dia: [], coto: [] }],
+      sendUser(initialState, 'uno'),
+    );
+    const second = run(
+      [{ t: 'search_compare', id: 'b', status: 'ok', query: 'huevos', dia: [], coto: [] }],
+      sendUser(firstTurn, 'dos'),
+    );
+    const earlier = second.blocks.findIndex((b) => b.kind === 'search_compare' && b.query === 'arroz');
+    const current = second.blocks.findIndex((b) => b.kind === 'search_compare' && b.query === 'huevos');
+    assert.deepEqual(
+      searchRowAt(second.blocks, earlier).map((b) => b.query),
+      ['arroz'],
+    );
+    assert.deepEqual(
+      searchRowAt(second.blocks, current).map((b) => b.query),
+      ['huevos'],
+    );
   });
 });

@@ -19,7 +19,7 @@ import {
 import { RETAILER_NAMES } from '../lib/retailers.ts';
 import { errorCode, track, trackLoginStart } from '../lib/analytics';
 import type { ChatImage } from '../lib/chat-image.ts';
-import { canRetry, type Block, type ChatState } from '../lib/chat-state';
+import { canRetry, searchRowAt, type Block, type ChatState } from '../lib/chat-state';
 import { prepareImage } from '../lib/prepare-image';
 import { useDictation, type DictationError } from '../lib/use-dictation';
 import type { Receipt } from '../lib/chat-store.ts';
@@ -86,20 +86,22 @@ function cartNewerThan(blocks: Block[], index: number): boolean {
   return false;
 }
 
-/** Coto, then Día. The newest block narrows to the chain the shopper already picked. */
+/** Coto, then Día. The newest row narrows to the chain the shopper already picked. */
 function sectionChains(
-  block: Extract<Block, { kind: 'search_compare' }>,
+  blocks: Extract<Block, { kind: 'search_compare' }>[],
   newest: boolean,
   order: string | undefined,
 ): Chain[] {
-  const listed = block.chains && block.chains.length > 0 ? block.chains : (['coto', 'dia'] as const);
-  const narrow = newest && (order === 'dia' || order === 'coto') ? [order] : listed;
-  const rank: Chain[] = ['coto', 'dia'];
-  const out: Chain[] = [];
-  for (const chain of rank) {
-    if (narrow.includes(chain)) out.push(chain);
+  const listed = new Set<Chain>();
+  let both = false;
+  for (const block of blocks) {
+    if (!block.chains || block.chains.length === 0) both = true;
+    else for (const chain of block.chains) listed.add(chain);
   }
-  return out;
+  const rank: Chain[] = ['coto', 'dia'];
+  const open = both ? rank : rank.filter((chain) => listed.has(chain));
+  if (newest && (order === 'dia' || order === 'coto')) return open.filter((chain) => chain === order);
+  return open;
 }
 
 function queryBeforeCart(blocks: Block[], cartId: string): string | undefined {
@@ -632,8 +634,11 @@ function ChatCore({
               );
             }
             case 'search_compare': {
+              const row = searchRowAt(state.blocks, index);
+              if (row.length === 0) return null;
               const order = state.snapshot?.order;
               const newest = lastSearchCompare(state.blocks);
+              const rowIsNewest = newest !== undefined && row.some((block) => block.id === newest.id);
               const onChain = (next: Chain, kind: 'choose' | 'build') => {
                 const current = state.cart?.cart;
                 const lines = current?.lines.length ?? 0;
@@ -649,12 +654,12 @@ function ChatCore({
               };
               return (
                 <SearchCompareCard
-                  key={b.id}
-                  block={b}
-                  chains={sectionChains(b, newest?.id === b.id, order)}
+                  key={row[0].id}
+                  blocks={row}
+                  chains={sectionChains(row, rowIsNewest, order)}
                   showChoose={order !== 'dia' && order !== 'coto'}
                   showBuild={
-                    newest?.id === b.id && !state.streaming && !readOnly && !cartNewerThan(state.blocks, index)
+                    rowIsNewest && !state.streaming && !readOnly && !cartNewerThan(state.blocks, index)
                   }
                   buildDisabled={gated}
                   onChoose={(next) => onChain(next, 'choose')}

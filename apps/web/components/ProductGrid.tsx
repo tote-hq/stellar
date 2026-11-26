@@ -1,7 +1,10 @@
 'use client';
 
+import { useState } from 'react';
+
 import type { Product } from '@changuito/mcp/types';
 
+import { cardImageUrl } from '../lib/one-per-type.ts';
 import { uiCopy } from '../lib/ui-copy.ts';
 import { useLang } from './LangProvider';
 
@@ -18,6 +21,7 @@ export function ProductCard({
   wasPrice,
   unit,
   unavailable,
+  kind,
 }: {
   name: string;
   brand?: string;
@@ -28,22 +32,30 @@ export function ProductCard({
   wasPrice?: string;
   unit?: string;
   unavailable?: boolean;
+  /** The type word, shown above the product name on a search card. */
+  kind?: string;
 }) {
   const copy = uiCopy(useLang()).grid;
+  const src = cardImageUrl(imageUrl);
+  const [failedSrc, setFailedSrc] = useState<string | undefined>(undefined);
+  const showImage = src !== undefined && failedSrc !== src;
   return (
     <li className="card">
       <div className="card-img">
-        {imageUrl ? (
+        {showImage ? (
           // Plain <img>: these are the supermarket's own CDN URLs, which
           // change without notice. next/image would need every host
           // whitelisted up front, and a missed one is a broken page.
+          // A load, 404 or CSP failure swaps to the empty square. Both
+          // states sit in this box, so the card does not jump.
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={imageUrl} alt={imageAlt} loading="lazy" />
+          <img src={src} alt={imageAlt} loading="lazy" onError={() => setFailedSrc(src)} />
         ) : (
           <span className="card-img-empty" aria-hidden="true">🛒</span>
         )}
       </div>
       <div className="card-body">
+        {kind ? <span className="card-kind">{kind}</span> : null}
         {brand ? <span className="card-brand">{brand}</span> : null}
         <span className="card-name">{name}</span>
         <span className="card-price">

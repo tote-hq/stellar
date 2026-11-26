@@ -151,6 +151,8 @@ describe('over a real MCP transport', () => {
     assert.notEqual(picked.isError, true);
     assert.match((picked.content as { text?: string }[])[0]?.text ?? '', /add_to_cart/);
     assert.match((picked.content as { text?: string }[])[0]?.text ?? '', /get_cart_link/);
+    assert.match((picked.content as { text?: string }[])[0]?.text ?? '', /pickDia/);
+    assert.match((picked.content as { text?: string }[])[0]?.text ?? '', /pickCoto/);
     assert.equal(c.state.getOrder(), 'coto');
     assert.match(c.state.cotoCartId(), /^coto-/);
     c.state.setCotoLines([{ id: 'coto-1', quantity: 1 }]);
