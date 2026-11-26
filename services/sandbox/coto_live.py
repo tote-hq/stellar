@@ -130,17 +130,17 @@ class LiveCotoDriver:
         await self.page.goto("https://www.coto.com.ar/caja", wait_until="domcontentloaded")
         return {"ok": True}
 
-    async def payment(self, card: dict) -> dict:
-        number = self.page.get_by_label(re.compile(r"N[uú]mero de tarjeta", re.I))
-        if await number.count() == 0:
+    async def payment(self) -> dict:
+        if await self._cvv_visible():
             return {"needs_human": True}
-        await number.first.fill(card["pan"])
-        holder = self.page.get_by_label(re.compile(r"Nombre", re.I))
-        if await holder.count():
-            await holder.first.fill(card.get("holder") or "")
-        exp = self.page.get_by_label(re.compile(r"Vencimiento", re.I))
-        if await exp.count():
-            await exp.first.fill(f"{card.get('exp_month', '')}/{card.get('exp_year', '')}")
+        saved = self.page.get_by_role("radio", name=re.compile(r"tarjeta|visa|master|d[eé]bito|cr[eé]dito", re.I))
+        if await saved.count() == 0:
+            saved = self.page.get_by_role("option", name=re.compile(r"tarjeta|visa|master|d[eé]bito|cr[eé]dito", re.I))
+        if await saved.count() == 0:
+            return {"needs_human": True}
+        await saved.first.click()
+        if await self._cvv_visible():
+            return {"needs_human": True}
         try:
             from checkout import complete_store_recaptcha
             outcome = await complete_store_recaptcha(self.page)
@@ -159,6 +159,13 @@ class LiveCotoDriver:
         if await self._declined():
             return {"declined": True}
         return {"needs_human": True}
+
+    async def _cvv_visible(self) -> bool:
+        field = self.page.get_by_label(re.compile(r"CVV|c[oó]digo de seguridad|security code", re.I))
+        try:
+            return await field.count() > 0 and await field.first.is_visible()
+        except Exception:
+            return False
 
     async def poll(self) -> dict:
         placed = await self._order_id()
@@ -200,7 +207,7 @@ class LiveCotoDriver:
         return "rechazad" in text or "no se pudo cobrar" in text
 
 
-async def run_live(job, *, user: str, password: str, card: dict, token: str, origin: str) -> dict:
+async def run_live(job, *, user: str, password: str, token: str, origin: str) -> dict:
     from playwright.async_api import async_playwright
 
     async with async_playwright() as playwright:
@@ -214,7 +221,6 @@ async def run_live(job, *, user: str, password: str, card: dict, token: str, ori
                 now_ms=lambda: int(time.time() * 1000),
                 sleep=asyncio.sleep,
                 log=lambda line: print(line, flush=True),
-                card=card,
                 token=token,
                 origin=origin,
             )
