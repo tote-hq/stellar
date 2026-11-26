@@ -8,6 +8,7 @@ import { starters } from '../lib/agent/prompt';
 import { cotoPayTarget } from '../lib/checkout/coto-real.ts';
 import { composerControls } from '../lib/composer.ts';
 import {
+  buildCartMessage,
   choiceMessage,
   confirmSwitchMessage,
   dropMessage,
@@ -37,9 +38,8 @@ import { uiCopy } from '../lib/ui-copy.ts';
 import { useChat } from '../lib/use-chat';
 import { useWallet } from '../lib/use-wallet.ts';
 import { CartCard } from './CartCard';
-import { ComparisonCard } from './ComparisonCard';
 import { Modal } from './Modal';
-import { MissingCard, SearchCompareCard } from './SearchCompareCard';
+import { CompareCloseTable, MissingCard, SearchCompareCard } from './SearchCompareCard';
 import { useLang } from './LangProvider';
 import { useNetwork } from './NetworkProvider';
 import { CameraIcon, ImageIcon, MicIcon, RetryIcon } from './icons';
@@ -71,6 +71,54 @@ const VOICE_NOTE: Record<DictationError, 'voiceUnsupported' | 'voiceDenied' | 'v
  * once a cart is already the newest thing on screen — pointing at an order
  * that is already there is the card's job.
  */
+function lastSearchCompare(blocks: Block[]): Extract<Block, { kind: 'search_compare' }> | undefined {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i];
+    if (block?.kind === 'search_compare') return block;
+  }
+  return undefined;
+}
+
+function cartNewerThan(blocks: Block[], index: number): boolean {
+  for (let i = index + 1; i < blocks.length; i++) {
+    if (blocks[i]?.kind === 'cart') return true;
+  }
+  return false;
+}
+
+/** Coto, then Día. The newest block narrows to the chain the shopper already picked. */
+function sectionChains(
+  block: Extract<Block, { kind: 'search_compare' }>,
+  newest: boolean,
+  order: string | undefined,
+): Chain[] {
+  const listed = block.chains && block.chains.length > 0 ? block.chains : (['coto', 'dia'] as const);
+  const narrow = newest && (order === 'dia' || order === 'coto') ? [order] : listed;
+  const rank: Chain[] = ['coto', 'dia'];
+  const out: Chain[] = [];
+  for (const chain of rank) {
+    if (narrow.includes(chain)) out.push(chain);
+  }
+  return out;
+}
+
+function queryBeforeCart(blocks: Block[], cartId: string): string | undefined {
+  let cartAt = -1;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i];
+    if (block?.kind === 'cart' && block.cart.cartId === cartId) {
+      cartAt = i;
+      break;
+    }
+  }
+  const end = cartAt === -1 ? blocks.length : cartAt;
+  for (let i = end - 1; i >= 0; i--) {
+    const block = blocks[i];
+    if (block?.kind === 'search_compare' && block.query) return block.query;
+  }
+  return undefined;
+}
+
 function offerBuildCart(blocks: Block[], streaming: boolean, readOnly: boolean): boolean {
   if (streaming || readOnly) return false;
   let products = -1;
@@ -507,7 +555,7 @@ function ChatCore({
       >
         {state.blocks.length === 0 ? <Greeting onPick={submit} /> : null}
 
-        {state.blocks.map((b) => {
+        {state.blocks.map((b, index) => {
           switch (b.kind) {
             case 'user':
               return (
@@ -583,26 +631,37 @@ function ChatCore({
                 />
               );
             }
-            case 'search_compare':
+            case 'search_compare': {
+              const order = state.snapshot?.order;
+              const newest = lastSearchCompare(state.blocks);
+              const onChain = (next: Chain, kind: 'choose' | 'build') => {
+                const current = state.cart?.cart;
+                const lines = current?.lines.length ?? 0;
+                if (
+                  current &&
+                  needsSwitchConfirm({ retailer: current.retailer, lines }, next) &&
+                  (current.retailer === 'dia' || current.retailer === 'coto')
+                ) {
+                  setSwitchAsk({ from: current.retailer, to: next });
+                  return;
+                }
+                submit(kind === 'choose' ? choiceMessage(next) : buildCartMessage(next));
+              };
               return (
                 <SearchCompareCard
                   key={b.id}
                   block={b}
-                  onChoose={(next) => {
-                    const current = state.cart?.cart;
-                    const lines = current?.lines.length ?? 0;
-                    if (
-                      current &&
-                      needsSwitchConfirm({ retailer: current.retailer, lines }, next) &&
-                      (current.retailer === 'dia' || current.retailer === 'coto')
-                    ) {
-                      setSwitchAsk({ from: current.retailer, to: next });
-                      return;
-                    }
-                    submit(choiceMessage(next));
-                  }}
+                  chains={sectionChains(b, newest?.id === b.id, order)}
+                  showChoose={order !== 'dia' && order !== 'coto'}
+                  showBuild={
+                    newest?.id === b.id && !state.streaming && !readOnly && !cartNewerThan(state.blocks, index)
+                  }
+                  buildDisabled={gated}
+                  onChoose={(next) => onChain(next, 'choose')}
+                  onBuild={(next) => onChain(next, 'build')}
                 />
               );
+            }
             case 'missing':
               return (
                 <MissingCard
@@ -623,6 +682,21 @@ function ChatCore({
                   paying={paying !== null}
                   address={address}
                   location={state.snapshot?.location}
+                  query={queryBeforeCart(state.blocks, b.cartId)}
+                  postalCode={state.snapshot?.location?.postalCode}
+                  onChoose={(next) => {
+                    const current = state.cart?.cart;
+                    const lines = current?.lines.length ?? 0;
+                    if (
+                      current &&
+                      needsSwitchConfirm({ retailer: current.retailer, lines }, next) &&
+                      (current.retailer === 'dia' || current.retailer === 'coto')
+                    ) {
+                      setSwitchAsk({ from: current.retailer, to: next });
+                      return;
+                    }
+                    submit(choiceMessage(next));
+                  }}
                   onPay={(which, cart, handoffUrl, receiptLines, acceptedAlternatives) => {
                     setPayLock(which);
                     payOpened.current = false;
@@ -977,6 +1051,9 @@ function DualCheckout({
   paying,
   address,
   location,
+  query,
+  postalCode,
+  onChoose,
   onPay,
 }: {
   block: Extract<Block, { kind: 'compare' }>;
@@ -986,6 +1063,9 @@ function DualCheckout({
   paying: boolean;
   address: string | null | undefined;
   location: unknown;
+  query?: string;
+  postalCode?: string;
+  onChoose: (retailer: Chain) => void;
   onPay: (
     which: 'dia' | 'coto',
     cart: Cart,
@@ -1019,7 +1099,7 @@ function DualCheckout({
   };
   return (
     <div className="compare-pay">
-      <ComparisonCard block={block} />
+      <CompareCloseTable block={block} query={query} postalCode={postalCode} onChoose={onChoose} />
       <DualPay
         block={block}
         blocks={blocks}

@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import handler from "vinext/server/fetch-handler";
 
 import { applyContractIdBindings } from "./lib/contract-ids.ts";
+import { runInDbRequest } from "./lib/db.ts";
 import { proxyPostHog } from "./lib/posthog-proxy.ts";
 import { applyRpcUrlBindings } from "./lib/rpc-url.ts";
 
@@ -22,14 +23,15 @@ export default {
     const url = binding?.connectionString?.trim();
     if (url) {
       process.env.DATABASE_URL = url;
-      // New id per request so the cached Postgres client is not reused after
-      // Hyperdrive has closed the previous socket.
+      // Still stamped so a host with no request store does not reuse a socket
+      // Hyperdrive has already closed. On this Worker the store below is what
+      // keeps two overlapping requests from ending each other's client.
       process.env.CHG_DB_REQUEST = crypto.randomUUID();
     }
     // Contract ids are runtime bindings. Copy them before the handler reads
     // them, and do not bake the values into this file.
     applyContractIdBindings(cfEnv);
     applyRpcUrlBindings(cfEnv);
-    return fetchHandler.fetch(request, cfEnv, ctx);
+    return runInDbRequest(() => fetchHandler.fetch(request, cfEnv, ctx));
   },
 };

@@ -16,8 +16,10 @@
  * statements, and the failure is a confusing "prepared statement already
  * exists" on the *second* request rather than the first.
  *
- * `max: 1` because a lambda handles one request at a time; a larger pool just
- * holds connections open against the pooler's own limit.
+ * `max: 1` because one request needs one connection. A Worker isolate can
+ * run two requests at once, so the client is scoped to the request
+ * (`runInDbRequest`) rather than shared. A larger pool would only hold
+ * connections open against the pooler's own limit.
  *
  * The connection is created lazily and cached on the module. A fresh clone with
  * no DATABASE_URL should still boot and still serve the chat half of the app —
@@ -25,6 +27,8 @@
  * here throws at import time. It throws when a money path actually needs a
  * database and there is none, which is a state that must be loud.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 import postgres from 'postgres';
 
 import type { NetworkId } from './deployments.ts';
@@ -34,6 +38,46 @@ export type Sql = ReturnType<typeof postgres>;
 let cached: Sql | undefined;
 let cachedUrl: string | undefined;
 let cachedRequest: string | undefined;
+
+type OpenClient = (url: string) => Sql;
+
+function defaultOpen(url: string): Sql {
+  return postgres(url, {
+    max: 1,
+    prepare: false,
+    fetch_types: false,
+    idle_timeout: 20,
+    connect_timeout: 10,
+    // A serverless function is killed, not shut down. Logging a fetch of a
+    // closed connection as an error would be noise on every cold start.
+    onnotice: () => {},
+  });
+}
+
+let openClient: OpenClient = defaultOpen;
+
+/** Tests only: replace the constructor that opens a client. */
+export function __setPostgresFactoryForTests(next?: OpenClient): void {
+  openClient = next ?? defaultOpen;
+}
+
+/**
+ * One Postgres client for the request that is running `fn`.
+ *
+ * `process.env` is per isolate. Two overlapping requests used to share it,
+ * and the second `CHG_DB_REQUEST` made `db()` end the client the first
+ * request was still querying. The store is the request. A call with no
+ * store — tests, `next dev` — keeps the module cache below.
+ *
+ * The client is not closed when `fn` returns. `/api/chat` returns a stream
+ * and keeps writing after that, including the archive, and closing here
+ * would cut that write. An idle client closes itself (`idle_timeout`).
+ */
+const requestDb = new AsyncLocalStorage<{ client?: Sql }>();
+
+export function runInDbRequest<T>(fn: () => T): T {
+  return requestDb.run({}, fn);
+}
 
 /** Whether this deployment has a database at all. */
 export function hasDatabase(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -46,12 +90,30 @@ export function hasDatabase(env: NodeJS.ProcessEnv = process.env): boolean {
  * DATABASE_URL is the transaction pooler (6543) on a lambda. DIRECT_URL
  * (5432) is for migrations only and is deliberately not read here.
  * On the Worker, worker.ts copies the Hyperdrive binding's connection
- * string onto DATABASE_URL and stamps CHG_DB_REQUEST for this request.
- * Hyperdrive closes the socket when the request ends, so the next request
- * opens a new client instead of reusing a dead one. A fake installed by
+ * string onto DATABASE_URL, stamps CHG_DB_REQUEST, and runs the request
+ * inside `runInDbRequest`. Inside that store each request keeps its own
+ * client and never ends another request's. Outside it — tests, `next dev` —
+ * a new CHG_DB_REQUEST still replaces the module cache, because Hyperdrive
+ * closes the previous socket when a request ends. A fake installed by
  * resetDb() has no url and stays in place.
  */
 export function db(env: NodeJS.ProcessEnv = process.env): Sql {
+  const scope = requestDb.getStore();
+  if (scope) return dbScoped(scope, env);
+  return dbCached(env);
+}
+
+function dbScoped(scope: { client?: Sql }, env: NodeJS.ProcessEnv): Sql {
+  if (scope.client) return scope.client;
+  const url = (env.DATABASE_URL ?? '').trim();
+  if (!url) {
+    throw new Error('DATABASE_URL is not set — the order tables are unreachable.');
+  }
+  scope.client = openClient(url);
+  return scope.client;
+}
+
+function dbCached(env: NodeJS.ProcessEnv): Sql {
   const url = (env.DATABASE_URL ?? '').trim();
   const requestId = env.CHG_DB_REQUEST;
   if (cached && cachedUrl === undefined) return cached;
@@ -65,16 +127,7 @@ export function db(env: NodeJS.ProcessEnv = process.env): Sql {
   if (cached && cachedUrl !== undefined) void cached.end({ timeout: 1 });
   cachedUrl = url;
   cachedRequest = requestId;
-  cached = postgres(url, {
-    max: 1,
-    prepare: false,
-    fetch_types: false,
-    idle_timeout: 20,
-    connect_timeout: 10,
-    // A serverless function is killed, not shut down. Logging a fetch of a
-    // closed connection as an error would be noise on every cold start.
-    onnotice: () => {},
-  });
+  cached = openClient(url);
   return cached;
 }
 

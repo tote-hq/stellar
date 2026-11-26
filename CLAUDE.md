@@ -352,20 +352,26 @@ the message, which is what used to happen to every message.
 
 When `chat_dual_compare` is on, `retailer_search.enabled.coto` is true, and the
 session retailer is Día, `search_products` also queries the Coto catalog
-in-process, in parallel with the Día call, with a 10s cap. The Coto lookup is
-not an MCP call and gets no trail row (§3). The shopper picks the chain with
-`choose_retailer`. The model cannot `add_to_cart` before that choice, and it
-cannot pick the cheaper chain: the chosen store has to be named in the
-shopper's message or in the assistant question just before it.
+in-process, in parallel with the Día call, with a 10s cap, until the shopper
+picks a chain. After that, a search queries only the chosen chain. A Coto
+search does not call Día and gets no trail row (§3). The Coto lookup on a
+dual search is not an MCP call and gets no trail row either. The shopper
+picks the chain with `choose_retailer`. The model cannot `add_to_cart` before
+that choice, and it cannot pick the cheaper chain: the chosen store has to be
+named in the shopper's message or in the assistant question just before it.
 
 `choose_retailer` only records the chain. It does not put lines in the basket,
 and `autoRenderCart` draws nothing until there are lines (a Día card also
-needs `get_cart_link`). The click "Pedir en Día" is the sentence "Quiero pedir
-en Día." The prompt, the tool description and the tool result all tell the
-model to `add_to_cart` and `get_cart_link` in that same turn. Stopping after
-`choose_retailer` is how a turn ended with the compare card still on screen
-and no cart. The compared item is `pairDia` / `pairCoto` on the
-`search_compare` line, not every row on the card.
+needs `get_cart_link`). The click "Seguir en Día" is the sentence "Quiero
+seguir en Día." It calls `choose_retailer` and does not `add_to_cart`. Later
+searches query that chain only. "Armar carrito" in a section is "Armá el
+carrito de Día …" (or Coto). That sentence calls `choose_retailer` if the
+order is not already that chain, then `add_to_cart` and `get_cart_link` in
+the same turn. The prompt, the tool description and the tool result say the
+same thing. Stopping after `choose_retailer` on an Armar turn leaves the
+compare card on screen and no cart. The compared item is `pairDia` /
+`pairCoto` on the `search_compare` line, not every row on the card. The gap
+and the 20% fee are drawn on the close table, after a cart exists.
 
 A Coto basket is lines held on the session snapshot (`order`, `coto`) and
 priced from `CotoCatalog.getProduct` on every read. The id is a stable

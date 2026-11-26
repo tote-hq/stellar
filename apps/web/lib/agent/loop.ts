@@ -16,7 +16,7 @@ import { anthropicProvider } from './providers/anthropic';
 import { openaiProvider } from './providers/openai';
 import type { HopResult } from './providers/types';
 import { freezeAllowed, freezeCotoReal } from '../checkout/coto-real.ts';
-import { beginDualSearch, dualSearchOn } from './search-compare';
+import { beginChainSearch, beginDualSearch, chainChoiceOn, searchMode } from './search-compare';
 import {
   autoRenderCart,
   cartWriteNeedsChoice,
@@ -358,13 +358,13 @@ export async function runTurn(
     const retailers = await getRetailerSearch();
     const compareOn = await chatDualCompareEnabled();
     const demoOn = await chatDualCheckoutDemoEnabled();
-    const dualNow = () =>
-      dualSearchOn({
+    const choiceNow = () =>
+      chainChoiceOn({
         compareOn,
         cotoEnabled: retailers.enabled.coto === true,
         retailer: session.state.getLocation()?.retailer,
       });
-    const hopTools = dualNow() ? tools : tools.filter((tool) => tool.name !== 'choose_retailer');
+    const hopTools = choiceNow() ? tools : tools.filter((tool) => tool.name !== 'choose_retailer');
 
     // Whatever this throws is the end of the turn: there is nothing left to
     // fall back to, and the route turns it into one message.
@@ -415,15 +415,28 @@ export async function runTurn(
       // data the user is already looking at: "mostrando el carrito ✓" sits
       // above the cart it is describing, and a ✗ reports a failure whose only
       // consequence is that the model tries again half a second later.
-      const traced = !RENDER_TOOL_NAMES.has(use.name);
+      const order = session.state.getOrder();
+      const mode = searchMode({
+        compareOn,
+        cotoEnabled: retailers.enabled.coto === true,
+        retailer: session.state.getLocation()?.retailer,
+        order,
+      });
+      // A Coto-only search is in-process. It does not call Día and gets no trail row.
+      const onlyCoto = use.name === 'search_products' && mode === 'coto';
+      const traced = !RENDER_TOOL_NAMES.has(use.name) && !onlyCoto;
       if (traced) emit({ t: 'tool_start', id: use.id, name: use.name });
       const t = Date.now();
-      const dual = dualNow();
+      const dual = mode !== 'off';
+      const query = typeof (use.input as { query?: unknown } | null)?.query === 'string'
+        ? (use.input as { query: string }).query
+        : '';
+      const postalCode = session.state.getLocation()?.postalCode;
 
       let result: Anthropic.ToolResultBlockParam;
       const refused = refusedCartCall(use, {
         dual,
-        order: session.state.getOrder(),
+        order,
         userText,
         priorAssistant,
         cache: turn.cache,
@@ -433,25 +446,41 @@ export async function runTurn(
         result = refused;
       } else if (RENDER_TOOL_NAMES.has(use.name)) {
         result = runRenderTool(turn.cache, use, emit);
+      } else if (onlyCoto) {
+        const note = await beginChainSearch({
+          chain: 'coto',
+          id: use.id,
+          query,
+          postalCode,
+          cache: turn.cache,
+          emit,
+        }).finish();
+        result = { type: 'tool_result', tool_use_id: use.id, content: note };
       } else {
-        const query = typeof (use.input as { query?: unknown } | null)?.query === 'string'
-          ? (use.input as { query: string }).query
-          : '';
-        const dualSearch =
-          use.name === 'search_products' && dual
-            ? beginDualSearch({
+        const chainSearch =
+          use.name === 'search_products' && mode === 'dia'
+            ? beginChainSearch({
+                chain: 'dia',
                 id: use.id,
                 query,
-                postalCode: session.state.getLocation()?.postalCode,
+                postalCode,
                 cache: turn.cache,
                 emit,
               })
-            : undefined;
+            : use.name === 'search_products' && mode === 'both'
+              ? beginDualSearch({
+                  id: use.id,
+                  query,
+                  postalCode,
+                  cache: turn.cache,
+                  emit,
+                })
+              : undefined;
         const call = await callMcpTool(session.client, use);
         rememberStructured(turn.cache, call.structured);
         result = call.block;
-        if (dualSearch) {
-          const note = await dualSearch.finish({
+        if (chainSearch) {
+          const note = await chainSearch.finish({
             products: productsOf(call.structured),
             failed: call.block.is_error === true,
           });

@@ -3,7 +3,9 @@
  *
  * The Coto lookup starts in the same turn as the Día MCP call and never gets
  * a trail row: it is in-process. Prices on the card come from the two catalogs.
- * The fee is 20% of the absolute gap. Nothing here writes a cart.
+ * Once a chain is chosen, only that chain is queried. The fee stays on the
+ * model note for a dual search; the shopper sees it on the close table.
+ * Nothing here writes a cart.
  */
 import type { CotoSearcher } from '@changuito/mcp/compare';
 import type { Product } from '@changuito/mcp/types';
@@ -21,12 +23,35 @@ const ars = new Intl.NumberFormat('es-AR', {
   minimumFractionDigits: 2,
 });
 
-export function dualSearchOn(input: {
+export function chainChoiceOn(input: {
   compareOn: boolean;
   cotoEnabled: boolean;
   retailer?: string;
 }): boolean {
   return input.compareOn === true && input.cotoEnabled === true && input.retailer === 'dia';
+}
+
+/** Both catalogs, and only before the shopper has picked a chain. */
+export function dualSearchOn(input: {
+  compareOn: boolean;
+  cotoEnabled: boolean;
+  retailer?: string;
+  order?: string;
+}): boolean {
+  return chainChoiceOn(input) && input.order === undefined;
+}
+
+/** Which catalogs `search_products` may query on this turn. */
+export function searchMode(input: {
+  compareOn: boolean;
+  cotoEnabled: boolean;
+  retailer?: string;
+  order?: string;
+}): 'both' | 'dia' | 'coto' | 'off' {
+  if (!chainChoiceOn(input)) return 'off';
+  if (input.order === 'dia') return 'dia';
+  if (input.order === 'coto') return 'coto';
+  return 'both';
 }
 
 export function searchCompareNote(args: {
@@ -54,13 +79,69 @@ function recordSearch(cache: RenderCache, query: string, retailer: 'dia' | 'coto
   cache.searches = searches;
 }
 
+function cardItem(src: {
+  id: string;
+  name: string;
+  shelfCentavos: number;
+  available: boolean;
+  brand?: string;
+  imageUrl?: string;
+  unitMultiplier?: number;
+  measurementUnit?: string;
+}): SearchCompareItem {
+  const item: SearchCompareItem = {
+    id: src.id,
+    name: src.name,
+    shelfCentavos: src.shelfCentavos,
+    available: src.available,
+  };
+  if (src.brand) item.brand = src.brand;
+  if (src.imageUrl) item.imageUrl = src.imageUrl;
+  if (typeof src.unitMultiplier === 'number' && src.unitMultiplier > 0 && src.measurementUnit) {
+    item.unitMultiplier = src.unitMultiplier;
+    item.measurementUnit = src.measurementUnit;
+  }
+  return item;
+}
+
 function diaItems(products: readonly Product[]): SearchCompareItem[] {
   const items: SearchCompareItem[] = [];
   for (const product of products) {
     const shelfCentavos = product.price?.centavos;
     if (!product.available || !product.skuId || !product.name) continue;
     if (!Number.isSafeInteger(shelfCentavos) || shelfCentavos <= 0) continue;
-    items.push({ id: product.skuId, name: product.name, shelfCentavos, available: true });
+    items.push(
+      cardItem({
+        id: product.skuId,
+        name: product.name,
+        shelfCentavos,
+        available: true,
+        brand: product.brand,
+        imageUrl: product.imageUrl,
+        unitMultiplier: product.unitMultiplier,
+        measurementUnit: product.measurementUnit,
+      }),
+    );
+  }
+  return items;
+}
+
+function cotoItems(
+  hits: ReadonlyArray<{ id: string; name: string; shelfCentavos: number; available: boolean; brand?: string; imageUrl?: string }>,
+): SearchCompareItem[] {
+  const items: SearchCompareItem[] = [];
+  for (const hit of hits) {
+    if (!hit.available || hit.shelfCentavos <= 0) continue;
+    items.push(
+      cardItem({
+        id: hit.id,
+        name: hit.name,
+        shelfCentavos: hit.shelfCentavos,
+        available: true,
+        brand: hit.brand,
+        imageUrl: hit.imageUrl,
+      }),
+    );
   }
   return items;
 }
@@ -130,14 +211,7 @@ export function beginDualSearch(args: {
       }
 
       const diaView = dia.failed ? [] : diaItems(dia.products);
-      const cotoView: SearchCompareItem[] = folded.coto
-        .filter((hit) => hit.available && hit.shelfCentavos > 0)
-        .map((hit) => ({
-          id: hit.id,
-          name: hit.name,
-          shelfCentavos: hit.shelfCentavos,
-          available: true,
-        }));
+      const cotoView = cotoItems(folded.coto);
       const feeCentavos =
         folded.gapCentavos === undefined ? undefined : feeCentavosOf(folded.gapCentavos);
 
@@ -191,6 +265,117 @@ export function beginDualSearch(args: {
         gapCentavos: folded.gapCentavos,
         ...(folded.pair ? { pair: folded.pair } : {}),
         hits: cotoView,
+      });
+    },
+  };
+}
+
+type ChainSearch = {
+  finish(dia?: { products: readonly Product[]; failed: boolean }): Promise<string>;
+};
+
+/**
+ * One chain, after the shopper has chosen it. Same emit and cache rules as
+ * `beginDualSearch`. Día does not start a Coto lookup. Coto does not call Día.
+ */
+export function beginChainSearch(args: {
+  chain: 'dia' | 'coto';
+  id: string;
+  query: string;
+  postalCode?: string;
+  cache: RenderCache;
+  emit: (event: UiEvent) => void;
+  timeoutMs?: number;
+  searcher?: CotoSearcher;
+}): ChainSearch {
+  const chains = [args.chain] as ('dia' | 'coto')[];
+  args.emit({
+    t: 'search_compare',
+    id: args.id,
+    status: 'pending',
+    query: args.query,
+    ...(args.postalCode ? { postalCode: args.postalCode } : {}),
+    chains,
+  });
+
+  if (args.chain === 'coto') {
+    const searcher = args.searcher ? Promise.resolve(args.searcher) : liveSearcher();
+    const lookup = searcher.then((ready) => cappedLookup(args.query, ready, args.timeoutMs ?? COTO_MS));
+    return {
+      async finish() {
+        const { assembleSearchCompare } = await import('@changuito/mcp/compare');
+        let folded;
+        try {
+          folded = assembleSearchCompare({
+            diaProducts: [],
+            diaFailed: false,
+            coto: await lookup,
+          });
+        } catch {
+          folded = assembleSearchCompare({
+            diaProducts: [],
+            diaFailed: false,
+            coto: { ok: false, reason: 'error' },
+          });
+        }
+        const cotoView = cotoItems(folded.coto);
+        const cotoCache = { ...(args.cache.coto ?? {}) };
+        for (const hit of folded.coto) {
+          cotoCache[hit.id] = {
+            id: hit.id,
+            name: hit.name,
+            shelfCentavos: hit.shelfCentavos,
+            available: hit.available,
+            ...(hit.ean ? { ean: hit.ean } : {}),
+            ...(hit.brand ? { brand: hit.brand } : {}),
+            ...(hit.url ? { url: hit.url } : {}),
+            ...(hit.imageUrl ? { imageUrl: hit.imageUrl } : {}),
+          };
+        }
+        args.cache.coto = cotoCache;
+        recordSearch(args.cache, args.query, 'coto', cotoView.length);
+        args.emit({
+          t: 'search_compare',
+          id: args.id,
+          status: folded.status,
+          query: args.query,
+          ...(args.postalCode ? { postalCode: args.postalCode } : {}),
+          dia: [],
+          coto: cotoView,
+          chains,
+        });
+        return searchCompareNote({
+          id: args.id,
+          dia: 0,
+          coto: cotoView.length,
+          matched: 0,
+          hits: cotoView,
+        });
+      },
+    };
+  }
+
+  return {
+    async finish(dia) {
+      const failed = dia?.failed === true;
+      const diaView = failed || !dia ? [] : diaItems(dia.products);
+      recordSearch(args.cache, args.query, 'dia', diaView.length);
+      args.emit({
+        t: 'search_compare',
+        id: args.id,
+        status: failed ? 'dia_error' : 'ok',
+        query: args.query,
+        ...(args.postalCode ? { postalCode: args.postalCode } : {}),
+        dia: diaView,
+        coto: [],
+        chains,
+      });
+      return searchCompareNote({
+        id: args.id,
+        dia: diaView.length,
+        coto: 0,
+        matched: 0,
+        hits: diaView,
       });
     },
   };

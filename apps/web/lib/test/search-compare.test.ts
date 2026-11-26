@@ -7,7 +7,14 @@ import type { Product } from '@changuito/mcp/types';
 import { feeCentavosOf } from '../checkout/compare-fee.ts';
 import type { UiEvent } from '../protocol.ts';
 import { emptyCache } from '../agent/render-tools.ts';
-import { beginDualSearch, dualSearchOn, searchCompareNote } from '../agent/search-compare.ts';
+import {
+  beginChainSearch,
+  beginDualSearch,
+  chainChoiceOn,
+  dualSearchOn,
+  searchCompareNote,
+  searchMode,
+} from '../agent/search-compare.ts';
 
 function dia(centavos: number, ean = '7790001'): Product {
   return {
@@ -62,6 +69,13 @@ describe('dual search', () => {
     assert.equal(dualSearchOn({ compareOn: true, cotoEnabled: true, retailer: 'jumbo' }), false);
     assert.equal(dualSearchOn({ compareOn: false, cotoEnabled: true, retailer: 'dia' }), false);
     assert.equal(dualSearchOn({ compareOn: true, cotoEnabled: false, retailer: 'dia' }), false);
+    assert.equal(dualSearchOn({ compareOn: true, cotoEnabled: true, retailer: 'dia', order: 'dia' }), false);
+    assert.equal(dualSearchOn({ compareOn: true, cotoEnabled: true, retailer: 'dia', order: 'coto' }), false);
+    assert.equal(chainChoiceOn({ compareOn: true, cotoEnabled: true, retailer: 'dia' }), true);
+    assert.equal(searchMode({ compareOn: true, cotoEnabled: true, retailer: 'dia' }), 'both');
+    assert.equal(searchMode({ compareOn: true, cotoEnabled: true, retailer: 'dia', order: 'dia' }), 'dia');
+    assert.equal(searchMode({ compareOn: true, cotoEnabled: true, retailer: 'dia', order: 'coto' }), 'coto');
+    assert.equal(searchMode({ compareOn: true, cotoEnabled: true, retailer: 'jumbo', order: 'coto' }), 'off');
   });
 
   it('emits pending before the result and does not write a cart', async () => {
@@ -162,5 +176,73 @@ describe('dual search', () => {
     await done;
     assert.equal(cache.cart, undefined);
     assert.equal(dualSearchOn({ compareOn: true, cotoEnabled: true, retailer: 'dia' }), true);
+  });
+
+  it('carries card fields and keeps a Día order off Coto', async () => {
+    const product = dia(2000);
+    product.imageUrl = 'https://img.test/leche.jpg';
+    product.unitMultiplier = 1;
+    product.measurementUnit = 'lt';
+    const events: UiEvent[] = [];
+    const cache = emptyCache();
+    const search = beginChainSearch({
+      chain: 'dia',
+      id: 'only-dia',
+      query: 'leche',
+      cache,
+      emit: (event) => events.push(event),
+      searcher: {
+        async search() {
+          throw new Error('coto should not be queried');
+        },
+      },
+    });
+    await search.finish({ products: [product], failed: false });
+    const finished = events[1];
+    if (finished?.t !== 'search_compare' || finished.status === 'pending') {
+      assert.fail('expected a finished día search');
+    }
+    assert.deepEqual(finished.chains, ['dia']);
+    assert.equal(finished.coto.length, 0);
+    assert.equal(finished.gapCentavos, undefined);
+    assert.equal(finished.dia[0]?.brand, 'Serenisima');
+    assert.equal(finished.dia[0]?.imageUrl, 'https://img.test/leche.jpg');
+    assert.equal(finished.dia[0]?.unitMultiplier, 1);
+    assert.equal(finished.dia[0]?.measurementUnit, 'lt');
+    assert.equal(cache.searches?.some((row) => row.retailer === 'coto'), false);
+  });
+
+  it('queries Coto only and does not invent a Día row', async () => {
+    const hit = coto(1500);
+    hit.imageUrl = 'https://img.test/coto.jpg';
+    let calls = 0;
+    const events: UiEvent[] = [];
+    const cache = emptyCache();
+    const search = beginChainSearch({
+      chain: 'coto',
+      id: 'only-coto',
+      query: 'leche',
+      cache,
+      emit: (event) => events.push(event),
+      searcher: {
+        async search() {
+          calls += 1;
+          return [hit];
+        },
+      },
+    });
+    await search.finish();
+    assert.equal(calls, 1);
+    const finished = events[1];
+    if (finished?.t !== 'search_compare' || finished.status === 'pending') {
+      assert.fail('expected a finished coto search');
+    }
+    assert.deepEqual(finished.chains, ['coto']);
+    assert.equal(finished.dia.length, 0);
+    assert.equal(finished.coto[0]?.brand, 'Serenisima');
+    assert.equal(finished.coto[0]?.imageUrl, 'https://img.test/coto.jpg');
+    assert.equal(finished.coto[0]?.unitMultiplier, undefined);
+    assert.equal(cache.coto?.c1?.imageUrl, 'https://img.test/coto.jpg');
+    assert.equal(cache.searches?.some((row) => row.retailer === 'dia'), false);
   });
 });

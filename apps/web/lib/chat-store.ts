@@ -257,12 +257,19 @@ function packCompare(b: Extract<Block, { kind: 'compare' }>): Extract<Block, { k
 }
 
 function packSearchItem(item: SearchCompareItem): SearchCompareItem {
-  return {
+  const packed: SearchCompareItem = {
     id: item.id,
     name: item.name,
     shelfCentavos: item.shelfCentavos,
     available: item.available,
   };
+  if (item.brand) packed.brand = item.brand;
+  if (item.imageUrl) packed.imageUrl = item.imageUrl;
+  if (typeof item.unitMultiplier === 'number' && item.unitMultiplier > 0 && item.measurementUnit) {
+    packed.unitMultiplier = item.unitMultiplier;
+    packed.measurementUnit = item.measurementUnit;
+  }
+  return packed;
 }
 
 function packSearchCompare(
@@ -280,6 +287,7 @@ function packSearchCompare(
   if (b.postalCode !== undefined) out.postalCode = b.postalCode;
   if (b.gapCentavos !== undefined) out.gapCentavos = b.gapCentavos;
   if (b.feeCentavos !== undefined) out.feeCentavos = b.feeCentavos;
+  if (b.chains && b.chains.length > 0) out.chains = b.chains;
   return out;
 }
 
@@ -491,7 +499,18 @@ function asSearchItem(v: unknown): SearchCompareItem | null {
   const name = str(v.name);
   const shelfCentavos = num(v.shelfCentavos);
   if (id === null || name === null || shelfCentavos === null || shelfCentavos <= 0) return null;
-  return { id, name, shelfCentavos, available: v.available === true };
+  const item: SearchCompareItem = { id, name, shelfCentavos, available: v.available === true };
+  const brand = str(v.brand);
+  if (brand !== null) item.brand = brand;
+  const imageUrl = str(v.imageUrl);
+  if (imageUrl !== null) item.imageUrl = imageUrl;
+  const measurementUnit = str(v.measurementUnit);
+  const unitMultiplier = num(v.unitMultiplier);
+  if (measurementUnit !== null && unitMultiplier !== null && unitMultiplier > 0) {
+    item.measurementUnit = measurementUnit;
+    item.unitMultiplier = unitMultiplier;
+  }
+  return item;
 }
 
 function asSearchCompare(v: Record<string, unknown>, id: string): Extract<Block, { kind: 'search_compare' }> | null {
@@ -523,6 +542,10 @@ function asSearchCompare(v: Record<string, unknown>, id: string): Extract<Block,
   if (gapCentavos !== null && gapCentavos >= 0) block.gapCentavos = gapCentavos;
   const feeCentavos = num(v.feeCentavos);
   if (feeCentavos !== null && feeCentavos >= 0) block.feeCentavos = feeCentavos;
+  if (Array.isArray(v.chains)) {
+    const chains = v.chains.filter((chain): chain is 'dia' | 'coto' => chain === 'dia' || chain === 'coto');
+    if (chains.length > 0) block.chains = chains;
+  }
   return block;
 }
 

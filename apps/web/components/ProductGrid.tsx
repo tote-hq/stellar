@@ -6,6 +6,58 @@ import { uiCopy } from '../lib/ui-copy.ts';
 import { useLang } from './LangProvider';
 
 /**
+ * One product card. The grid and the search-compare sections share this markup.
+ * The price string is already formatted by the caller from server data.
+ */
+export function ProductCard({
+  name,
+  brand,
+  imageUrl,
+  imageAlt,
+  price,
+  wasPrice,
+  unit,
+  unavailable,
+}: {
+  name: string;
+  brand?: string;
+  imageUrl?: string;
+  /** Empty when the photo is decorative, the product name when it is the content. */
+  imageAlt: string;
+  price: string;
+  wasPrice?: string;
+  unit?: string;
+  unavailable?: boolean;
+}) {
+  const copy = uiCopy(useLang()).grid;
+  return (
+    <li className="card">
+      <div className="card-img">
+        {imageUrl ? (
+          // Plain <img>: these are the supermarket's own CDN URLs, which
+          // change without notice. next/image would need every host
+          // whitelisted up front, and a missed one is a broken page.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={imageUrl} alt={imageAlt} loading="lazy" />
+        ) : (
+          <span className="card-img-empty" aria-hidden="true">🛒</span>
+        )}
+      </div>
+      <div className="card-body">
+        {brand ? <span className="card-brand">{brand}</span> : null}
+        <span className="card-name">{name}</span>
+        <span className="card-price">
+          {price}
+          {wasPrice ? <s className="card-was">{wasPrice}</s> : null}
+        </span>
+        {unit ? <span className="card-unit">{unit}</span> : null}
+        {unavailable ? <span className="card-oos">{copy.outOfStock}</span> : null}
+      </div>
+    </li>
+  );
+}
+
+/**
  * What the model chose to show, not everything it searched.
  *
  * Every number here comes from `structuredContent`, never from parsing the
@@ -20,35 +72,17 @@ export function ProductGrid({ items, note }: { items: Product[]; note?: string }
       {note ? <p className="grid-note">{note}</p> : null}
       <ul className="grid">
         {items.map((p) => (
-          <li key={`${p.skuId}-${p.sellerId}`} className="card">
-            <div className="card-img">
-              {p.imageUrl ? (
-                // Plain <img>: these are the supermarket's own CDN URLs, which
-                // change without notice. next/image would need every host
-                // whitelisted up front, and a missed one is a broken page.
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={p.imageUrl} alt="" loading="lazy" />
-              ) : (
-                <span className="card-img-empty" aria-hidden="true">🛒</span>
-              )}
-            </div>
-            <div className="card-body">
-              {p.brand ? <span className="card-brand">{p.brand}</span> : null}
-              <span className="card-name">{p.name}</span>
-              <span className="card-price">
-                {p.price.display}
-                {p.listPrice && p.listPrice.centavos > p.price.centavos ? (
-                  <s className="card-was">{p.listPrice.display}</s>
-                ) : null}
-              </span>
-              {p.unitMultiplier && p.measurementUnit ? (
-                <span className="card-unit">
-                  {p.unitMultiplier} {p.measurementUnit}
-                </span>
-              ) : null}
-              {!p.available ? <span className="card-oos">{copy.outOfStock}</span> : null}
-            </div>
-          </li>
+          <ProductCard
+            key={`${p.skuId}-${p.sellerId}`}
+            name={p.name}
+            brand={p.brand}
+            imageUrl={p.imageUrl}
+            imageAlt=""
+            price={p.price.display}
+            wasPrice={p.listPrice && p.listPrice.centavos > p.price.centavos ? p.listPrice.display : undefined}
+            unit={p.unitMultiplier && p.measurementUnit ? `${p.unitMultiplier} ${p.measurementUnit}` : undefined}
+            unavailable={!p.available}
+          />
         ))}
       </ul>
     </section>

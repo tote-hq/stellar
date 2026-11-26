@@ -407,6 +407,34 @@ describe('search compare and missing blocks', () => {
     assert.equal(cards[0]?.kind === 'search_compare' && cards[0].gapCentavos, 200);
   });
 
+  it('keeps card fields and the chains that were queried', () => {
+    resetIds();
+    const done = {
+      t: 'search_compare' as const,
+      id: 'sc2',
+      status: 'ok' as const,
+      query: 'huevos',
+      chains: ['coto'] as ('dia' | 'coto')[],
+      dia: [],
+      coto: [
+        {
+          id: 'c1',
+          name: 'Huevos',
+          shelfCentavos: 800,
+          available: true,
+          brand: 'Coto',
+          imageUrl: 'https://img.test/huevos.jpg',
+        },
+      ],
+    };
+    const s = run([done], sendUser(initialState, 'huevos'));
+    const card = s.blocks.find((b) => b.kind === 'search_compare');
+    assert.equal(card?.kind === 'search_compare' && card.chains?.[0], 'coto');
+    assert.equal(card?.kind === 'search_compare' && card.coto[0]?.brand, 'Coto');
+    assert.equal(card?.kind === 'search_compare' && card.coto[0]?.imageUrl, 'https://img.test/huevos.jpg');
+    assert.equal(card?.kind === 'search_compare' && card.coto[0]?.unitMultiplier, undefined);
+  });
+
   it('appends a missing block after the search card', () => {
     resetIds();
     const s = run(

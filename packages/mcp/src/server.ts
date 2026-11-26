@@ -380,8 +380,12 @@ export function registerCatalogTools(
         'the other store, this fails unless replace_cart is true, and replace_cart is only for ' +
         'after the shopper confirms. Lines are never merged. A Coto order is a Changuito-held ' +
         'basket priced from the Coto catalog. It has no store link and cannot be paid yet. ' +
-        'This call does not draw a cart. After it succeeds, in the same turn, call add_to_cart ' +
-        'with ids from that chain, then get_cart_link. Ending the turn here leaves no cart card.',
+        'This call does not draw a cart. ' +
+        '"Quiero seguir en Día." or "Quiero seguir en Coto." — call this, confirm in one line, and ' +
+        'do not call add_to_cart. Later searches are that store only. ' +
+        '"Armá el carrito de Día" or "Armá el carrito de Coto" — call this if the order is not already ' +
+        'that store, then in the same turn call add_to_cart with ids from that chain, then get_cart_link. ' +
+        'Do not end that turn before the cart has lines.',
       inputSchema: {
         retailer: z.enum(['dia', 'coto']).describe('The store the shopper named.'),
         replace_cart: z
@@ -408,9 +412,12 @@ export function registerCatalogTools(
         // choose_retailer only records the chain. The card is drawn later, from
         // lines, and a Día card also needs the handoff URL. The model reads this
         // result on the next hop and was ending the turn here.
+        const store = next === 'dia' ? 'Día' : 'Coto';
         const note =
           cleared +
-          'In this same turn, call add_to_cart with only ids from this chain for what the shopper asked to buy ' +
+          `If the shopper said "Quiero seguir en ${store}.", confirm in one line and do not call add_to_cart. ` +
+          `Later searches are ${next} only. ` +
+          `If the shopper said "Armá el carrito de ${store}", in this same turn call add_to_cart with only ids from this chain ` +
           '(pairDia when the order is dia, pairCoto when it is coto, from the last search_compare line when it has them), ' +
           'then call get_cart_link. Do not end the turn before that. ' +
           'A Día card is not drawn until get_cart_link returns. A Coto card is drawn from the lines and has no store link.';

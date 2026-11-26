@@ -62,6 +62,11 @@ export interface SearchCompareItem {
   name: string;
   shelfCentavos: number;
   available: boolean;
+  /** Copied from the catalog. Absent when that chain has no photo, brand, or unit. */
+  imageUrl?: string;
+  brand?: string;
+  unitMultiplier?: number;
+  measurementUnit?: string;
 }
 
 export type SearchCompareStatus =
@@ -120,6 +125,11 @@ export type UiEvent =
       status: 'pending';
       query: string;
       postalCode?: string;
+      /**
+       * Chains this search is querying. Absent means both, so a block from
+       * before the field existed still draws Día and Coto.
+       */
+      chains?: ('dia' | 'coto')[];
     }
   | {
       t: 'search_compare';
@@ -131,6 +141,8 @@ export type UiEvent =
       coto: SearchCompareItem[];
       gapCentavos?: number;
       feeCentavos?: number;
+      /** Absent means both chains were queried. */
+      chains?: ('dia' | 'coto')[];
     }
   /** A requested item came back with no available hit on the chosen store. */
   | { t: 'missing'; query: string; retailer: 'dia' | 'coto'; item: string }
