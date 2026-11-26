@@ -757,6 +757,10 @@ button.card[aria-disabled='true'] { cursor: default; }
 }
 .btn-ghost:hover { background: rgba(42, 26, 20, 0.06); }
 .btn-pay { flex: 1; min-width: 44px; min-height: 44px; }
+/* Logout is solid arcilla. Espresso on arcilla is 5.67:1; white would be 2.95:1. */
+.btn-logout { background: var(--chg-arcilla); color: var(--chg-espresso); }
+.btn-logout:hover { background: var(--chg-arcilla); filter: brightness(0.94); }
+.btn-logout:active { background: var(--chg-arcilla); filter: brightness(0.88); }
 
 .pay-cards {
   display: grid;

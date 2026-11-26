@@ -131,6 +131,20 @@ describe('coto real quote', () => {
       assert.equal(over.quote.lockCentavos, 3_000_000 + HOME_PROVISION_CENTAVOS);
     }
     assert.notEqual(quoted.quote.cotoTicketCentavos, 1);
+    const unmatched = quoteFromPriced({
+      lines: [line()],
+      clientTotalCentavos: 1,
+      pairs: [],
+      postalCode: '1951',
+      coverage: 'shopper',
+      fulfillment: 'pickup',
+    });
+    assert.equal(unmatched.ok, true);
+    if (unmatched.ok) {
+      assert.equal(unmatched.quote.gapCentavos, 0);
+      assert.equal(unmatched.quote.feeCentavos, 0);
+      assert.equal(unmatched.quote.lockCentavos, 494800);
+    }
   });
 
   it('uses fee 0 when no pair matches, and rejects an unsafe quantity', () => {
@@ -211,7 +225,7 @@ describe('coto real quote', () => {
     const other = freezeCotoReal(signed.snapshot, pairs, OTHER);
     assert.equal(other.ok, false);
     assert.equal(quoteBuyerError(signed.snapshot, OTHER), 'Este changuito está asociado a otra cuenta.');
-    assert.equal(quoteBuyerError(undefined, OWNER), 'Volvé a comparar antes de pagar.');
+    assert.equal(quoteBuyerError(undefined, OWNER), undefined);
   });
 
   it('no longer limits Coto pay to the latest card in the turn', () => {

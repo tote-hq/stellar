@@ -187,7 +187,7 @@ export function ProfileGeneral({
       </section>
 
       <div className="modal-actions">
-        <button type="button" className="btn btn-ghost" data-testid="wallet-logout" onClick={onLogout}>
+        <button type="button" className="btn btn-logout" data-testid="wallet-logout" onClick={onLogout}>
           <LogoutIcon />
           {copy.signOut}
         </button>
