@@ -12,7 +12,6 @@ import {
   admitCotoReal,
   av5LogLine,
   COTO_REAL_PHASES,
-  cotoPayTarget,
   cotoRealOutcome,
   cotoShopperBody,
   deliveryBeforeShop,
@@ -215,16 +214,11 @@ describe('coto real quote', () => {
     assert.equal(quoteBuyerError(undefined, OWNER), 'Volvé a comparar antes de pagar.');
   });
 
-  it('shows pay only on the current turn Coto cart', () => {
-    const blocks = [
-      { id: 'u1', kind: 'user' },
-      { id: 'dia', kind: 'cart', retailer: 'dia' },
-      { id: 'u2', kind: 'user' },
-      { id: 'coto', kind: 'cart', retailer: 'coto' },
-    ];
-    assert.equal(cotoPayTarget(blocks, true), 'coto');
-    assert.equal(cotoPayTarget(blocks, false), undefined);
-    assert.notEqual(cotoPayTarget(blocks, true), 'dia');
+  it('no longer limits Coto pay to the latest card in the turn', () => {
+    // cotoPayTarget was removed. Every Coto card uses cotoPayGate, covered in
+    // coto-pay-gate.test.ts. An older card pays the live basket.
+    const source = readFileSync(join(import.meta.dirname, '../checkout/coto-real.ts'), 'utf8');
+    assert.equal(source.includes('cotoPayTarget'), false);
   });
 
   it('refunds the full lock, hides viewer fields, and keeps delivery before shop', () => {

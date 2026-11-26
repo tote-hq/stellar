@@ -32,10 +32,9 @@ export interface CartCopy {
   /** One is a sentence, several is a count. Both say the same thing. */
   oosOne: string;
   oosMany: (n: number) => string;
-  /** Shown when the basket is a Coto order. There is no pay control. */
+  /** Shown when the basket is a Coto order. */
   cotoTitle: string;
   diaTitle: string;
-  notPayable: string;
 }
 
 export interface RailCopy {
@@ -52,7 +51,6 @@ export interface RailCopy {
   ref: (amount: string, orderId: string) => string;
   cotoTitle: string;
   diaTitle: string;
-  notPayable: string;
 }
 
 export interface HistoryCopy {
@@ -284,7 +282,23 @@ export interface CardAddCopy {
   adding: string;
   added: string;
   failed: string;
+  retry: string;
+  /** Shown with the failure when a turn is still on screen. */
+  busy: string;
+  /** Shown with the failure when the request did not land. */
+  network: string;
   label: (name: string, store: string) => string;
+}
+
+/** One phrase per Coto pay gate. The button and the phrase never show together. */
+export interface CotoGateCopy {
+  waiting: string;
+  fetch_failed: string;
+  not_admitted: string;
+  paid: string;
+  read_only: string;
+  dual_checkout: string;
+  no_total: string;
 }
 
 export interface MissingCopy {
@@ -315,6 +329,7 @@ export interface UiCopy {
   compare: CompareCopy;
   searchCompare: SearchCompareCopy;
   cardAdd: CardAddCopy;
+  cotoGate: CotoGateCopy;
   missing: MissingCopy;
   switch: SwitchCopy;
   /** Every dialog's ✕. One key, because it is one word. */
@@ -334,7 +349,6 @@ const ES: UiCopy = {
     oosMany: (n) => `${n} productos quedaron sin stock.`,
     cotoTitle: 'Tu changuito · Coto',
     diaTitle: 'Tu changuito · Día',
-    notPayable: 'Los pedidos de Coto todavía no se pueden pagar.',
   },
   rail: {
     cartAria: 'Tu changuito',
@@ -349,7 +363,6 @@ const ES: UiCopy = {
     ref: (amount, orderId) => `Pagaste ${amount} · pedido ${orderId}`,
     cotoTitle: 'Tu changuito · Coto',
     diaTitle: 'Tu changuito · Día',
-    notPayable: 'Los pedidos de Coto todavía no se pueden pagar.',
   },
   history: {
     aria: 'Tus compras',
@@ -559,8 +572,20 @@ const ES: UiCopy = {
   cardAdd: {
     adding: 'Sumando…',
     added: 'En el carrito',
-    failed: 'No se pudo sumar. Probá de nuevo.',
+    failed: 'No se pudo sumar.',
+    retry: 'Reintentar',
+    busy: 'Esperá a que termine la respuesta.',
+    network: 'Falló la conexión.',
     label: (name, store) => `${name}, ${store}: sumar al carrito de ${store}`,
+  },
+  cotoGate: {
+    waiting: 'Pagar en Coto: esperando si esta cuenta puede.',
+    fetch_failed: 'Pagar en Coto: no se pudo leer allowed.',
+    not_admitted: 'Pagar en Coto: esta cuenta no está admitida.',
+    paid: 'Pagar en Coto: este chat ya está pago.',
+    read_only: 'Pagar en Coto: este chat es de solo lectura.',
+    dual_checkout: 'Pagar en Coto: el pago está en la comparación.',
+    no_total: 'Pagar en Coto: no hay un total para cobrar.',
   },
   missing: {
     prompt: (item, store) => `${item} no está en ${store}. ¿Lo sustituís o lo sacamos?`,
@@ -592,7 +617,6 @@ const EN: UiCopy = {
     oosMany: (n) => `${n} items went out of stock.`,
     cotoTitle: 'Your changuito · Coto',
     diaTitle: 'Your changuito · Día',
-    notPayable: 'Coto orders cannot be paid yet.',
   },
   rail: {
     cartAria: 'Your changuito',
@@ -607,7 +631,6 @@ const EN: UiCopy = {
     ref: (amount, orderId) => `You paid ${amount} · order ${orderId}`,
     cotoTitle: 'Your changuito · Coto',
     diaTitle: 'Your changuito · Día',
-    notPayable: 'Coto orders cannot be paid yet.',
   },
   history: {
     aria: 'Your purchases',
@@ -819,8 +842,20 @@ const EN: UiCopy = {
   cardAdd: {
     adding: 'Adding…',
     added: 'In the cart',
-    failed: "Couldn't add it. Try again.",
+    failed: "Couldn't add it.",
+    retry: 'Try again',
+    busy: 'Wait for the reply to finish.',
+    network: 'The connection failed.',
     label: (name, store) => `${name}, ${store}: add to the ${store} cart`,
+  },
+  cotoGate: {
+    waiting: 'Pay at Coto: waiting to see if this account can.',
+    fetch_failed: 'Pay at Coto: could not read allowed.',
+    not_admitted: 'Pay at Coto: this account is not admitted.',
+    paid: 'Pay at Coto: this chat is already paid.',
+    read_only: 'Pay at Coto: this chat is read-only.',
+    dual_checkout: 'Pay at Coto: payment is in the comparison.',
+    no_total: 'Pay at Coto: there is no total to charge.',
   },
   missing: {
     prompt: (item, store) => `${item} isn't at ${store}. Substitute it or drop it?`,

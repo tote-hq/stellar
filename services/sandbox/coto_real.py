@@ -222,15 +222,23 @@ async def coto_real_worker(job: dict) -> None:
     env = os.environ
     card = None
     try:
+        blocked = False
         if env.get("COTO_REAL_LIVE") != "1":
-            print("phase=login code=ops_unavailable", flush=True)
-            job.update(**_fail("login", "ops_unavailable", []))
-            return
-        card = load_ops_card(job)
+            print("coto-pay gate=COTO_REAL_LIVE", flush=True)
+            blocked = True
         user = env.get("COTO_OPS_USER") or ""
         password = env.get("COTO_OPS_PASSWORD") or ""
-        if card is None or not user or not password:
-            print("phase=login code=ops_unavailable", flush=True)
+        if not user:
+            print("coto-pay gate=COTO_OPS_USER", flush=True)
+            blocked = True
+        if not password:
+            print("coto-pay gate=COTO_OPS_PASSWORD", flush=True)
+            blocked = True
+        card = load_ops_card(job)
+        if card is None:
+            print("coto-pay gate=job_card", flush=True)
+            blocked = True
+        if blocked:
             job.update(**_fail("login", "ops_unavailable", []))
             return
         from coto_live import run_live

@@ -520,7 +520,55 @@ button.card:disabled,
 button.card[aria-disabled='true'] { cursor: default; }
 .card-match,
 .card-add-state { font-size: 12px; font-weight: 650; color: var(--text); }
-.card-add-error { color: var(--warn-ink); }
+.card-add-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px;
+  color: #7a2e12;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+.card-add-error-text { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.card-add-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #7a2e12;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.card-add-retry {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 8px 12px;
+  border: 1px solid #7a2e12;
+  border-radius: var(--radius);
+  background: #fff;
+  color: #7a2e12;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.card-add-retry:focus-visible {
+  outline: 3px solid var(--chg-espresso);
+  outline-offset: 2px;
+}
+@media (prefers-color-scheme: dark) {
+  /* The shop plate stays light. Pin the error ink so AA holds on that plate. */
+  .card-add-error,
+  .card-add-retry {
+    color: #7a2e12;
+    background: #fff;
+    border-color: #7a2e12;
+  }
+  .card-add-icon { background: #7a2e12; color: #fff; }
+}
 .card-empty { min-height: 44px; }
 .card-img {
   aspect-ratio: 1;

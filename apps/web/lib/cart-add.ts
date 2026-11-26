@@ -9,7 +9,7 @@
 import type { SessionSnapshot } from '@changuito/mcp/session';
 
 import type { RenderCache } from './agent/render-tools.ts';
-import { autoRenderCart, foreignCartSku, rememberStructured } from './agent/render-tools.ts';
+import { autoRenderCart, foreignCartSku, rememberStructured, type CotoCacheItem } from './agent/render-tools.ts';
 import { chainChoiceOn } from './agent/search-compare.ts';
 import { freezeAllowed } from './checkout/coto-real.ts';
 import type { UiEvent } from './protocol.ts';
@@ -19,6 +19,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export interface CartAddCall {
   isError: boolean;
   structured?: unknown;
+  message?: string;
 }
 
 export interface ParsedCartAdd {
@@ -81,16 +82,38 @@ export async function addCardToCart(args: {
   owner: string | null;
   compareOn: boolean;
   cotoEnabled: boolean;
+  /**
+   * A turn the store did not have. A Día id is validated by `add_to_cart`.
+   * A Coto id is priced through `catalog` first.
+   */
+  freshTurn?: boolean;
+  catalog?: {
+    getProduct(id: string): Promise<CotoCacheItem | null>;
+  };
   call: (name: string, input: Record<string, unknown>) => Promise<CartAddCall>;
 }): Promise<CartAddResult> {
   const diaIds = new Set(args.cache.products.keys());
   const cotoIds = new Set(Object.keys(args.cache.coto ?? {}));
   const onThisChain = args.chain === 'dia' ? diaIds.has(args.id) : Boolean(args.cache.coto?.[args.id]);
+  let diaFromTool = false;
   if (!onThisChain) {
     if (foreignCartSku(args.chain, args.id, diaIds, cotoIds)) {
       return { ok: false, status: 409, error: 'foreign_cart' };
     }
-    return { ok: false, status: 400, error: 'unknown_product' };
+    if (args.chain === 'coto' && args.catalog) {
+      let item: CotoCacheItem | null;
+      try {
+        item = await args.catalog.getProduct(args.id);
+      } catch {
+        return { ok: false, status: 502, error: 'add_failed' };
+      }
+      if (!item) return { ok: false, status: 400, error: 'unknown_product' };
+      args.cache.coto = { ...(args.cache.coto ?? {}), [item.id]: item, [args.id]: item };
+    } else if (args.chain === 'dia' && args.freshTurn) {
+      diaFromTool = true;
+    } else {
+      return { ok: false, status: 400, error: 'unknown_product' };
+    }
   }
 
   if (args.chain === 'coto' && !freezeAllowed(args.cache.cotoRealDia, args.owner)) {
@@ -128,7 +151,10 @@ export async function addCardToCart(args: {
   const added = await args.call('add_to_cart', {
     items: [{ sku_id: args.id, quantity: 1, seller_id: seller }],
   });
-  if (added.isError) return { ok: false, status: 502, error: 'add_failed' };
+  if (added.isError) {
+    const missing = diaFromTool && /not found|unknown sku|no existe/i.test(added.message ?? '');
+    return { ok: false, status: missing ? 400 : 502, error: missing ? 'unknown_product' : 'add_failed' };
+  }
   rememberStructured(args.cache, added.structured);
 
   const cartId = args.cache.cart?.cartId;

@@ -172,9 +172,9 @@ export function SearchCompareCard({
                   }
                   disabled={addDisabled}
                   onAdd={onAdd && item ? () => onAdd(chain, item.id) : undefined}
-                  onResult={(result) => {
-                    if (result === 'added') setLive(copy.cardAdd.added);
-                    else if (result === 'failed') setLive(copy.cardAdd.failed);
+                  onResult={(outcome) => {
+                    if (outcome.result === 'added') setLive(copy.cardAdd.added);
+                    else if (outcome.result === 'failed') setLive(copy.cardAdd.failed);
                   }}
                 />
               ))}

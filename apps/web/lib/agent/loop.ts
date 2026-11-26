@@ -11,6 +11,7 @@ import type { Product } from '@changuito/mcp/types';
 
 import type { UiEvent } from '../protocol';
 import { autoCompare } from './auto-compare';
+import { syncRailCart } from './cart-sync';
 import { earlyCityAsk, earlyLocationAsk, transcriptHasPostal } from './early-ask';
 import { changuitoPrompt, stateBanner } from './prompt';
 import { classifyTopic, offTopicRefusal } from './topic-guard.ts';
@@ -238,6 +239,25 @@ export async function runTurn(
 ): Promise<{ brain: string }> {
   const t0 = Date.now();
 
+  // Before the banner and before the model. An empty cache on an isolate that
+  // did not run the last turn still has the basket on the session snapshot.
+  // view_cart is awaited here, with no trail row and no card for that basket.
+  const snap = session.state.snapshot();
+  const cotoLines = session.state.cotoLines().length;
+  if (!turn.cache.cart && (cotoLines > 0 || snap.carts.dia)) {
+    emit({ t: 'status', stage: 'thinking', hop: 0 });
+  }
+  const synced = await syncRailCart({
+    cache: turn.cache,
+    cotoLines,
+    diaCartId: snap.carts.dia,
+    viewCart: async () => {
+      const call = await callMcpTool(session.client, { id: 'rail-view', name: 'view_cart', input: {} });
+      return { ok: call.block.is_error !== true, structured: call.structured };
+    },
+  });
+  const cartUnknown = synced === 'unknown';
+
   // Before early-ask and before the model. An off-topic message is not a
   // basket, so it must not become the postal-code question and it must not
   // open a tool. Ambiguous grocery talk falls through; see topic-guard.ts.
@@ -259,6 +279,7 @@ export async function runTurn(
             cartTotal: cart?.total.display,
             searchOrder: search.order,
             order: session.state.getOrder(),
+            cartUnknown,
           }),
           image,
         ),
@@ -320,6 +341,7 @@ export async function runTurn(
         cartTotal: cart?.total.display,
         searchOrder: search.order,
         order: session.state.getOrder(),
+        cartUnknown,
       }),
       image,
     ),

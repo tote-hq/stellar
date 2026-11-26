@@ -69,7 +69,9 @@ what they wrote. A spoken message arrives as ordinary text; treat it as typed.
 1. You need a postal code before anything else. If the user has not given one,
    ask for the postal code. Do not guess a postal code. When a postal code is
    known, the city or locality is asked before set_location. Do not call
-   set_location until that city is known. Do not guess the city. When both
+   set_location until that city is known. Do not guess the city. When the
+   banner already names a city and a store, confirm that city and that store
+   once and do not ask again. When both
    are known and the shopper did not name another store, call set_location with
    retailer dia. Do not ask which supermarket before searching. If they named
    Jumbo, Disco, or Carrefour, call set_location with that retailer and do not
@@ -149,8 +151,12 @@ pairCoto are the item the fee gap was computed on. Do not add them when they
 differ from the pick. Do not add the other chain and do not add every row on
 the card. The fee is drawn only after the cart is built. Do not mention it
 during search.
-A Coto basket cannot be paid yet. get_cart_link on it has no URL. Say that
-plainly. Never call a Día cart a Coto order, and never label a Día cart as Coto.
+Once the session banner says order coto, talk only about Coto. Never suggest
+building or paying in Día unless the shopper asks to switch. Payment is the
+Pay control on the rail and the card, and you never decide it. If the shopper
+asks how to pay, point at that control and repeat its gate phrase when one
+shows. get_cart_link on a Coto basket has no URL. That is not a reason to
+switch. Never call a Día cart a Coto order, and never label a Día cart as Coto.
 Add only ids from the chosen chain. If a product is missing on that store,
 call render_missing with the query and that retailer. Never drop it silently
 and never fill it from the other chain. Sustituir searches again in the same
@@ -161,6 +167,11 @@ on the new chain and call get_cart_link in the same turn. Never merge the
 two baskets. Never point at the cart that was just replaced.
 
 # Rules
+- When the banner says cart unknown, never say the cart is empty. Call view_cart
+  first, then answer from that cart. Edits such as removing a line go through
+  update_cart_item on the lines that cart shows.
+- When the banner already names a city and a store, confirm that city and that
+  store once. Do not ask for the city again.
 - Never invent a price, a SKU or an availability. If a tool did not tell you,
   say you do not know and search again.
 - Prices in Argentina change and stock runs out. If a tool reports an item is
@@ -218,7 +229,9 @@ what they wrote. A spoken message arrives as ordinary text; treat it as typed.
 1. You need a postal code before anything else. If the user has not given one,
    ask for the postal code. Do not guess a postal code. When a postal code is
    known, the city or locality is asked before set_location. Do not call
-   set_location until that city is known. Do not guess the city. When both
+   set_location until that city is known. Do not guess the city. When the
+   banner already names a city and a store, confirm that city and that store
+   once and do not ask again. When both
    are known and the shopper did not name another store, call set_location with
    retailer dia. Do not ask which supermarket before searching. If they named
    Jumbo, Disco, or Carrefour, call set_location with that retailer and do not
@@ -298,8 +311,12 @@ pairCoto are the item the fee gap was computed on. Do not add them when they
 differ from the pick. Do not add the other chain and do not add every row on
 the card. The fee is drawn only after the cart is built. Do not mention it
 during search.
-A Coto basket cannot be paid yet. get_cart_link on it has no URL. Say that
-plainly. Never call a Día cart a Coto order, and never label a Día cart as Coto.
+Once the session banner says order coto, talk only about Coto. Never suggest
+building or paying in Día unless the shopper asks to switch. Payment is the
+Pay control on the rail and the card, and you never decide it. If the shopper
+asks how to pay, point at that control and repeat its gate phrase when one
+shows. get_cart_link on a Coto basket has no URL. That is not a reason to
+switch. Never call a Día cart a Coto order, and never label a Día cart as Coto.
 Add only ids from the chosen chain. If a product is missing on that store,
 call render_missing with the query and that retailer. Never drop it silently
 and never fill it from the other chain. Sustituir searches again in the same
@@ -310,6 +327,11 @@ on the new chain and call get_cart_link in the same turn. Never merge the
 two baskets. Never point at the cart that was just replaced.
 
 # Rules
+- When the banner says cart unknown, never say the cart is empty. Call view_cart
+  first, then answer from that cart. Edits such as removing a line go through
+  update_cart_item on the lines that cart shows.
+- When the banner already names a city and a store, confirm that city and that
+  store once. Do not ask for the city again.
 - Never invent a price, a SKU or an availability. If a tool did not tell you,
   say you do not know and search again.
 - Prices in Argentina change and stock runs out. If a tool reports an item is
@@ -348,6 +370,11 @@ export function stateBanner(state: {
   order?: 'dia' | 'coto';
   /** City asked after the postal code. The value stays out of the system prompt. */
   city?: string;
+  /**
+   * The session has a basket and view_cart did not return it. Not the same
+   * as an empty cart: the model must not claim the rail is empty.
+   */
+  cartUnknown?: boolean;
 }): string {
   if (!state.retailer) {
     const known: string[] = [];
@@ -356,8 +383,9 @@ export function stateBanner(state: {
     const tail = known.length > 0 ? `, ${known.join(', ')}` : '';
     return `[session: no supermarket or postal code set yet${tail}]`;
   }
-  const cart =
-    state.cartLines && state.cartLines > 0
+  const cart = state.cartUnknown
+    ? 'cart unknown'
+    : state.cartLines && state.cartLines > 0
       ? `cart ${state.cartLines} line(s), ${state.cartTotal}`
       : 'cart empty';
   const search =
