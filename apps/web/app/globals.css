@@ -494,7 +494,34 @@ body:not(:has(.topbar)) .shell {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  /* Keeps a focused card out from under the composer and the rail. */
+  scroll-margin: 24px;
+  scroll-margin-bottom: 120px;
 }
+.card-slot { list-style: none; margin: 0; padding: 0; min-width: 0; }
+button.card {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+  min-height: 44px;
+  min-width: 44px;
+}
+button.card:focus-visible {
+  /* Espresso on the light plate is well above 3:1 in both themes.
+     The shopper plate stays off-white when the OS is dark. */
+  outline: 3px solid var(--chg-espresso);
+  outline-offset: 3px;
+}
+button.card:disabled,
+button.card[aria-disabled='true'] { cursor: default; }
+.card-match,
+.card-add-state { font-size: 12px; font-weight: 650; color: var(--text); }
+.card-add-error { color: var(--warn-ink); }
+.card-empty { min-height: 44px; }
 .card-img {
   aspect-ratio: 1;
   display: grid;

@@ -6,6 +6,7 @@ import { track } from './analytics';
 import { lastShown } from './chat-recall';
 import {
   applyEvent,
+  cartAdded,
   endTurn,
   failTurn,
   idNumber,
@@ -23,7 +24,7 @@ import { notifyHumanRequired, SOLO_HUMANOS } from './human-gate-ui';
 import { DEFAULT_LANG, inLang, type Lang } from './lang.ts';
 import { LOGIN_REQUIRED, LOGIN_REQUIRED_MESSAGE, loginRequiredMessage } from './login-constants';
 import type { ChatImage } from './chat-image.ts';
-import { parseEvents, type ChatRequest } from './protocol';
+import { parseEvents, type ChatRequest, type UiEvent } from './protocol';
 import { ensureUserCookie } from './session-login';
 import type { WalletSigner } from './wallet-proof.ts';
 
@@ -382,5 +383,40 @@ export function useChat(auth?: UseChatAuth) {
    */
   const currentSessionId = useCallback(() => sessionId.current || null, []);
 
-  return { state, send, retry, stop, loginRequired, clearLoginRequired, resume, reset, currentSessionId };
+  /**
+   * Add the product on a card. Not a chat turn: the server prices the id.
+   * Refused while a turn is streaming, so the click cannot race the model.
+   */
+  const addCard = useCallback(async (chain: 'dia' | 'coto', id: string): Promise<'added' | 'failed'> => {
+    if (inFlight.current || !sessionId.current) return 'failed';
+    try {
+      const res = await fetch('/api/cart/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          sessionId: sessionId.current,
+          snapshot: snapshot.current,
+          chain,
+          id,
+          ...(authRef.current.network ? { network: authRef.current.network } : {}),
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        event?: Extract<UiEvent, { t: 'cart' }> | null;
+        snapshot?: ChatState['snapshot'];
+      } | null;
+      if (!res.ok || !data || data.ok !== true || !data.event || data.event.t !== 'cart') return 'failed';
+      if (data.snapshot) snapshot.current = data.snapshot;
+      const event = data.event;
+      const nextSnapshot = data.snapshot;
+      setState((s) => cartAdded(s, event, nextSnapshot));
+      return 'added';
+    } catch {
+      return 'failed';
+    }
+  }, []);
+
+  return { state, send, retry, stop, loginRequired, clearLoginRequired, resume, reset, currentSessionId, addCard };
 }

@@ -3,6 +3,7 @@ import { beforeEach, describe, it } from 'node:test';
 
 import {
   applyEvent,
+  cartAdded,
   canRetry,
   dualCheckoutOn,
   endTurn,
@@ -124,6 +125,40 @@ describe('applyEvent', () => {
     assert.deepEqual(s.blocks.map((b) => b.kind), ['user', 'cart', 'user', 'cart']);
     assert.equal(s.blocks[1].kind === 'cart' && s.blocks[1].handoffUrl, undefined);
     assert.equal(s.blocks[3].kind === 'cart' && s.blocks[3].handoffUrl, 'https://dia/checkout');
+  });
+
+  it('replaces the same cart when a card click adds a line', () => {
+    resetIds();
+    const shown = run([{ t: 'cart', cart: cart('c1'), handoffUrl: 'https://dia/checkout' }]);
+    const id = shown.blocks[0].id;
+    const next = {
+      ...cart('c1'),
+      lines: [
+        {
+          index: 0,
+          skuId: 'd1',
+          name: 'Leche',
+          quantity: 1,
+          sellerId: '1',
+          unitPrice: money(1000),
+          lineTotal: money(1000),
+          available: true,
+        },
+      ],
+      total: money(1000),
+    };
+    const added = cartAdded(shown, { t: 'cart', cart: next }, { carts: {} });
+    assert.equal(added.blocks.length, 1);
+    assert.equal(added.blocks[0].id, id);
+    assert.equal(added.blocks[0].kind === 'cart' && added.blocks[0].handoffUrl, 'https://dia/checkout');
+    assert.equal(added.cart?.cart.lines.length, 1);
+    assert.deepEqual(added.snapshot, { carts: {} });
+
+    resetIds();
+    const fresh = cartAdded(initialState, { t: 'cart', cart: cart('c2'), handoffUrl: 'https://dia/new' }, undefined);
+    assert.equal(fresh.blocks.length, 1);
+    assert.equal(fresh.blocks[0].kind === 'cart' && fresh.blocks[0].cart.cartId, 'c2');
+    assert.equal(fresh.cart?.cart.cartId, 'c2');
   });
 
   it('drops the get_cart_link trail row once this turn draws the cart', () => {

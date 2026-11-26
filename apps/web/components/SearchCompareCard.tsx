@@ -1,5 +1,7 @@
 'use client';
 
+import { useState } from 'react';
+
 import type { Block } from '../lib/chat-state';
 import { feeCentavosOf } from '../lib/checkout/compare-fee.ts';
 import { cheapestAvailable } from '../lib/one-per-type.ts';
@@ -9,7 +11,7 @@ import { RETAILER_NAMES } from '../lib/retailers.ts';
 import type { Chain } from '../lib/retailer-choice.ts';
 import { uiCopy, type SearchCompareCopy } from '../lib/ui-copy.ts';
 import { useLang } from './LangProvider';
-import { ProductCard } from './ProductGrid';
+import { ProductCard, type CardAddResult } from './ProductGrid';
 
 type SearchBlock = Extract<Block, { kind: 'search_compare' }>;
 
@@ -31,6 +33,7 @@ function typeNote(
   if (chain === 'dia' && block.status === 'dia_error') return copy.diaError;
   if (chain === 'coto' && block.status === 'coto_error') return copy.cotoError;
   if (chain === 'coto' && block.status === 'coto_timed_out') return copy.cotoTimedOut;
+  if (block.noPair?.includes(chain)) return copy.noPair(block.typeLabel || type, store);
   return copy.missingType(type, store);
 }
 
@@ -41,6 +44,11 @@ function TypeSlot({
   item,
   price,
   unit,
+  store,
+  matchLabel,
+  onAdd,
+  disabled,
+  onResult,
 }: {
   typeLabel: string;
   note: string | null;
@@ -48,10 +56,16 @@ function TypeSlot({
   item?: SearchCompareItem;
   price?: string;
   unit?: string;
+  store?: string;
+  matchLabel?: string;
+  onAdd?: () => Promise<CardAddResult>;
+  disabled?: boolean;
+  onResult?: (result: CardAddResult) => void;
 }) {
   if (item && price) {
     return (
       <ProductCard
+        id={item.id}
         kind={typeLabel}
         name={item.name}
         brand={item.brand}
@@ -59,6 +73,11 @@ function TypeSlot({
         imageAlt=""
         price={price}
         unit={unit}
+        store={store}
+        matchLabel={matchLabel}
+        onAdd={onAdd}
+        disabled={disabled}
+        onResult={onResult}
       />
     );
   }
@@ -83,8 +102,8 @@ function TypeSlot({
 
 /**
  * One row of types, Coto then Día, before a cart exists.
- * Each chain shows one card per type. The pick is `cheapestAvailable`,
- * so a stored block that still lists several rows draws one card too.
+ * Each chain shows one card per type. The server sends the typed pick.
+ * `cheapestAvailable` still collapses a stored block that lists several rows.
  * Prices come from the event. A chain with no pick has no buttons.
  */
 export function SearchCompareCard({
@@ -95,6 +114,8 @@ export function SearchCompareCard({
   buildDisabled,
   onChoose,
   onBuild,
+  onAdd,
+  addDisabled,
 }: {
   blocks: SearchBlock[];
   chains: Chain[];
@@ -103,14 +124,20 @@ export function SearchCompareCard({
   buildDisabled: boolean;
   onChoose: (retailer: Chain) => void;
   onBuild: (retailer: Chain) => void;
+  onAdd?: (chain: Chain, id: string) => Promise<CardAddResult>;
+  addDisabled?: boolean;
 }) {
   const lang = useLang();
   const copy = uiCopy(lang);
   const search = copy.searchCompare;
+  const [live, setLive] = useState('');
   const label = blocks.map((block) => block.query).filter(Boolean).join(', ');
   const pending = blocks.some((block) => block.status === 'pending');
   return (
     <div className="search-compare" data-testid="search-compare" aria-label={label}>
+      <div className="sr-only" aria-live="polite" data-testid="card-add-status">
+        {live}
+      </div>
       {chains.map((chain) => {
         const store = RETAILER_NAMES[chain];
         const slots = blocks.map((block) => {
@@ -125,8 +152,8 @@ export function SearchCompareCard({
               {slots.map(({ block, item }) => (
                 <TypeSlot
                   key={block.id}
-                  typeLabel={block.query}
-                  note={typeNote(chain, block, Boolean(item), block.query, store, search)}
+                  typeLabel={block.typeLabel || block.query}
+                  note={typeNote(chain, block, Boolean(item), block.typeLabel || block.query, store, search)}
                   announce={block.status === 'pending' && chain === 'coto'}
                   item={item}
                   price={item ? pesos(item.shelfCentavos, lang) : undefined}
@@ -135,6 +162,20 @@ export function SearchCompareCard({
                       ? `${item.unitMultiplier} ${item.measurementUnit}`
                       : undefined
                   }
+                  store={onAdd && item ? store : undefined}
+                  matchLabel={
+                    item?.match === 'same'
+                      ? search.same
+                      : item?.match === 'similar'
+                        ? search.similar(block.typeLabel || block.query)
+                        : undefined
+                  }
+                  disabled={addDisabled}
+                  onAdd={onAdd && item ? () => onAdd(chain, item.id) : undefined}
+                  onResult={(result) => {
+                    if (result === 'added') setLive(copy.cardAdd.added);
+                    else if (result === 'failed') setLive(copy.cardAdd.failed);
+                  }}
                 />
               ))}
             </ul>

@@ -15,7 +15,8 @@ import { STOREFRONT_ORIGINS } from './storefront.ts';
  *   Stellar Horizon/RPC hosts it reads balances and submits through. OAuth
  *   and Albedo are top-level navigations and popups, which CSP does not
  *   restrict. Neither Pollar nor the Stellar SDK uses eval.
- * - Product photos: every retailer serves them from *.vtexassets.com.
+ * - Product photos: Día serves them from *.vtexassets.com. Coto's proven
+ *   photo host is static.cotodigital3.com.ar, that host only, no wildcard.
  * - Supermarket checkout: framed inside the chat, so the store's own origin
  *   is in frame-src. See lib/storefront.ts for what that does and does not
  *   buy — a store can start refusing at any time and nothing warns us.
@@ -39,7 +40,7 @@ const POLLAR_ASSETS = 'https://pollar.xyz';
 const STELLAR = [
   ...new Set(NETWORK_IDS.flatMap((net) => [DEPLOYMENTS[net].horizonUrl, DEPLOYMENTS[net].rpcUrl])),
 ].map((url) => new URL(url).origin);
-const PRODUCT_IMAGES = 'https://*.vtexassets.com';
+const PRODUCT_IMAGES = 'https://*.vtexassets.com https://static.cotodigital3.com.ar';
 
 export function analyticsCspSources(ids: AnalyticsIds = ANALYTICS_IDS): { script: string[]; connect: string[]; img: string[] } {
   const script: string[] = [];

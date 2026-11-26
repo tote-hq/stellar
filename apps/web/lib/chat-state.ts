@@ -22,6 +22,53 @@ export interface ToolRun {
 }
 
 /**
+ * A card click landed a cart the model did not stream.
+ *
+ * The newest block for this cart id is replaced in place, anywhere in the
+ * transcript, so the rail and the thread stay on the same basket. A cart the
+ * shopper has not seen yet is appended. A link already on the card stays.
+ */
+export function cartAdded(
+  state: ChatState,
+  event: Extract<UiEvent, { t: 'cart' }>,
+  snapshot: SessionSnapshot | undefined,
+): ChatState {
+  let existing = -1;
+  for (let i = state.blocks.length - 1; i >= 0; i -= 1) {
+    const block = state.blocks[i];
+    if (block && block.kind === 'cart' && block.cart.cartId === event.cart.cartId) {
+      existing = i;
+      break;
+    }
+  }
+  const prior = existing === -1 ? undefined : (state.blocks[existing] as Extract<Block, { kind: 'cart' }>);
+  const handoffUrl = event.handoffUrl ?? prior?.handoffUrl;
+  const block: Extract<Block, { kind: 'cart' }> = {
+    kind: 'cart',
+    id: prior?.id ?? nextId(),
+    cart: event.cart,
+    ...(handoffUrl ? { handoffUrl } : {}),
+    ...(event.dualCheckout ? { dualCheckout: true } : {}),
+    ...(event.soloDia ? { soloDia: true } : {}),
+    ...(event.orderable === false ? { orderable: false } : {}),
+  };
+  const blocks = prior
+    ? state.blocks.map((item, index) => (index === existing ? block : item))
+    : [...state.blocks, block];
+  return {
+    ...state,
+    blocks,
+    ...(snapshot ? { snapshot } : {}),
+    cart: {
+      cart: event.cart,
+      ...(handoffUrl ? { handoffUrl } : {}),
+      ...(event.dualCheckout ? { dualCheckout: true } : {}),
+      ...(event.soloDia ? { soloDia: true } : {}),
+    },
+  };
+}
+
+/**
  * Why a turn never landed.
  *
  * `login` is the only one worth resuming on its own: the gate is a door the
@@ -84,6 +131,10 @@ export type Block =
       feeCentavos?: number;
       /** Absent means both chains. A block drawn before the field keeps both. */
       chains?: ('dia' | 'coto')[];
+      /** The type label from the event's `kind`. Absent on an older block. */
+      typeLabel?: string;
+      /** Chains with no comparable product. Absent when the row does not say. */
+      noPair?: ('dia' | 'coto')[];
     }
   | { kind: 'missing'; id: string; query: string; retailer: 'dia' | 'coto'; item: string }
   | { kind: 'error'; id: string; message: string; recoverable: boolean };
@@ -423,6 +474,8 @@ export function applyEvent(state: ChatState, e: UiEvent): ChatState {
             ...(e.gapCentavos === undefined ? {} : { gapCentavos: e.gapCentavos }),
             ...(e.feeCentavos === undefined ? {} : { feeCentavos: e.feeCentavos }),
             ...(e.chains ? { chains: e.chains } : {}),
+            ...(e.kind ? { typeLabel: e.kind } : {}),
+            ...(e.noPair ? { noPair: e.noPair } : {}),
           };
       const blocks = prior
         ? state.blocks.map((b, i) => (i === existing ? block : b))

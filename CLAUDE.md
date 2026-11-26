@@ -49,7 +49,10 @@ value rather than a reference, the grid can be wrong.
 
 A search grid under dual compare is a server pick, not a model call. The card
 shows one available product per type per chain, chosen in `one-per-type.ts`.
-The model does not choose which row of that search to show.
+The model does not choose which row of that search to show. In compare mode
+`render_products` is refused by the server for SKUs already on that row
+(`RenderCache.compared`). The prompt asks the model not to call it; the
+refusal is what keeps the extra grid off.
 
 ### 2. The cart draws itself, and §1 does not apply to it
 
@@ -387,6 +390,14 @@ priced from `CotoCatalog.getProduct` on every read. The id is a stable
 `render_missing` takes a query and a retailer, and only when that query was
 searched this turn on that store and came back with no available hit.
 
+A card click is a server cart write (`POST /api/cart/add`). The body carries
+`chain` and `id`. The server prices the line from the turn cache and ignores
+any price, name, or quantity. The click names the chain: when the order is
+unset and dual compare is on, the route calls `choose_retailer` before
+`add_to_cart`. A basket with lines on the other chain is refused until the
+shopper confirms the existing switch dialog. The cart card then draws through
+`autoRenderCart`, under the same fingerprint rules as a model add.
+
 ---
 
 ## Things that are the way they are on purpose
@@ -415,7 +426,7 @@ searched this turn on that store and came back with no available hit.
 ## Before you commit
 
 ```
-npm test                        # 720: mcp 209 · trust 1 · web 510
+npm test                        # 790: mcp 217 · trust 1 · web 572
 npm run typecheck -w @changuito/web
 npm run build
 ```
