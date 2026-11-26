@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { isPetFood, ofQueryType, queryHead } from '../catalog/food-type.js';
+import { isPetFood, ofQueryType, queryHead, typeScore, widerQueries } from '../catalog/food-type.js';
 
 describe('food type', () => {
   it('rejects pet food as carne and spinach croquettes as nuggets', () => {
@@ -32,5 +32,28 @@ describe('food type', () => {
     assert.equal(queryHead('de la'), '');
     assert.equal(ofQueryType('', { name: 'Picada Ciudad del Lago' }), false);
     assert.equal(ofQueryType('   ', { name: 'Leche' }), false);
+  });
+
+  it('scores the head double and zero when the hit is not the type', () => {
+    const paper = { name: 'Papel Higienico Campanita Soft 4 u' };
+    const napkins = { name: 'Servilletas Campanita Soft' };
+    const asado = { name: 'Asado de cerdo' };
+    const chop = { name: 'Chuleta de cerdo' };
+    assert.ok(typeScore('papel higienico campanita soft', paper) > typeScore('papel higienico campanita soft', napkins));
+    assert.ok(typeScore('asado de cerdo', asado) > typeScore('asado de cerdo', chop));
+    assert.equal(typeScore('leche', { name: 'Leche entera' }), typeScore('leche', { name: 'Leche descremada' }));
+    assert.equal(typeScore('leche', { name: 'Snack Carne Pedigree', brand: 'Pedigree' }), 0);
+    assert.equal(typeScore('', paper), 0);
+  });
+
+  it('widens a missed query from the head and a short list', () => {
+    assert.deepEqual(widerQueries('pastas'), ['fideo']);
+    assert.deepEqual(widerQueries('spaghetti'), ['fideo spaghetti', 'tallarin']);
+    assert.deepEqual(widerQueries('spaguetti'), ['fideo spaghetti', 'tallarin']);
+    assert.deepEqual(widerQueries('huevos'), ['huevos blanco']);
+    assert.deepEqual(widerQueries('parmesano'), ['queso rallado']);
+    assert.deepEqual(widerQueries('panceta'), ['bacon']);
+    assert.deepEqual(widerQueries('papel higienico'), ['papel']);
+    assert.deepEqual(widerQueries('leche'), []);
   });
 });

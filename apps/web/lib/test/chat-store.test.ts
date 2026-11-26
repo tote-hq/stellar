@@ -392,6 +392,15 @@ describe('chat store: dual checkout flags', () => {
     assert.equal(back?.dualCheckout, true);
   });
 
+  it('does not restore a Coto cart as the dual-checkout offer', () => {
+    const coto = cart({ retailer: 'coto', cartId: 'coto-1' });
+    const block: Block = { kind: 'cart', id: 'b4', cart: coto, dualCheckout: true };
+    save({ state: { blocks: [block], cart: { cart: coto, dualCheckout: true } } });
+    const back = loadChat('c1');
+    assert.equal(back?.cart?.retailer, 'coto');
+    assert.equal(back?.dualCheckout, undefined);
+  });
+
   it('keeps search-compare card fields and chains', () => {
     const block: Block = {
       kind: 'search_compare',

@@ -47,9 +47,11 @@ put it in. That matters most directly above a button that spends money.
 If you add a render tool, keep the property. The moment an input carries a
 value rather than a reference, the grid can be wrong.
 
-A search grid under dual compare is a server pick, not a model call. The card
-shows one available product per type per chain, chosen in `one-per-type.ts`.
-The model does not choose which row of that search to show. In compare mode
+A search grid under dual compare is a server pick, not a model call. While
+both chains are open, the card shows one available product per type per chain:
+the cheapest hit in the best-matching tier. After the shopper chooses a chain,
+that chain's card lists several, ranked, best match first. The model does not
+choose which row to show. In compare mode
 `render_products` is refused by the server for SKUs already on that row
 (`RenderCache.compared`). The prompt asks the model not to call it; the
 refusal is what keeps the extra grid off.
@@ -106,7 +108,10 @@ fingerprint has changed since the last card. Four parts hold it up:
   account that is not admitted. Pay on any Coto card charges the live basket.
   The gate phrase replaces the generic "cannot be paid yet" line. A Día cart
   without a link still does not draw. The link rule exists because a Día
-  card's action is that link.
+  card's action is that link. `dualCheckout` is stamped only while no chain
+  is chosen, and it is never put on a Coto cart. The newest Coto card shows
+  the live basket, so its lines and total match the rail. Older Coto cards
+  stay the record of what the basket was then.
 
   Before the banner and before hop 0, if the cache has no cart and the session
   still has Coto lines or a Día cart id, the loop calls `view_cart` in-process.
@@ -328,7 +333,9 @@ Now there is a `status` event, and it never creates a block:
   responder"), not `network` ("No se envió"). The retry control is the same
   — history is still only written on a clean return — but the copy is true.
 - **`thinking`** at the top of every hop, with its index. Hop 0 is reading
-  the user; later hops are reading tool results.
+  the user; later hops are reading tool results. The model's reasoning
+  stream is not shown in the thread. `onThinking` is a no-op. The `thinking`
+  event stays in the protocol so an old bundle still parses.
 - **`fallback`** is in the protocol and emitted by nothing, since §5. Left
   there deliberately: an old bundle meeting a new server is the reason wire
   protocols shrink slowly.
@@ -386,9 +393,17 @@ carrito de Día …" (or Coto). That sentence calls `choose_retailer` if the
 order is not already that chain, then `add_to_cart` and `get_cart_link` in
 the same turn. The prompt, the tool description and the tool result say the
 same thing. Stopping after `choose_retailer` on an Armar turn leaves the
-compare card on screen and no cart. The search card shows one product per
-type per chain, picked on the server (`pickDia` / `pickCoto`). Armar adds
-that pick, one per type. `pairDia` / `pairCoto` stay the item the fee gap
+compare card on screen and no cart. While both chains are open, the search
+card shows one product per type per chain, the cheapest in the best-matching
+tier, picked on the server (`pickDia` / `pickCoto`). After a chain is chosen,
+that chain's card lists up to six, ranked. A later search for the same query
+puts ids not yet in `RenderCache.shown` first. A typed set that is empty tries
+a short wider pass, in-process under the row already open, before the card
+says the type is missing. Hits remembered on the turn that score for the query
+join that pass; the note marks them `seen`. A type that matches a cart line is
+`inCart` and is not "no está". After "Quiero seguir en {store}.", the composer
+offers Armar and says she can keep typing. Armar adds the pick, one per type.
+`pairDia` / `pairCoto` stay the item the fee gap
 was computed on. They are not what Armar adds when they differ from the pick.
 The gap and the 20% fee are drawn on the close table, after a cart exists.
 
@@ -439,7 +454,7 @@ shopper confirms the existing switch dialog. The cart card then draws through
 ## Before you commit
 
 ```
-npm test                        # 804: mcp 217 · trust 1 · web 586
+npm test                        # 814: mcp 220 · trust 1 · web 593
 npm run typecheck -w @changuito/web
 npm run build
 ```

@@ -48,7 +48,7 @@ export function cartAdded(
     id: prior?.id ?? nextId(),
     cart: event.cart,
     ...(handoffUrl ? { handoffUrl } : {}),
-    ...(event.dualCheckout ? { dualCheckout: true } : {}),
+    ...(event.cart.retailer !== 'coto' && event.dualCheckout ? { dualCheckout: true } : {}),
     ...(event.soloDia ? { soloDia: true } : {}),
     ...(event.orderable === false ? { orderable: false } : {}),
   };
@@ -62,7 +62,7 @@ export function cartAdded(
     cart: {
       cart: event.cart,
       ...(handoffUrl ? { handoffUrl } : {}),
-      ...(event.dualCheckout ? { dualCheckout: true } : {}),
+      ...(event.cart.retailer !== 'coto' && event.dualCheckout ? { dualCheckout: true } : {}),
       ...(event.soloDia ? { soloDia: true } : {}),
     },
   };
@@ -232,9 +232,14 @@ export interface ChatState {
 
 export const initialState: ChatState = { blocks: [], streaming: false };
 
-/** The rail hides its pay control while the dual mock cards are the way to pay. */
+/**
+ * The rail hides its pay control while the dual mock cards are the way to pay.
+ * A live Coto cart is never that offer. A live cart uses its own flag.
+ * With no live cart, a Día cart or a settled compare can still carry it.
+ */
 export function dualCheckoutOn(state: Pick<ChatState, 'blocks' | 'cart'>): boolean {
-  if (state.cart?.dualCheckout) return true;
+  if (state.cart?.cart.retailer === 'coto') return false;
+  if (state.cart) return state.cart.dualCheckout === true;
   for (const block of state.blocks) {
     if (block.kind === 'cart' && block.dualCheckout) return true;
     if (
@@ -455,7 +460,8 @@ export function applyEvent(state: ChatState, e: UiEvent): ChatState {
         // other order, where dropping it would remove a button the user saw.
         handoffUrl: e.handoffUrl ?? prior?.handoffUrl,
         // The flag is read every hop. A later card without it is the flag off.
-        ...(e.dualCheckout ? { dualCheckout: true } : {}),
+        // A Coto cart never carries it: Pay is the gate, not the dual mock.
+        ...(e.cart.retailer !== 'coto' && e.dualCheckout ? { dualCheckout: true } : {}),
         ...(e.soloDia ? { soloDia: true } : {}),
         ...(e.orderable === false ? { orderable: false } : {}),
       });
@@ -469,7 +475,7 @@ export function applyEvent(state: ChatState, e: UiEvent): ChatState {
         cart: {
           cart: e.cart,
           handoffUrl: e.handoffUrl ?? prior?.handoffUrl,
-          ...(e.dualCheckout ? { dualCheckout: true } : {}),
+          ...(e.cart.retailer !== 'coto' && e.dualCheckout ? { dualCheckout: true } : {}),
           ...(e.soloDia ? { soloDia: true } : {}),
         },
         // Reusing the id matters: React keys off it, so the card updates in

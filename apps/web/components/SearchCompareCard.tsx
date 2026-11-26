@@ -102,8 +102,9 @@ function TypeSlot({
 
 /**
  * One row of types, Coto then Día, before a cart exists.
- * Each chain shows one card per type. The server sends the typed pick.
- * `cheapestAvailable` still collapses a stored block that lists several rows.
+ * While both chains are open, each chain shows one card per type.
+ * After a chain is chosen, that chain's block lists every ranked item.
+ * A stored dual block still collapses with `cheapestAvailable`.
  * Prices come from the event. A chain with no pick has no buttons.
  */
 export function SearchCompareCard({
@@ -140,18 +141,26 @@ export function SearchCompareCard({
       </div>
       {chains.map((chain) => {
         const store = RETAILER_NAMES[chain];
-        const slots = blocks.map((block) => {
+        const slots = blocks.flatMap((block) => {
           const items = chain === 'dia' ? block.dia : block.coto;
-          return { block, item: cheapestAvailable(items) };
+          const chosen = block.chains?.length === 1;
+          const shown = chosen
+            ? items.filter((item) => item.available && item.shelfCentavos > 0)
+            : (() => {
+                const one = cheapestAvailable(items);
+                return one ? [one] : [];
+              })();
+          if (shown.length === 0) return [{ key: block.id, block, item: undefined as SearchCompareItem | undefined }];
+          return shown.map((item) => ({ key: `${block.id}:${item.id}`, block, item }));
         });
         const anyPick = slots.some((slot) => slot.item);
         return (
           <section key={chain} className="search-compare-section" aria-label={store}>
             <h3 className="search-compare-store">{store}</h3>
             <ul className="grid">
-              {slots.map(({ block, item }) => (
+              {slots.map(({ key, block, item }) => (
                 <TypeSlot
-                  key={block.id}
+                  key={key}
                   typeLabel={block.typeLabel || block.query}
                   note={typeNote(chain, block, Boolean(item), block.typeLabel || block.query, store, search)}
                   announce={block.status === 'pending' && chain === 'coto'}

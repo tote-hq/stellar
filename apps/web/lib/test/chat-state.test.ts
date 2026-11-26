@@ -449,6 +449,15 @@ describe('dual checkout flags on the transcript', () => {
     assert.equal(card?.kind === 'cart' && card.dualCheckout, true);
     assert.equal(compare?.kind === 'compare' && compare.checkoutDemo, true);
     assert.equal(dualCheckoutOn(s), true);
+    const cotoCart = { ...cart('coto-1'), retailer: 'coto' };
+    const afterCoto = run([
+      cartEvent,
+      settled,
+      { t: 'cart', cart: cotoCart, dualCheckout: true },
+    ]);
+    const cotoCard = afterCoto.blocks.filter((b) => b.kind === 'cart').at(-1);
+    assert.equal(cotoCard?.kind === 'cart' && cotoCard.dualCheckout, undefined);
+    assert.equal(dualCheckoutOn(afterCoto), false);
     const waiting = run([cartEvent, pending]);
     const row = waiting.blocks.find((b) => b.kind === 'compare');
     assert.equal(row?.kind === 'compare' && row.checkoutDemo, undefined);

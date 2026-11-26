@@ -11,6 +11,7 @@ import {
   beginChainSearch,
   beginDualSearch,
   chainChoiceOn,
+  dualCheckoutStamp,
   dualSearchOn,
   searchCompareNote,
   searchMode,
@@ -308,5 +309,236 @@ describe('dual search', () => {
     assert.match(note, /match=none/);
     assert.deepEqual(cache.compared, ['pet', 'milk']);
     assert.equal(cache.searches?.find((row) => row.retailer === 'dia')?.available, 1);
+  });
+});
+
+describe('ranked search', () => {
+  it('stamps dual checkout only while the order is unset', () => {
+    assert.equal(dualCheckoutStamp({ demoOn: true, cotoEnabled: true }), true);
+    assert.equal(dualCheckoutStamp({ demoOn: true, cotoEnabled: true, order: 'coto' }), false);
+    assert.equal(dualCheckoutStamp({ demoOn: true, cotoEnabled: true, order: 'dia' }), false);
+    assert.equal(dualCheckoutStamp({ demoOn: false, cotoEnabled: true }), false);
+    assert.equal(dualCheckoutStamp({ demoOn: true, cotoEnabled: false }), false);
+  });
+
+  it('fees the gap between the best-tier picks, not the cheapest napkins', async () => {
+    const paper = (side: 'dia' | 'coto', centavos: number): Product | CatalogItem =>
+      side === 'dia'
+        ? {
+            ...dia(centavos, '7791111'),
+            skuId: 'dia-paper',
+            name: 'Papel Higienico Campanita Soft 4 u',
+          }
+        : {
+            ...coto(centavos, '7791111'),
+            id: 'coto-paper',
+            name: 'Papel Higienico Campanita Soft 4 u',
+          };
+    const napkinsDia: Product = {
+      ...dia(100, '7799999'),
+      skuId: 'dia-napkins',
+      name: 'Servilletas Campanita Soft',
+    };
+    const napkinsCoto: CatalogItem = {
+      ...coto(50, '7799999'),
+      id: 'coto-napkins',
+      name: 'Servilletas Campanita Soft',
+    };
+    const events: UiEvent[] = [];
+    const search = beginDualSearch({
+      id: 'tier',
+      query: 'papel higienico campanita soft',
+      cache: emptyCache(),
+      emit: (event) => events.push(event),
+      searcher: { async search() { return [napkinsCoto, paper('coto', 4000) as CatalogItem]; } },
+    });
+    await search.finish({ products: [napkinsDia, paper('dia', 5000) as Product], failed: false });
+    const finished = events[1];
+    if (finished?.t !== 'search_compare' || finished.status === 'pending') assert.fail('expected a card');
+    assert.equal(finished.dia[0]?.id, 'dia-paper');
+    assert.equal(finished.coto[0]?.id, 'coto-paper');
+    assert.equal(finished.gapCentavos, 1000);
+    assert.equal(finished.feeCentavos, feeCentavosOf(1000));
+  });
+
+  it('lists several ranked Coto hits and puts unseen ids first', async () => {
+    const hits = [1, 2, 3, 4, 5].map((n) => ({
+      ...coto(1000 + n),
+      id: `c${n}`,
+      name: `Leche ${n}`,
+    }));
+    const limits: number[] = [];
+    const events: UiEvent[] = [];
+    const cache = emptyCache();
+    const first = beginChainSearch({
+      chain: 'coto',
+      id: 'many',
+      query: 'leche',
+      cache,
+      emit: (event) => events.push(event),
+      searcher: {
+        async search(_query, opts) {
+          limits.push(opts?.limit ?? 0);
+          return hits;
+        },
+      },
+    });
+    const note = await first.finish();
+    const finished = events[1];
+    if (finished?.t !== 'search_compare' || finished.status === 'pending') assert.fail('expected a card');
+    assert.ok(finished.coto.length > 1);
+    assert.equal(finished.coto.length, 5);
+    assert.match(note, /coto=5/);
+    assert.deepEqual(limits, [24]);
+    assert.deepEqual(
+      finished.coto.map((item) => item.id),
+      ['c1', 'c2', 'c3', 'c4', 'c5'],
+    );
+
+    cache.shown = finished.coto.map((item) => item.id);
+    const againEvents: UiEvent[] = [];
+    const extra = { ...coto(50), id: 'c-new', name: 'Leche nueva' };
+    const second = beginChainSearch({
+      chain: 'coto',
+      id: 'more',
+      query: 'leche',
+      cache,
+      emit: (event) => againEvents.push(event),
+      searcher: { async search() { return [...hits, extra]; } },
+    });
+    await second.finish();
+    const more = againEvents[1];
+    if (more?.t !== 'search_compare' || more.status === 'pending') assert.fail('expected a second card');
+    assert.equal(more.coto[0]?.id, 'c-new');
+  });
+
+  it('tries a wider query before saying the type is missing', async () => {
+    const calls: string[] = [];
+    const events: UiEvent[] = [];
+    const cache = emptyCache();
+    const search = beginChainSearch({
+      chain: 'coto',
+      id: 'wide',
+      query: 'pastas',
+      cache,
+      emit: (event) => events.push(event),
+      searcher: {
+        async search(query) {
+          calls.push(query);
+          if (query === 'fideo') {
+            return [{ ...coto(1500), id: 'fideos', name: 'Fideos spaghetti' }];
+          }
+          return [];
+        },
+      },
+    });
+    const note = await search.finish();
+    const finished = events[1];
+    if (finished?.t !== 'search_compare' || finished.status === 'pending') assert.fail('expected a card');
+    assert.deepEqual(calls, ['pastas', 'fideo']);
+    assert.equal(finished.noPair, undefined);
+    assert.equal(finished.coto[0]?.id, 'fideos');
+    assert.ok((cache.searches?.find((row) => row.retailer === 'coto')?.available ?? 0) > 0);
+    assert.doesNotMatch(note, /noPair/);
+
+    const diaEvents: UiEvent[] = [];
+    const diaSearch = beginChainSearch({
+      chain: 'dia',
+      id: 'wide-dia',
+      query: 'pastas',
+      cache: emptyCache(),
+      emit: (event) => diaEvents.push(event),
+      searchDia: async (term) => {
+        assert.equal(term, 'fideo');
+        return {
+          failed: false,
+          products: [{ ...dia(1800), skuId: 'dia-fideos', name: 'Fideos spaghetti' }],
+        };
+      },
+    });
+    await diaSearch.finish({ products: [], failed: false });
+    const diaCard = diaEvents[1];
+    if (diaCard?.t !== 'search_compare' || diaCard.status === 'pending') assert.fail('expected a día card');
+    assert.equal(diaCard.noPair, undefined);
+    assert.equal(diaCard.dia[0]?.id, 'dia-fideos');
+
+    const emptyEvents: UiEvent[] = [];
+    const empty = beginChainSearch({
+      chain: 'coto',
+      id: 'none',
+      query: 'pastas',
+      cache: emptyCache(),
+      emit: (event) => emptyEvents.push(event),
+      searcher: { async search() { return []; } },
+    });
+    await empty.finish();
+    const missing = emptyEvents[1];
+    if (missing?.t !== 'search_compare' || missing.status === 'pending') assert.fail('expected an empty card');
+    assert.deepEqual(missing.noPair, ['coto']);
+  });
+
+  it('does not call a cart line missing, and prefers a remembered SKU', async () => {
+    const events: UiEvent[] = [];
+    const cache = emptyCache();
+    cache.cart = {
+      retailer: 'coto',
+      cartId: 'coto-1',
+      lines: [
+        {
+          index: 0,
+          skuId: 'held',
+          name: 'Leche entera',
+          quantity: 1,
+          sellerId: '1',
+          unitPrice: { centavos: 2000, display: '$20' },
+          lineTotal: { centavos: 2000, display: '$20' },
+          available: true,
+        },
+      ],
+      total: { centavos: 2000, display: '$20' },
+      messages: [],
+    };
+    const search = beginChainSearch({
+      chain: 'coto',
+      id: 'held',
+      query: 'leche',
+      cache,
+      emit: (event) => events.push(event),
+      searcher: { async search() { return []; } },
+    });
+    const note = await search.finish();
+    const finished = events[1];
+    if (finished?.t !== 'search_compare' || finished.status === 'pending') assert.fail('expected a card');
+    assert.equal(finished.noPair, undefined);
+    assert.match(note, /inCart=held/);
+
+    const remembered = emptyCache();
+    remembered.coto = {
+      paper: {
+        id: 'paper',
+        name: 'Papel Higienico Campanita Soft 4 u',
+        shelfCentavos: 4500,
+        available: true,
+      },
+    };
+    const seenEvents: UiEvent[] = [];
+    const again = beginChainSearch({
+      chain: 'coto',
+      id: 'seen',
+      query: 'papel higienico campanita soft',
+      cache: remembered,
+      emit: (event) => seenEvents.push(event),
+      searcher: {
+        async search() {
+          return [{ ...coto(100), id: 'napkins', name: 'Servilletas Campanita Soft' }];
+        },
+      },
+    });
+    const seenNote = await again.finish();
+    const card = seenEvents[1];
+    if (card?.t !== 'search_compare' || card.status === 'pending') assert.fail('expected a card');
+    assert.equal(card.coto[0]?.id, 'paper');
+    assert.equal(card.coto[0]?.shelfCentavos, 4500);
+    assert.match(seenNote, /seen=paper/);
   });
 });

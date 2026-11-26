@@ -13,13 +13,13 @@ import type { UiEvent } from '../protocol';
 import { autoCompare } from './auto-compare';
 import { syncRailCart } from './cart-sync';
 import { earlyCityAsk, earlyLocationAsk, transcriptHasPostal } from './early-ask';
-import { changuitoPrompt, stateBanner } from './prompt';
+import { changuitoPrompt, payBanner, stateBanner } from './prompt';
 import { classifyTopic, offTopicRefusal } from './topic-guard.ts';
 import { anthropicProvider } from './providers/anthropic';
 import { openaiProvider } from './providers/openai';
 import type { HopResult } from './providers/types';
 import { freezeAllowed, freezeCotoReal } from '../checkout/coto-real.ts';
-import { beginChainSearch, beginDualSearch, chainChoiceOn, searchMode } from './search-compare';
+import { beginChainSearch, beginDualSearch, chainChoiceOn, dualCheckoutStamp, searchMode } from './search-compare';
 import {
   autoRenderCart,
   cartWriteNeedsChoice,
@@ -262,27 +262,35 @@ export async function runTurn(
   // basket, so it must not become the postal-code question and it must not
   // open a tool. Ambiguous grocery talk falls through; see topic-guard.ts.
   const search = await getRetailerSearch();
-  if (classifyTopic(userText, { hasImage: Boolean(image) }) === 'refuse') {
-    const reply = offTopicRefusal(lang, userText);
+  const sessionBanner = (unknown: boolean) => {
     const location = session.state.getLocation();
     const cart = turn.cache.cart;
+    const order = session.state.getOrder();
+    return stateBanner({
+      retailer: location?.retailer,
+      postalCode: location?.postalCode ?? session.state.getPendingPostal(),
+      city: session.state.getCity(),
+      cartLines: cart?.lines.length,
+      cartTotal: cart?.total.display,
+      searchOrder: search.order,
+      order,
+      cartUnknown: unknown,
+      pay: payBanner({
+        order,
+        retailer: cart?.retailer,
+        cotoPay: turn.cache.cotoPay,
+        dualCheckout: turn.cache.dualCheckout,
+        lines: cart?.lines,
+        totalCentavos: cart?.total.centavos,
+      }),
+    });
+  };
+  if (classifyTopic(userText, { hasImage: Boolean(image) }) === 'refuse') {
+    const reply = offTopicRefusal(lang, userText);
     turn.messages.push(
       {
         role: 'user',
-        content: shopperTurn(
-          userText,
-          stateBanner({
-            retailer: location?.retailer,
-            postalCode: location?.postalCode ?? session.state.getPendingPostal(),
-            city: session.state.getCity(),
-            cartLines: cart?.lines.length,
-            cartTotal: cart?.total.display,
-            searchOrder: search.order,
-            order: session.state.getOrder(),
-            cartUnknown,
-          }),
-          image,
-        ),
+        content: shopperTurn(userText, sessionBanner(cartUnknown), image),
       },
       { role: 'assistant', content: [{ type: 'text', text: reply }] },
     );
@@ -326,25 +334,9 @@ export async function runTurn(
   const mcpTools = await mcpToolsToAnthropic(session.client);
   const tools = [...mcpTools, ...RENDER_TOOLS];
 
-  const location = session.state.getLocation();
-  const cart = turn.cache.cart;
-
   turn.messages.push({
     role: 'user',
-    content: shopperTurn(
-      userText,
-      stateBanner({
-        retailer: location?.retailer,
-        postalCode: location?.postalCode ?? session.state.getPendingPostal(),
-        city: session.state.getCity(),
-        cartLines: cart?.lines.length,
-        cartTotal: cart?.total.display,
-        searchOrder: search.order,
-        order: session.state.getOrder(),
-        cartUnknown,
-      }),
-      image,
-    ),
+    content: shopperTurn(userText, sessionBanner(cartUnknown), image),
   });
   const priorAssistant = assistantBeforeLatestUser(turn.messages);
 
@@ -374,7 +366,9 @@ export async function runTurn(
 
     const cb = {
       onText: (delta: string) => emit({ t: 'text', delta }),
-      onThinking: (delta: string) => emit({ t: 'thinking', delta }),
+      // Reasoning stays off the thread. The status event still names the hop.
+      // The thinking event stays in the protocol so an old bundle still parses.
+      onThinking: () => undefined,
     };
 
     emit({ t: 'status', stage: 'thinking', hop });
@@ -427,11 +421,6 @@ export async function runTurn(
     // Every result goes back in one user message. Splitting them across
     // messages teaches the model not to call tools in parallel.
     const results: Anthropic.ToolResultBlockParam[] = [];
-    // Once per hop, before any cart card. The bit is not stored on the turn.
-    // retailer_search.enabled.coto off turns off compare + Coto pay; Día stays on.
-    // Dual UI needs Coto on. Solo Día keeps the demo fee path with Coto off.
-    turn.cache.dualCheckout = demoOn && retailers.enabled.coto;
-    turn.cache.soloDia = demoOn && !retailers.enabled.coto;
     for (const use of uses) {
       // The trail is for work, not for drawing. An MCP call reaches a
       // supermarket and can take twenty seconds, so naming it explains the
@@ -478,10 +467,21 @@ export async function runTurn(
           postalCode,
           cache: turn.cache,
           emit,
+          cotoLineIds: session.state.cotoLines().map((line) => line.id),
         }).finish();
         result = { type: 'tool_result', tool_use_id: use.id, content: note };
       } else {
-        const chainSearch =
+        const searchDia = async (term: string) => {
+          const wider = await callMcpTool(session.client, {
+            id: `${use.id}:wider`,
+            name: 'search_products',
+            input: { query: term },
+          });
+          rememberStructured(turn.cache, wider.structured);
+          return { products: productsOf(wider.structured), failed: wider.block.is_error === true };
+        };
+        const cotoLineIds = session.state.cotoLines().map((line) => line.id);
+      const chainSearch =
           use.name === 'search_products' && mode === 'dia'
             ? beginChainSearch({
                 chain: 'dia',
@@ -490,6 +490,8 @@ export async function runTurn(
                 postalCode,
                 cache: turn.cache,
                 emit,
+                searchDia,
+                cotoLineIds,
               })
             : use.name === 'search_products' && mode === 'both'
               ? beginDualSearch({
@@ -498,6 +500,8 @@ export async function runTurn(
                   postalCode,
                   cache: turn.cache,
                   emit,
+                  searchDia,
+                  cotoLineIds,
                 })
               : undefined;
         const call = await callMcpTool(session.client, use);
@@ -522,6 +526,15 @@ export async function runTurn(
       }
 
       if (traced) emit({ t: 'tool_end', id: use.id, ok: result.is_error !== true, ms: Date.now() - t });
+
+      // After the tool, so a choose_retailer in this hop clears the stamp
+      // before the next card. Solo Día keeps the demo fee path with Coto off.
+      turn.cache.dualCheckout = dualCheckoutStamp({
+        demoOn,
+        cotoEnabled: retailers.enabled.coto === true,
+        order: session.state.getOrder(),
+      });
+      turn.cache.soloDia = demoOn && !retailers.enabled.coto;
 
       // After the trail row closes, so the card lands under a finished line
       // rather than beside a spinner. The basket is the one thing on screen

@@ -201,4 +201,70 @@ describe('searchCompare', () => {
     assert.equal(diaOnly.match, 'none');
     assert.equal(diaOnly.gapCentavos, undefined);
   });
+
+  it('picks the cheapest hit in the best-matching tier', () => {
+    const paper = (id: string, centavos: number, ean: string) =>
+      coto({
+        id,
+        name: 'Papel Higienico Campanita Soft 4 u',
+        ean,
+        shelfPrice: { centavos, display: '$0' },
+      });
+    const napkins = coto({
+      id: 'napkins',
+      name: 'Servilletas Campanita Soft',
+      ean: '7799999',
+      shelfPrice: { centavos: 100, display: '$0' },
+    });
+    const ranked = assembleSearchCompare({
+      query: 'papel higienico campanita soft',
+      diaProducts: [
+        dia({
+          skuId: 'dia-paper',
+          name: 'Papel Higienico Campanita Soft 4 u',
+          ean: '7791111',
+          price: { centavos: 5000, display: '$0' },
+        }),
+        dia({
+          skuId: 'dia-napkins',
+          name: 'Servilletas Campanita Soft',
+          ean: '7799999',
+          price: { centavos: 100, display: '$0' },
+        }),
+      ],
+      diaFailed: false,
+      coto: { ok: true, items: [napkins, paper('coto-paper', 4000, '7791111')] },
+    });
+    assert.equal(ranked.cotoPick?.id, 'coto-paper');
+    assert.equal(ranked.diaPick?.id, 'dia-paper');
+    assert.equal(ranked.gapCentavos, 1000);
+
+    const asado = assembleSearchCompare({
+      query: 'asado de cerdo',
+      diaProducts: [],
+      diaFailed: false,
+      coto: {
+        ok: true,
+        items: [
+          coto({ id: 'chop', name: 'Chuleta de cerdo', shelfPrice: { centavos: 100, display: '$0' } }),
+          coto({ id: 'roast', name: 'Asado de cerdo', shelfPrice: { centavos: 900, display: '$0' } }),
+        ],
+      },
+    });
+    assert.equal(asado.cotoPick?.id, 'roast');
+
+    const milk = assembleSearchCompare({
+      query: 'leche',
+      diaProducts: [dia({ price: { centavos: 3000, display: '$0' } })],
+      diaFailed: false,
+      coto: {
+        ok: true,
+        items: [
+          coto({ id: 'dear', shelfPrice: { centavos: 4000, display: '$0' }, ean: '7790002' }),
+          coto({ id: 'cheap', shelfPrice: { centavos: 500, display: '$0' } }),
+        ],
+      },
+    });
+    assert.equal(milk.cotoPick?.id, 'cheap');
+  });
 });

@@ -129,6 +129,13 @@ test('coto cache and searches round-trip, and an older turn still decodes', () =
   const withCompared = decodeTurn(JSON.parse(JSON.stringify(encodeTurn(turn))) as unknown);
   assert.deepEqual(withCompared?.cache.compared, ['d1', 'd2']);
   assert.equal(older.cache.compared, undefined);
+
+  turn.cache.shown = ['c1', 'd9'];
+  const withShown = decodeTurn(JSON.parse(JSON.stringify(encodeTurn(turn))) as unknown);
+  assert.deepEqual(withShown?.cache.shown, ['c1', 'd9']);
+  assert.equal(older.cache.shown, undefined);
+  const absent = decodeTurn({ v: 1, messages: [], products: [] });
+  assert.equal(absent?.cache.shown, undefined);
 });
 
 test('an empty conversation round trips to an empty one, not to undefined', () => {

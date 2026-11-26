@@ -78,6 +78,11 @@ export interface RenderCache {
    */
   compared?: string[];
   /**
+   * Ids already drawn on a search_compare card. A later chosen-chain search
+   * puts the ones that are not here first. Optional, so an older turn still decodes.
+   */
+  shown?: string[];
+  /**
    * This request's Coto admission. Set by the route from `admitCotoRequest`,
    * not by the model. Optional so a turn stored before the field still decodes.
    * A missing value draws a Coto cart as not orderable.
@@ -213,7 +218,7 @@ export function autoRenderCart(cache: RenderCache, emit: (e: UiEvent) => void): 
     cart,
     ...(handoffUrl ? { handoffUrl } : {}),
     ...(cotoBasket ? { orderable: cotoOrderable(cache, cart) } : {}),
-    ...(cache.dualCheckout ? { dualCheckout: true } : {}),
+    ...(cache.dualCheckout && !cotoBasket ? { dualCheckout: true } : {}),
     ...(cache.soloDia ? { soloDia: true } : {}),
   });
   return true;
@@ -400,7 +405,7 @@ export function runRenderTool(
       cart: cache.cart,
       ...(handoffUrl ? { handoffUrl } : {}),
       ...(cotoBasket ? { orderable: cotoOrderable(cache, cache.cart) } : {}),
-      ...(cache.dualCheckout ? { dualCheckout: true } : {}),
+      ...(cache.dualCheckout && !cotoBasket ? { dualCheckout: true } : {}),
       ...(cache.soloDia ? { soloDia: true } : {}),
     });
     return result(`Rendered the cart: ${cache.cart.lines.length} line(s), ${cache.cart.total.display}.`);

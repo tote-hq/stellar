@@ -188,6 +188,8 @@ export interface ChatCopy {
   buildCart: string;
   /** The message that click sends, in this language. */
   buildCartAsk: string;
+  /** Under Armar, after the shopper has chosen a chain. */
+  keepTyping: string;
   /** Shown while the recognizer is open, under the composer. */
   listening: string;
   attach: string;
@@ -477,6 +479,7 @@ const ES: UiCopy = {
     voiceStop: 'Parar el dictado',
     buildCart: 'Armar carrito',
     buildCartAsk: 'Armá el carrito con lo que charlamos y mostrame el pedido listo para pagar.',
+    keepTyping: 'Podés seguir escribiendo productos.',
     listening: 'Escuchando… hablá y lo busco.',
     attach: 'Adjuntar una imagen',
     camera: 'Sacar una foto',
@@ -745,6 +748,7 @@ const EN: UiCopy = {
     voiceStop: 'Stop dictation',
     buildCart: 'Build cart',
     buildCartAsk: 'Build the cart from what we discussed and show me the order ready to pay.',
+    keepTyping: 'You can keep typing products.',
     listening: "Listening… speak and I'll search.",
     attach: 'Attach an image',
     camera: 'Take a photo',
