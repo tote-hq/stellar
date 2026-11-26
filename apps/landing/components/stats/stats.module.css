@@ -168,6 +168,7 @@
 .segment button,
 .export,
 .theme,
+.lang,
 .reset {
   font: inherit;
   cursor: pointer;
@@ -179,7 +180,8 @@
 }
 
 .export,
-.theme {
+.theme,
+.lang {
   border: 1px solid var(--pill-border);
   background: var(--pill);
   color: var(--pill-text);
@@ -201,7 +203,8 @@
 }
 
 .export,
-.theme {
+.theme,
+.lang {
   width: 44px;
   padding: 0;
   display: inline-flex;
@@ -784,9 +787,9 @@
   }
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 1200px) {
   .kpis {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
   }
 
   .header {

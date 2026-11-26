@@ -1,8 +1,8 @@
 /**
  * Turns the snapshot into what a filter, a range and a chart mode show.
- * The waitlist is one product number, so the end-user card stays put when a
- * network is selected. Chain counts move. Seeker has no published rows, so
- * that filter is zeros rather than a split we do not have.
+ * The waitlist and the real-purchases figures are product numbers, so those
+ * cards stay put when a network is selected. Chain counts move. Seeker has
+ * no published rows, so that filter is zeros rather than a split we do not have.
  */
 
 import { format, type MessageKey } from './i18n.ts';
@@ -30,7 +30,7 @@ export interface Phrase {
 }
 
 export interface Kpi {
-  id: 'endUsers' | 'transactions' | 'carts' | 'wallets';
+  id: 'endUsers' | 'realPurchases' | 'transactions' | 'carts' | 'wallets';
   value: number;
   parts: Phrase[];
 }
@@ -149,10 +149,15 @@ export function kpis(filter: NetworkFilter, snap: StatsSnapshot = FALLBACK_SNAPS
   const TOTALS = snap.totals;
   const userParts: Phrase[] = [];
   if (TOTALS.endUsersDelta30d !== null) userParts.push({ key: 'delta', vars: { count: TOTALS.endUsersDelta30d } });
-  userParts.push({ key: 'realOrder', vars: { count: TOTALS.realOrders } });
   if (TOTALS.appAccounts !== null) userParts.push({ key: 'appAccounts', vars: { count: TOTALS.appAccounts } });
   if (snap.updatedAt !== null && snap.sources.waitlist !== 'live') userParts.push({ key: 'lastKnown' });
   const endUsers: Kpi = { id: 'endUsers', value: TOTALS.endUsers, parts: userParts };
+  // Real purchases are Stellar settled escrows (ARS supermarket payments).
+  // The box stays put when a network is selected. last-known applies only
+  // when the escrow event read failed.
+  const purchaseParts: Phrase[] = [{ key: 'realPurchaseNote' }];
+  if (snap.updatedAt !== null && snap.sources.realPurchases !== 'live') purchaseParts.push({ key: 'lastKnown' });
+  const realPurchases: Kpi = { id: 'realPurchases', value: TOTALS.realPurchases, parts: purchaseParts };
 
   const transactions: Kpi =
     filter === 'seeker'
@@ -220,7 +225,7 @@ export function kpis(filter: NetworkFilter, snap: StatsSnapshot = FALLBACK_SNAPS
               ],
             };
 
-  return [endUsers, transactions, carts, wallets];
+  return [endUsers, realPurchases, transactions, carts, wallets];
 }
 
 function instructionRows(snap: StatsSnapshot): { id: string; count: number; label: MessageKey }[] {
@@ -330,6 +335,7 @@ export function networkNameKey(filter: NetworkFilter): MessageKey {
 
 export function kpiTitleKey(id: Kpi['id']): MessageKey {
   if (id === 'endUsers') return 'kpiEndUsers';
+  if (id === 'realPurchases') return 'kpiRealPurchases';
   if (id === 'transactions') return 'kpiTx';
   if (id === 'carts') return 'kpiCarts';
   return 'kpiWallets';

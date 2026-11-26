@@ -5,8 +5,9 @@
  * devnet JSON-RPC for the escrow program, Stellar Expert for Soroban contract
  * events, Horizon for Stellar transactions. Product numbers come from
  * Postgres (`STATS_STELLAR_DATABASE_URL`, `STATS_SOLANA_DATABASE_URL`):
- * app accounts and delivered orders. The waitlist figure is live when
- * `STATS_WAITLIST_COUNT_URL` is set; otherwise it stays on the last
+ * app accounts. Real purchases are the live `settled` count on the Stellar
+ * testnet escrow; they are not read from Postgres. The waitlist figure is
+ * live when `STATS_WAITLIST_COUNT_URL` is set; otherwise it stays on the last
  * published value. When a source is missing or fails, that part
  * keeps its published value and the snapshot says the source is unavailable.
  * Nothing here throws out of loadLiveSnapshot.
@@ -219,6 +220,8 @@ export interface ChainRead {
   settledUsdc: number;
   /** Bodies whose program logs were read. Zero means instruction totals were not scanned. */
   parsed: number;
+  /** True when the Stellar escrow event list was fetched (settled is then a live count). */
+  escrowEvents?: boolean;
 }
 
 interface SolSig {
@@ -545,6 +548,7 @@ export async function readStellar(deps: LiveDeps): Promise<ChainRead> {
   read.recent = ordered.slice(0, RECENT_PER_CHAIN).map(([hash]) => ({ network: 'stellar', hash }));
   // Event totals are the instruction scan. Solana uses `parsed` for transaction bodies.
   read.parsed = 1;
+  read.escrowEvents = escrow !== null;
   return read;
 }
 
@@ -831,7 +835,9 @@ function assembleSnapshot(deps: LiveDeps, box: ReadBox): StatsSnapshot {
     endUsers: waitlist ?? b.endUsers,
     // The published 30-day delta is pinned to the snapshot day, so a live page never repeats it.
     endUsersDelta30d: null,
-    realOrders: db?.delivered ?? b.realOrders,
+    // Live supermarket purchases: Stellar settled escrows only. Do not use
+    // Postgres `orders.status = 'done'` (db.delivered) for this figure.
+    realPurchases: stl?.escrowEvents ? stl.settled : b.realPurchases,
     txSolana: sol ? sol.txs : b.txSolana,
     txStellar: stl ? stl.txs : b.txStellar,
     txDelta30d:
@@ -877,6 +883,7 @@ function assembleSnapshot(deps: LiveDeps, box: ReadBox): StatsSnapshot {
       waitlist: !waitlistCountConfigured(deps.env) ? 'snapshot' : waitlist !== null ? 'live' : 'unavailable',
       appDb: !dbConfigured(deps) ? 'snapshot' : db ? 'live' : 'unavailable',
       github: prs === null ? 'unavailable' : 'live',
+      realPurchases: stl?.escrowEvents ? 'live' : 'unavailable',
     },
   };
 }

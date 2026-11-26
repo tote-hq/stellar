@@ -3,10 +3,12 @@
 import { useEffect, useId, useRef, useState } from 'react';
 
 import {
+  LANG_KEY,
   THEME_KEY,
   format,
   formatInt,
   messages,
+  parseLang,
   parseTheme,
   phraseLine,
   type Lang,
@@ -53,8 +55,6 @@ import {
 import styles from './stats.module.css';
 
 type Panel = 'overview' | 'transactions';
-
-const lang: Lang = 'en';
 
 function readStorage(key: string): string | null {
   try {
@@ -195,6 +195,7 @@ function ChartCard({
   mode,
   filter,
   snapshot,
+  lang,
 }: {
   kind: SeriesKind;
   title: string;
@@ -202,6 +203,7 @@ function ChartCard({
   mode: ChartMode;
   filter: NetworkFilter;
   snapshot: StatsSnapshot;
+  lang: Lang;
 }) {
   const t = messages(lang);
   const titleId = useId();
@@ -307,7 +309,7 @@ function ChartCard({
   );
 }
 
-function MeterList({ rows }: { rows: readonly Meter[] }) {
+function MeterList({ rows, lang }: { rows: readonly Meter[]; lang: Lang }) {
   const peak = plotTop(meterPeak(rows));
   return (
     <div className={styles.meters}>
@@ -354,6 +356,7 @@ function writeFilters(filter: NetworkFilter, range: RangeId, panel: Panel, mode:
 
 export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
   const [theme, setTheme] = useState<ThemeName>('light');
+  const [lang, setLang] = useState<Lang>('en');
   const [filter, setFilter] = useState<NetworkFilter>('all');
   const [range, setRange] = useState<RangeId>('all');
   const [panel, setPanel] = useState<Panel>('overview');
@@ -367,15 +370,16 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
 
   useEffect(() => {
     setTheme(parseTheme(readStorage(THEME_KEY)));
+    setLang(parseLang(readStorage(LANG_KEY)));
   }, []);
 
   useEffect(() => {
     const previous = document.documentElement.lang;
-    document.documentElement.lang = 'en';
+    document.documentElement.lang = lang === 'es' ? 'es-AR' : 'en';
     return () => {
       document.documentElement.lang = previous;
     };
-  }, []);
+  }, [lang]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -406,6 +410,11 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
   function chooseTheme(next: ThemeName) {
     setTheme(next);
     writeStorage(THEME_KEY, next);
+  }
+
+  function chooseLang(next: Lang) {
+    setLang(next);
+    writeStorage(LANG_KEY, next);
   }
 
   function resetFilters() {
@@ -450,6 +459,15 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
               {t.exportCsv}
             </span>
           </a>
+          <button
+            type="button"
+            className={styles.lang}
+            data-testid="stats-lang"
+            aria-label={lang === 'en' ? t.langToEs : t.langToEn}
+            onClick={() => chooseLang(lang === 'en' ? 'es' : 'en')}
+          >
+            {lang === 'en' ? t.langEs : t.langEn}
+          </button>
           <button
             type="button"
             className={styles.theme}
@@ -520,7 +538,7 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
             <article key={card.id} className={styles.card} data-testid={`stats-kpi-${card.id}`}>
               <h2 className={styles.kpiLabel}>
                 {t[kpiTitleKey(card.id)]}
-                {card.id === 'endUsers' || !chainMark ? null : <StaleMark label={chainMark} />}
+                {card.id === 'endUsers' || card.id === 'realPurchases' || !chainMark ? null : <StaleMark label={chainMark} />}
               </h2>
               <p className={styles.kpiValue}>{formatInt(card.value, lang)}</p>
               <p className={styles.kpiDetail}>{phraseLine(card.parts, lang)}</p>
@@ -576,6 +594,7 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
                 mode={mode}
                 filter={filter}
                 snapshot={snapshot}
+                lang={lang}
               />
               <ChartCard
                 kind="carts"
@@ -584,10 +603,11 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
                 mode={mode}
                 filter={filter}
                 snapshot={snapshot}
+                lang={lang}
               />
               <article className={styles.card} data-testid="stats-by-network">
                 <h3 className={styles.cardTitle}>{t.byNetwork}</h3>
-                <MeterList rows={networkMeters(filter, snapshot)} />
+                <MeterList rows={networkMeters(filter, snapshot)} lang={lang} />
               </article>
               <article className={styles.card} data-testid="stats-engineering">
                 <h3 className={styles.cardTitle}>{t.engineering}</h3>
@@ -606,7 +626,7 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
                     <p className={styles.miniScope}>{t.prsScope}</p>
                   </div>
                 </div>
-                <MeterList rows={engineeringMeters(filter)} />
+                <MeterList rows={engineeringMeters(filter)} lang={lang} />
               </article>
             </div>
           ) : (
