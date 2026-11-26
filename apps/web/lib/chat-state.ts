@@ -68,6 +68,52 @@ export function cartAdded(
   };
 }
 
+/** Body of POST /api/cart/add. `event` is null when the line was written and nothing new was drawn. */
+export interface CartAddReply {
+  ok?: boolean;
+  event?: Extract<UiEvent, { t: 'cart' }> | null;
+  snapshot?: SessionSnapshot;
+}
+
+export interface CartAddReplyApplied {
+  result: 'added' | 'failed';
+  /** What the next request must send. Unchanged when the add did not succeed. */
+  snapshot: SessionSnapshot | undefined;
+  apply: (state: ChatState) => ChatState;
+}
+
+/**
+ * What a card-click response does to the session and the transcript.
+ *
+ * A 200 with `ok: true` already wrote the line, including when `autoRenderCart`
+ * drew nothing (`event` is null — a Día basket whose link call failed). The
+ * snapshot still has to land, or the next chat turn rebuilds the MCP session
+ * without that cart id. A missing card is not a failure: the shopper must not
+ * see "could not add" for a line that is in the basket, and a retry would add
+ * it again. `ok: false` and a non-2xx response leave the snapshot and the
+ * transcript untouched.
+ */
+export function applyCartAddReply(
+  held: SessionSnapshot | undefined,
+  httpOk: boolean,
+  body: CartAddReply | null,
+): CartAddReplyApplied {
+  if (!httpOk || !body || body.ok !== true) {
+    return { result: 'failed', snapshot: held, apply: (state) => state };
+  }
+  const snapshot = body.snapshot ? body.snapshot : held;
+  const event = body.event && body.event.t === 'cart' ? body.event : null;
+  return {
+    result: 'added',
+    snapshot,
+    apply: (state) => {
+      if (event) return cartAdded(state, event, snapshot);
+      if (snapshot === undefined || state.snapshot === snapshot) return state;
+      return { ...state, snapshot };
+    },
+  };
+}
+
 /**
  * Why a turn never landed.
  *

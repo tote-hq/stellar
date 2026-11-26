@@ -5,8 +5,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { track } from './analytics';
 import { lastShown } from './chat-recall';
 import {
+  applyCartAddReply,
   applyEvent,
-  cartAdded,
   endTurn,
   failTurn,
   idNumber,
@@ -15,6 +15,7 @@ import {
   retryUser,
   seedIds,
   sendUser,
+  type CartAddReply,
   type ChatState,
   type SendFailure,
 } from './chat-state';
@@ -402,17 +403,11 @@ export function useChat(auth?: UseChatAuth) {
           ...(authRef.current.network ? { network: authRef.current.network } : {}),
         }),
       });
-      const data = (await res.json().catch(() => null)) as {
-        ok?: boolean;
-        event?: Extract<UiEvent, { t: 'cart' }> | null;
-        snapshot?: ChatState['snapshot'];
-      } | null;
-      if (!res.ok || !data || data.ok !== true || !data.event || data.event.t !== 'cart') return 'failed';
-      if (data.snapshot) snapshot.current = data.snapshot;
-      const event = data.event;
-      const nextSnapshot = data.snapshot;
-      setState((s) => cartAdded(s, event, nextSnapshot));
-      return 'added';
+      const data = (await res.json().catch(() => null)) as CartAddReply | null;
+      const applied = applyCartAddReply(snapshot.current, res.ok, data);
+      snapshot.current = applied.snapshot;
+      if (applied.result === 'added') setState(applied.apply);
+      return applied.result;
     } catch {
       return 'failed';
     }

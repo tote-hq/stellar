@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 
 import {
+  applyCartAddReply,
   applyEvent,
   cartAdded,
   canRetry,
@@ -159,6 +160,44 @@ describe('applyEvent', () => {
     assert.equal(fresh.blocks.length, 1);
     assert.equal(fresh.blocks[0].kind === 'cart' && fresh.blocks[0].cart.cartId, 'c2');
     assert.equal(fresh.cart?.cart.cartId, 'c2');
+  });
+
+  it('keeps a successful card add when the server drew no cart', () => {
+    // A Día add whose link call failed returns 200 { ok: true, event: null }
+    // after the line is already in the basket. Treating that as a failure
+    // shows "could not add" and drops the new cart id, so a retry adds twice
+    // and the next chat turn rebuilds an empty session.
+    const held = { carts: { dia: 'old' } };
+    const next = { carts: { dia: 'new' }, order: 'dia' as const };
+    const event = { t: 'cart' as const, cart: cart('new'), handoffUrl: 'https://dia/checkout' };
+
+    const drawn = applyCartAddReply(held, true, { ok: true, event, snapshot: next });
+    assert.equal(drawn.result, 'added');
+    assert.deepEqual(drawn.snapshot, next);
+    const withCard = drawn.apply(initialState);
+    assert.equal(withCard.blocks.length, 1);
+    assert.equal(withCard.blocks[0].kind === 'cart' && withCard.blocks[0].cart.cartId, 'new');
+    assert.deepEqual(withCard.snapshot, next);
+
+    resetIds();
+    const shown = run([{ t: 'text', delta: 'Listo.' }]);
+    const quiet = applyCartAddReply(held, true, { ok: true, event: null, snapshot: next });
+    assert.equal(quiet.result, 'added');
+    assert.deepEqual(quiet.snapshot, next);
+    const kept = quiet.apply(shown);
+    assert.deepEqual(kept.blocks, shown.blocks);
+    assert.equal(kept.cart, undefined);
+    assert.deepEqual(kept.snapshot, next);
+
+    const refused = applyCartAddReply(held, true, { ok: false, event, snapshot: next });
+    assert.equal(refused.result, 'failed');
+    assert.deepEqual(refused.snapshot, held);
+    assert.equal(refused.apply(shown), shown);
+
+    const http = applyCartAddReply(held, false, { ok: true, event: null, snapshot: next });
+    assert.equal(http.result, 'failed');
+    assert.deepEqual(http.snapshot, held);
+    assert.equal(http.apply(shown), shown);
   });
 
   it('drops the get_cart_link trail row once this turn draws the cart', () => {
