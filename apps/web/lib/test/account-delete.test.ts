@@ -33,12 +33,12 @@ describe('account delete', () => {
     const { POST } = await import('../../app/api/account/delete/route.ts');
     const { mintUserToken } = await import('../login-gate.ts');
     const { USER_COOKIE } = await import('../login-constants.ts');
-    const open = await POST(new Request('https://sol.changuito.me/api/account/delete', { method: 'POST' }));
+    const open = await POST(new Request('https://app.changuito.me/api/account/delete', { method: 'POST' }));
     assert.equal(open.status, 401);
 
     const cookie = `${USER_COOKIE}=${encodeURIComponent(await mintUserToken(ADDRESS, SECRET))}`;
     const wrong = await POST(
-      new Request('https://sol.changuito.me/api/account/delete', {
+      new Request('https://app.changuito.me/api/account/delete', {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie },
         body: JSON.stringify({ confirm: 'no' }),
@@ -63,7 +63,7 @@ describe('account delete', () => {
 
     const cookie = `${USER_COOKIE}=${encodeURIComponent(await mintUserToken(ADDRESS, SECRET))}`;
     const res = await POST(
-      new Request('https://sol.changuito.me/api/account/delete', {
+      new Request('https://app.changuito.me/api/account/delete', {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie },
         body: JSON.stringify({ confirm: 'delete-my-changuito-account' }),
@@ -91,7 +91,7 @@ describe('account delete', () => {
     try {
       const cookie = `${USER_COOKIE}=${encodeURIComponent(await mintUserToken(ADDRESS, SECRET))}`;
       const res = await POST(
-        new Request('https://sol.changuito.me/api/account/delete', {
+        new Request('https://app.changuito.me/api/account/delete', {
           method: 'POST',
           headers: { 'content-type': 'application/json', cookie },
           body: JSON.stringify({ confirm: 'delete-my-changuito-account' }),

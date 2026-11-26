@@ -15,7 +15,7 @@
     "build:vinext": "vite build",
     "postbuild:vinext": "node ../../scripts/migrate-on-build.mjs",
     "start:vinext": "vinext start",
-    "deploy:vinext": "vinext-cloudflare deploy --skip-build"
+    "deploy:vinext": "node ../../scripts/deploy-vinext.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.127.0",
@@ -24,6 +24,7 @@
     "@changuito/mcp": "*",
     "@changuito/usdc-bindings": "*",
     "@modelcontextprotocol/sdk": "1.30.0",
+    "@noble/hashes": "1.8.0",
     "@openzeppelin/relayer-plugin-channels": "0.21.1",
     "@pollar/core": "0.11.3",
     "@pollar/react": "0.11.3",

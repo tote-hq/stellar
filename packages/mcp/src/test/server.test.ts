@@ -27,6 +27,7 @@ const CATALOG = [
   'update_cart_item',
   'view_cart',
   'get_cart_link',
+  'choose_retailer',
   'where_am_i',
 ];
 
@@ -141,6 +142,29 @@ describe('over a real MCP transport', () => {
       assert.ok(product[f], `a product card cannot be drawn without ${f}`);
     }
     assert.deepEqual(Object.keys(product.price.properties).sort(), ['centavos', 'display']);
+    await c.close();
+  });
+
+  it('choose_retailer records the order and refuses a switch that would drop lines', async () => {
+    const c = await connected();
+    const picked = await c.client.callTool({ name: 'choose_retailer', arguments: { retailer: 'coto' } });
+    assert.notEqual(picked.isError, true);
+    assert.match((picked.content as { text?: string }[])[0]?.text ?? '', /add_to_cart/);
+    assert.match((picked.content as { text?: string }[])[0]?.text ?? '', /get_cart_link/);
+    assert.equal(c.state.getOrder(), 'coto');
+    assert.match(c.state.cotoCartId(), /^coto-/);
+    c.state.setCotoLines([{ id: 'coto-1', quantity: 1 }]);
+    const blocked = await c.client.callTool({ name: 'choose_retailer', arguments: { retailer: 'dia' } });
+    assert.equal(blocked.isError, true);
+    assert.equal(c.state.getOrder(), 'coto');
+    assert.equal(c.state.cotoLines().length, 1);
+    const replaced = await c.client.callTool({
+      name: 'choose_retailer',
+      arguments: { retailer: 'dia', replace_cart: true },
+    });
+    assert.notEqual(replaced.isError, true);
+    assert.equal(c.state.getOrder(), 'dia');
+    assert.deepEqual(c.state.cotoLines(), []);
     await c.close();
   });
 

@@ -18,18 +18,23 @@ export function CartCard({
   cart,
   handoffUrl,
   onPay,
+  cotoPay = false,
 }: {
   cart: Cart;
   handoffUrl?: string;
   onPay?: (cart: Cart) => void;
+  /** Allowlisted wallet, and this is the current turn's Coto cart. */
+  cotoPay?: boolean;
 }) {
   const copy = uiCopy(useLang()).cart;
   const unavailable = cart.lines.filter((l) => !l.available);
   const store = RETAILER_NAMES[cart.retailer] ?? cart.retailer;
+  const coto = cart.retailer === 'coto';
+  const title = coto ? copy.cotoTitle : cart.retailer === 'dia' ? copy.diaTitle : copy.title;
   return (
-    <section className="cart" aria-label={copy.aria}>
+    <section className="cart" aria-label={copy.aria} data-testid={coto ? 'cart-coto' : 'cart-card'}>
       <header className="cart-head">
-        <span className="cart-title">{copy.title}</span>
+        <span className="cart-title">{title}</span>
         <span className="cart-retailer">{store}</span>
       </header>
 
@@ -61,9 +66,25 @@ export function CartCard({
             {unavailable.length === 1 ? copy.oosOne : copy.oosMany(unavailable.length)}
           </p>
         ) : null}
+        {coto && !cotoPay ? (
+          <p className="cart-warn" data-testid="cart-coto-unpayable">
+            {copy.notPayable}
+          </p>
+        ) : null}
         <div className="cart-actions">
-          {onPay ? (
+          {onPay && !coto ? (
             <button type="button" className="btn btn-pay" onClick={() => onPay(cart)}>
+              {copy.payCta}
+            </button>
+          ) : null}
+          {onPay && coto && cotoPay ? (
+            <button
+              type="button"
+              className="btn btn-pay"
+              data-testid="cart-coto-pay"
+              style={{ minHeight: 44, minWidth: 44 }}
+              onClick={() => onPay(cart)}
+            >
               {copy.payCta}
             </button>
           ) : null}

@@ -289,6 +289,9 @@ try {
     await refuses(tx, 'a malformed member address is refused', '23514', (sp) =>
       sp`insert into shared_card_member (network, address) values ('mainnet', 'not-an-address')`);
     await tx`insert into shared_card_member (network, address, note) values ('mainnet', ${A}, 'demo')`;
+    const flags = await tx`select coto_sandbox_enabled, dia_manual_enabled from allowlist where network='mainnet' and user_id=${A}`;
+    check('a new allowlist row starts with both flags off',
+      flags[0]?.coto_sandbox_enabled === false && flags[0]?.dia_manual_enabled === false);
     await refuses(tx, 'the same member twice is refused', '23505', (sp) =>
       sp`insert into shared_card_member (network, address) values ('mainnet', ${A})`);
     check('a member on mainnet is not a member on testnet',
@@ -327,8 +330,8 @@ console.log(`\n${ok.length} ok, ${bad.length} failed  (${at})`);
 const left = await sql`select (select count(*) from card_owner) c,
                               (select count(*) from chat) h,
                               (select count(*) from orders) o,
-                              (select count(*) from shared_card_member) m`;
+                              (select count(*) from allowlist) m`;
 const { c, h, o, m } = left[0];
-console.log(`rows left behind: card_owner=${c} chat=${h} orders=${o} shared_card_member=${m}`);
+console.log(`rows left behind: card_owner=${c} chat=${h} orders=${o} allowlist=${m}`);
 if (bad.length) process.exitCode = 1;
 await sql.end();

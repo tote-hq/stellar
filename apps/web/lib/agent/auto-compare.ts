@@ -1,6 +1,8 @@
 /**
  * The Día vs Coto card draws itself.
  *
+ * Día carts only. A Coto basket never runs this: the search-time card already
+ * compared the chains, and a Coto order is not a Día cart with Coto links.
  * One basket, not a recommendation: after `get_cart_link`, for a Día cart
  * whose link opens that cart, and only when `chat_dual_compare` is on. The
  * model does not choose a price, a name, or a URL. A repeated fingerprint

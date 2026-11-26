@@ -38,6 +38,14 @@ const rpcUrls = {
   STELLAR_RPC_URL_MAINNET: bindings.text("https://mainnet.sorobanrpc.com"),
 };
 
+// Coto real checkout is on for this Worker. A plain var the config omits makes
+// the strict deploy abort, the same way an unpinned contract id does. The
+// admin session key is a secret and stays on the dashboard: a plain copy of
+// it is what the deploy refused.
+const cotoReal = {
+  COTO_REAL_ENABLED: bindings.text("1"),
+};
+
 // Which Postgres this Worker reaches is a decision, not a default: the
 // database is a privacy boundary between the two apps. No id, no binding, and
 // the app runs without a database the way a fresh clone does.
@@ -45,8 +53,10 @@ const hyperdriveId = process.env.CHG_HYPERDRIVE_ID?.trim();
 
 export default defineConfig({
   worker: defineWorker({
-    // The Worker that owns app.changuito.me. Deployed by Workers Builds from
-    // this repo's main branch.
+    // The Worker that owns app.changuito.me and admin.changuito.me. Deployed
+    // by Workers Builds from this repo's main branch. Both hostnames are
+    // listed so a deploy does not detach the admin desk. Turnstile's hostname
+    // list is separate and is left as it is.
     name: "changuito-web",
     entrypoint: "./worker.ts",
     compatibilityDate: "2026-11-02",
@@ -61,6 +71,7 @@ export default defineConfig({
     // changuito-ste.
     domains: [
       { hostname: "app.changuito.me", production: true, previews: false },
+      { hostname: "admin.changuito.me", production: true, previews: false },
     ],
     workersDev: true,
     previewUrls: false,
@@ -74,6 +85,7 @@ export default defineConfig({
       ...(hyperdriveId ? { HYPERDRIVE: bindings.hyperdrive({ id: hyperdriveId }) } : {}),
       ...contractIds,
       ...rpcUrls,
+      ...cotoReal,
       ...publicEnv,
     },
   }),

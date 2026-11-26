@@ -12,7 +12,7 @@ import {
   SOURCE_MISSING,
   WHATSAPP_INVALID,
 } from './messages.ts';
-import { allowedSources, OTHER_SOURCE } from './options.ts';
+import { canonicalSource, OTHER_SOURCE } from './options.ts';
 
 export type WaitlistField =
   | 'name'
@@ -55,7 +55,7 @@ export function validateWaitlist(
   const errors: FieldErrors = {};
   const name = cleanName(input.name);
   const email = input.email.trim().toLowerCase();
-  const source = input.source.trim();
+  const source = canonicalSource(input.source);
   const otherDetail = input.otherDetail.replace(/\s+/g, ' ').trim();
   const whatsappRaw = input.whatsapp.replace(/\s+/g, ' ').trim();
   const groupRaw = input.whatsappGroup.trim().toLowerCase();
@@ -68,7 +68,7 @@ export function validateWaitlist(
   if (!email) errors.email = EMAIL_MISSING;
   else if (email.length > 254 || !EMAIL.test(email) || email.includes('..')) errors.email = EMAIL_INVALID;
 
-  if (!allowedSources().has(source)) {
+  if (!source) {
     errors.source = SOURCE_MISSING;
   }
 
@@ -95,7 +95,7 @@ export function validateWaitlist(
     errors.whatsappGroup = GROUP_MISSING;
   }
 
-  if (Object.keys(errors).length > 0 || !whatsapp || whatsappGroup === undefined) {
+  if (Object.keys(errors).length > 0 || !source || !whatsapp || whatsappGroup === undefined) {
     return { ok: false, errors };
   }
 

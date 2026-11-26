@@ -26,9 +26,9 @@ export const RETAILER_IDS = [...adapters.keys()] as const;
  */
 export const UNSUPPORTED: Record<string, string> = {
   coto:
-    'Coto is not on VTEX. Its search runs on Constructor.io and its cart on Oracle ATG ' +
-    '(/rest/model/atg/actors/cCarritoActor/...), which is undocumented. The anonymous ' +
-    'search probe is recorded in probes/coto-vs-jumbo-2026-11-17.md. The cart is not implemented.',
+    'Coto is not a VTEX store, so getAdapter has no Oracle ATG cart. Search is Constructor.io ' +
+    '(catalog/coto.ts). A Changuito-held basket of Coto catalog lines is catalog/coto-cart.ts. ' +
+    'The ATG cart, the store link and payment are not implemented.',
 };
 
 export function getAdapter(id: string): RetailerAdapter {

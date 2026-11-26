@@ -23,6 +23,8 @@ import type { Cart, CartLine } from '@changuito/mcp/types';
 
 import { comparisonTotals, countsTowardFee, feeUsdFrom, type ComparisonQuote, type ComparisonRow, type FeeBasis } from '../../../../lib/checkout/compare-fee.ts';
 import { cotoCheckoutBlocked } from '../../../../lib/checkout/coto-guard.ts';
+import { COTO_REAL_KIND } from '../../../../lib/checkout/coto-real.ts';
+import { postCotoRealQuote } from '../../../../lib/checkout/coto-real-http.ts';
 import { quoteRate } from '../../../../lib/checkout/rate.ts';
 import { NO_DELIVERY, quoteShipping, type ShippingLocation } from '../../../../lib/checkout/shipping.ts';
 import { checkoutStore } from '../../../../lib/checkout/store.ts';
@@ -71,9 +73,17 @@ export async function POST(req: Request): Promise<Response> {
     payRetailer?: unknown;
     acceptedAlternatives?: unknown;
     checkoutPath?: unknown;
+    checkoutKind?: unknown;
+    postalCode?: unknown;
+    sessionId?: unknown;
   } | null;
   if (!isCart(body?.cart)) return Response.json({ error: 'Falta el changuito.' }, { status: 400 });
   const cart = body.cart;
+  // Above the blanket Coto refusal. A wallet that is not admitted gets that
+  // same refusal and does not fall through to the demo or the Día quote.
+  if (cart.retailer === 'coto' && body.checkoutKind === COTO_REAL_KIND) {
+    return postCotoRealQuote(user.address, cart, body);
+  }
   if (cotoCheckoutBlocked(cart.retailer)) {
     return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
   }
@@ -121,8 +131,9 @@ export async function POST(req: Request): Promise<Response> {
     } catch (err) { if ((err as { code?: string }).code !== '42P01') throw err; }
   }
 
-  // An admitted manual checkout is a wallet on shared_card_member (the
-  // historical allowlist; the table is not a card) while manual checkout is
+  // An admitted manual checkout is a wallet on allowlist with
+  // dia_manual_enabled (the historical name was shared_card_member; the table
+  // is not a card) while manual checkout is
   // enabled. Everyone else gets the demo run: same lock, the mock stops at
   // payment, refund, and the cart link to finish in Día. Mock mode wins, the
   // way it always did, so a rehearsal never opens the manual path. Asked here

@@ -21,7 +21,9 @@
  * same status rather than starting a second job.
  */
 import { readOrder } from '../../../../lib/checkout/escrow-server.ts';
-import { cotoCheckoutBlocked, cotoDemoPayRecord } from '../../../../lib/checkout/coto-guard.ts';
+import { admitCotoRequest } from '../../../../lib/checkout/coto-admit.ts';
+import { startCotoRealCheckout } from '../../../../lib/checkout/coto-real-start.ts';
+import { cotoCheckoutBlocked, cotoDemoPayRecord, cotoRealRecord } from '../../../../lib/checkout/coto-guard.ts';
 import { startJob } from '../../../../lib/checkout/sandbox.ts';
 import { readShopper } from '../../../../lib/checkout/shopper.ts';
 import { checkoutMode } from '../../../../lib/checkout/mode.ts';
@@ -53,6 +55,12 @@ export async function POST(req: Request): Promise<Response> {
   const store = checkoutStore();
   const rec = await store.get(orderId);
   if (!rec || rec.buyer !== user.address) return Response.json({ error: 'No encontramos ese pedido.' }, { status: 404 });
+  if (cotoRealRecord(rec)) {
+    if (!(await admitCotoRequest(user.address))) {
+      return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
+    }
+    return startCotoRealCheckout(rec, typeof body?.openSig === 'string' ? body.openSig : undefined);
+  }
   if (cotoCheckoutBlocked(rec.retailer) && !cotoDemoPayRecord(rec)) {
     return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
   }

@@ -1,6 +1,8 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Cart, Product } from '@changuito/mcp/types';
 
+import type { CotoRealDia, DiaPair } from '../checkout/coto-real.ts';
+
 import type { CompareCard, UiEvent } from '../protocol';
 
 /**
@@ -55,6 +57,38 @@ export interface RenderCache {
    * still prices the 20% gap fee (feeBasis other_disabled → 0).
    */
   soloDia?: boolean;
+  /**
+   * Coto hits from search-time compare, keyed by id. A plain record so the
+   * turn-store codec carries it without a Map special case.
+   */
+  coto?: Record<string, CotoCacheItem>;
+  /** Queries searched this turn, and how many available hits came back. */
+  searches?: SearchRecord[];
+  /**
+   * Día shelf pairs from search, merged by Coto id. A plain array: a Map
+   * would encode as `{}`. Not on the browser session snapshot.
+   */
+  diaPairs?: DiaPair[];
+  /** Frozen when the shopper confirms Coto. Authorization is the cookie, not this stamp. */
+  cotoRealDia?: CotoRealDia;
+}
+
+/** A Coto catalog row the render tools may cite. Prices stay off the model input. */
+export interface CotoCacheItem {
+  id: string;
+  name: string;
+  shelfCentavos: number;
+  available: boolean;
+  ean?: string;
+  brand?: string;
+  url?: string;
+  imageUrl?: string;
+}
+
+export interface SearchRecord {
+  query: string;
+  retailer: 'dia' | 'coto';
+  available: number;
 }
 
 export const emptyCache = (): RenderCache => ({ products: new Map() });
@@ -132,8 +166,13 @@ function cardPrint(cart: Cart, handoffUrl?: string): string {
  */
 export function autoRenderCart(cache: RenderCache, emit: (e: UiEvent) => void): boolean {
   const cart = cache.cart;
-  const handoffUrl = cartLink(cache);
-  if (!cart || !cart.lines.length || !handoffUrl) return false;
+  if (!cart || !cart.lines.length) return false;
+  // A Coto basket has no store link and no pay control. Drawing it without a
+  // link does not reopen the Día bug: that bug was a card whose only action
+  // was missing. This card is not allowed to spend anything.
+  const cotoBasket = cart.retailer === 'coto';
+  const handoffUrl = cotoBasket ? undefined : cartLink(cache);
+  if (!cotoBasket && !handoffUrl) return false;
 
   const print = cardPrint(cart, handoffUrl);
   if (print === cache.drawn) return false;
@@ -142,11 +181,66 @@ export function autoRenderCart(cache: RenderCache, emit: (e: UiEvent) => void): 
   emit({
     t: 'cart',
     cart,
-    handoffUrl,
+    ...(handoffUrl ? { handoffUrl } : {}),
+    ...(cotoBasket ? { orderable: false } : {}),
     ...(cache.dualCheckout ? { dualCheckout: true } : {}),
     ...(cache.soloDia ? { soloDia: true } : {}),
   });
   return true;
+}
+
+/** Dual search is on and the shopper has not picked a chain yet. */
+export function cartWriteNeedsChoice(dual: boolean, order: string | undefined): boolean {
+  return dual && order !== 'dia' && order !== 'coto';
+}
+
+/**
+ * An id that is known only on the other chain. An id known on neither is left
+ * to the cart tool, which rejects a Coto id that is not an exact catalog match.
+ */
+export function foreignCartSku(
+  order: 'dia' | 'coto',
+  skuId: string,
+  diaIds: ReadonlySet<string>,
+  cotoIds: ReadonlySet<string>,
+): boolean {
+  const onDia = diaIds.has(skuId);
+  const onCoto = cotoIds.has(skuId);
+  if (order === 'dia') return onCoto && !onDia;
+  return onDia && !onCoto;
+}
+
+// Whole word only. `\b` is an ASCII boundary, and `í` is not a word character,
+// so "días" and a letter glued to "Día" both go wrong. A letter or digit
+// on either side is the boundary.
+const DIA_NAME = /(?<![\p{L}\p{N}])d[ií]a(?![\p{L}\p{N}])/iu;
+const COTO_NAME = /(?<![\p{L}\p{N}])coto(?![\p{L}\p{N}])/iu;
+
+export function textNamesRetailer(text: string, retailer: 'dia' | 'coto'): boolean {
+  return (retailer === 'dia' ? DIA_NAME : COTO_NAME).test(text);
+}
+
+/** The shopper named the store, or the question immediately before them did. */
+export function shopperNamedRetailer(
+  retailer: 'dia' | 'coto',
+  userText: string,
+  priorAssistant: string,
+): boolean {
+  return textNamesRetailer(userText, retailer) || textNamesRetailer(priorAssistant, retailer);
+}
+
+/** A query searched this turn on that retailer that returned no available hit. */
+export function searchedEmpty(cache: RenderCache, query: string, retailer: 'dia' | 'coto'): boolean {
+  const wanted = query.trim().toLowerCase();
+  if (!wanted) return false;
+  const rows = cache.searches ?? [];
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i];
+    if (!row || row.retailer !== retailer) continue;
+    if (row.query.trim().toLowerCase() !== wanted) continue;
+    return row.available === 0;
+  }
+  return false;
 }
 
 export const RENDER_TOOLS: Anthropic.Tool[] = [
@@ -185,6 +279,23 @@ export const RENDER_TOOLS: Anthropic.Tool[] = [
       'link. Call this only to bring an unchanged basket back on screen — after a question ' +
       'about it, say. Never answer a change by pointing at a card already on screen.',
     input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'render_missing',
+    description:
+      'Tell the shopper a requested item is missing on the store they picked, and ask them to ' +
+      'substitute or drop it. Pass the query you searched and the retailer (dia or coto). ' +
+      'The server accepts it only when that query was searched this turn on that store and ' +
+      'returned no available product. Do not drop the item silently and do not fill it from ' +
+      'the other chain. You do not supply a price or a product name.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'The search query that returned nothing available.' },
+        retailer: { type: 'string', enum: ['dia', 'coto'], description: 'The store the shopper picked.' },
+      },
+      required: ['query', 'retailer'],
+    },
   },
 ];
 
@@ -230,18 +341,38 @@ export function runRenderTool(
     if (!cache.cart) {
       return result('No cart yet. Call view_cart or add_to_cart first.', true);
     }
-    const handoffUrl = cartLink(cache);
+    const cotoBasket = cache.cart.retailer === 'coto';
+    const handoffUrl = cotoBasket ? undefined : cartLink(cache);
     // Recorded as drawn so the automatic render does not immediately repeat
     // what this call just put on screen.
     cache.drawn = cardPrint(cache.cart, handoffUrl);
     emit({
       t: 'cart',
       cart: cache.cart,
-      handoffUrl,
+      ...(handoffUrl ? { handoffUrl } : {}),
+      ...(cotoBasket ? { orderable: false } : {}),
       ...(cache.dualCheckout ? { dualCheckout: true } : {}),
       ...(cache.soloDia ? { soloDia: true } : {}),
     });
     return result(`Rendered the cart: ${cache.cart.lines.length} line(s), ${cache.cart.total.display}.`);
+  }
+
+  if (use.name === 'render_missing') {
+    const query = (use.input as { query?: unknown })?.query;
+    const retailer = (use.input as { retailer?: unknown })?.retailer;
+    if (typeof query !== 'string' || (retailer !== 'dia' && retailer !== 'coto')) {
+      return result('render_missing needs a query and retailer dia or coto.', true);
+    }
+    if (!searchedEmpty(cache, query, retailer)) {
+      return result(
+        'That query was not searched on that store in this turn, or it returned an available product. ' +
+          'Search it there first, and only call this when nothing available comes back.',
+        true,
+      );
+    }
+    const item = query.trim();
+    emit({ t: 'missing', query: item, retailer, item });
+    return result(`Told the shopper that "${item}" is missing at ${retailer}.`);
   }
 
   return result(`Unknown render tool ${use.name}.`, true);

@@ -306,6 +306,7 @@ The service builds from `services/sandbox/Dockerfile`:
 `mcr.microsoft.com/playwright/python:v1.63.0-noble` (Chromium system
 dependencies included) + `uv`, `uv sync --frozen --no-dev`, `playwright install
 chromium`, then `uvicorn server:app` on `$PORT` (default 8080).
+The image copies every top-level `*.py` in `services/sandbox` except `test_*.py`, so a new module needs no Dockerfile edit.
 `railway.json`: Dockerfile builder, healthcheck `/health`, restart on failure,
 1 replica.
 
@@ -320,8 +321,9 @@ chromium`, then `uvicorn server:app` on `$PORT` (default 8080).
 3. Deploy; check `GET https://<service>/health` returns `{"ok": true, …}`.
 4. In the web app (the Worker) set `SANDBOX_URL=https://<service>` and the same
    `SANDBOX_TOKEN`, and `npm run config -- set sandbox_mock false`.
-5. Wallets on `shared_card_member` for the default network may open a manual
-   checkout. Everyone else gets the demo run: up to payment, then settled.
+5. Wallets on `allowlist` with `dia_manual_enabled` for the default network may
+   open a manual checkout. Coto real is the separate flag `coto_sandbox_enabled`.
+   Everyone else gets the demo run: up to payment, then settled.
 
 ## Run locally
 

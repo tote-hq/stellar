@@ -165,6 +165,9 @@ escrow; it is simply no longer on the deposit rail.
 ## Part 2 — the app on Cloudflare Workers
 
 The app is the Worker **`changuito-web`**, which owns `app.changuito.me`.
+`admin.changuito.me` is the same Worker. A person attaches that hostname in the
+Cloudflare dashboard. It is not in the `domains` array of `cloudflare.config.ts`,
+and it is not added to the Turnstile hostname list.
 It is deployed by **Workers Builds** from this repository's `main` branch,
 not from a laptop. Which variables exist, and what each name means, is under
 [Variables and services](#variables-and-services) below.

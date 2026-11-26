@@ -32,6 +32,10 @@ export interface CartCopy {
   /** One is a sentence, several is a count. Both say the same thing. */
   oosOne: string;
   oosMany: (n: number) => string;
+  /** Shown when the basket is a Coto order. There is no pay control. */
+  cotoTitle: string;
+  diaTitle: string;
+  notPayable: string;
 }
 
 export interface RailCopy {
@@ -46,6 +50,9 @@ export interface RailCopy {
   oosMany: (n: number) => string;
   /** Under a finished order: what was paid and which order it was. */
   ref: (amount: string, orderId: string) => string;
+  cotoTitle: string;
+  diaTitle: string;
+  notPayable: string;
 }
 
 export interface HistoryCopy {
@@ -206,6 +213,8 @@ export interface ChatCopy {
   voiceFailed: string;
   photoUnread: string;
   photoHuge: string;
+  /** Under the field while a turn is in flight and Send is off. */
+  sendDisabledHint: string;
   /** Under the receipt: what was paid, and which order it was. */
   paidRef: (amount: string, orderId: string) => string;
   /** Rotating composer prompts. Each long one has a short twin for phones. */
@@ -253,6 +262,33 @@ export interface CompareCopy {
   cotoCta: string;
 }
 
+export interface SearchCompareCopy {
+  title: string;
+  subtitle: (cp: string) => string;
+  gapFee: (gap: string, fee: string) => string;
+  pendingCoto: string;
+  diaEmpty: string;
+  cotoEmpty: string;
+  cotoError: string;
+  cotoTimedOut: string;
+  diaError: string;
+  chooseDia: string;
+  chooseCoto: string;
+}
+
+export interface MissingCopy {
+  prompt: (item: string, store: string) => string;
+  substitute: string;
+  drop: string;
+}
+
+export interface SwitchCopy {
+  confirmTitle: string;
+  confirmBody: (from: string, to: string) => string;
+  confirm: string;
+  cancel: (from: string) => string;
+}
+
 export interface UiCopy {
   cart: CartCopy;
   rail: RailCopy;
@@ -266,6 +302,9 @@ export interface UiCopy {
   gate: GateCopy;
   checkout: CheckoutUiCopy;
   compare: CompareCopy;
+  searchCompare: SearchCompareCopy;
+  missing: MissingCopy;
+  switch: SwitchCopy;
   /** Every dialog's ✕. One key, because it is one word. */
   close: string;
   purchasesUnconfigured: string;
@@ -281,6 +320,9 @@ const ES: UiCopy = {
     openAt: (store) => `Abrir en ${store}`,
     oosOne: '1 producto quedó sin stock.',
     oosMany: (n) => `${n} productos quedaron sin stock.`,
+    cotoTitle: 'Tu changuito · Coto',
+    diaTitle: 'Tu changuito · Día',
+    notPayable: 'Los pedidos de Coto todavía no se pueden pagar.',
   },
   rail: {
     cartAria: 'Tu changuito',
@@ -293,6 +335,9 @@ const ES: UiCopy = {
     oosOne: '1 producto sin stock.',
     oosMany: (n) => `${n} productos sin stock.`,
     ref: (amount, orderId) => `Pagaste ${amount} · pedido ${orderId}`,
+    cotoTitle: 'Tu changuito · Coto',
+    diaTitle: 'Tu changuito · Día',
+    notPayable: 'Los pedidos de Coto todavía no se pueden pagar.',
   },
   history: {
     aria: 'Tus compras',
@@ -424,6 +469,7 @@ const ES: UiCopy = {
     voiceFailed: 'No pude usar el micrófono. Probá de nuevo.',
     photoUnread: 'No pude leer esa imagen. Probá con otra foto.',
     photoHuge: 'La foto es muy pesada. Probá con otra.',
+    sendDisabledHint: 'Esperá a que termine la búsqueda…',
     paidRef: (amount, orderId) => `Pagaste ${amount} · pedido ${orderId}`,
     placeholders: [
       {
@@ -481,6 +527,31 @@ const ES: UiCopy = {
     diaCta: 'Abrir el carrito en Día',
     cotoCta: 'Ver en Coto',
   },
+  searchCompare: {
+    title: 'Comparación',
+    subtitle: (cp) => `CP ${cp} · Día y Coto`,
+    gapFee: (gap, fee) => `Diferencia ${gap}. Fee Changuito: ${fee} (20% de la diferencia).`,
+    pendingCoto: 'Buscando en Coto…',
+    diaEmpty: 'En Día no encontramos resultados para esta búsqueda.',
+    cotoEmpty: 'En Coto no encontramos resultados para esta búsqueda.',
+    cotoError: 'No pudimos consultar Coto. Los precios de Día sí están.',
+    cotoTimedOut: 'Coto tardó demasiado. Los precios de Día sí están.',
+    diaError: 'No pudimos consultar Día.',
+    chooseDia: 'Pedir en Día',
+    chooseCoto: 'Pedir en Coto',
+  },
+  missing: {
+    prompt: (item, store) => `${item} no está en ${store}. ¿Lo sustituís o lo sacamos?`,
+    substitute: 'Sustituir',
+    drop: 'Sacar',
+  },
+  switch: {
+    confirmTitle: 'Cambiar de supermercado',
+    confirmBody: (from, to) =>
+      `Se reemplaza el changuito de ${from} por uno de ${to}. No se mezclan productos. ¿Confirmás?`,
+    confirm: 'Confirmar',
+    cancel: (from) => `Seguir con ${from}`,
+  },
   close: 'Cerrar',
   purchasesUnconfigured: 'Falta configurar el inicio de sesión en esta instalación.',
   reportBug: 'Reportar un bug',
@@ -497,6 +568,9 @@ const EN: UiCopy = {
     openAt: (store) => `Open in ${store}`,
     oosOne: '1 item went out of stock.',
     oosMany: (n) => `${n} items went out of stock.`,
+    cotoTitle: 'Your changuito · Coto',
+    diaTitle: 'Your changuito · Día',
+    notPayable: 'Coto orders cannot be paid yet.',
   },
   rail: {
     cartAria: 'Your changuito',
@@ -509,6 +583,9 @@ const EN: UiCopy = {
     oosOne: '1 item out of stock.',
     oosMany: (n) => `${n} items out of stock.`,
     ref: (amount, orderId) => `You paid ${amount} · order ${orderId}`,
+    cotoTitle: 'Your changuito · Coto',
+    diaTitle: 'Your changuito · Día',
+    notPayable: 'Coto orders cannot be paid yet.',
   },
   history: {
     aria: 'Your purchases',
@@ -640,6 +717,7 @@ const EN: UiCopy = {
     voiceFailed: "I couldn't use the microphone. Try again.",
     photoUnread: "I couldn't read that image. Try another photo.",
     photoHuge: 'That photo is too large. Try another one.',
+    sendDisabledHint: 'Wait for the search to finish…',
     paidRef: (amount, orderId) => `You paid ${amount} · order ${orderId}`,
     // The stores are Argentine and so is the money, so the shop the shopper
     // is describing is the same one either way. Only the asking changes.
@@ -698,6 +776,31 @@ const EN: UiCopy = {
     timedOut: 'The comparison took too long. Prices that did not arrive are not shown.',
     diaCta: 'Open the cart at Día',
     cotoCta: 'View at Coto',
+  },
+  searchCompare: {
+    title: 'Comparison',
+    subtitle: (cp) => `Postal code ${cp} · Día and Coto`,
+    gapFee: (gap, fee) => `Difference ${gap}. Changuito fee: ${fee} (20% of the difference).`,
+    pendingCoto: 'Searching Coto…',
+    diaEmpty: 'Día has no results for this search.',
+    cotoEmpty: 'Coto has no results for this search.',
+    cotoError: "We couldn't reach Coto. Día prices are here.",
+    cotoTimedOut: 'Coto took too long. Día prices are here.',
+    diaError: "We couldn't reach Día.",
+    chooseDia: 'Order at Día',
+    chooseCoto: 'Order at Coto',
+  },
+  missing: {
+    prompt: (item, store) => `${item} isn't at ${store}. Substitute it or drop it?`,
+    substitute: 'Substitute',
+    drop: 'Drop',
+  },
+  switch: {
+    confirmTitle: 'Change supermarket',
+    confirmBody: (from, to) =>
+      `The ${from} changuito is replaced by one from ${to}. Products are not mixed. Confirm?`,
+    confirm: 'Confirm',
+    cancel: (from) => `Stay with ${from}`,
   },
   close: 'Close',
   purchasesUnconfigured: 'Signing in has not been configured in this installation.',

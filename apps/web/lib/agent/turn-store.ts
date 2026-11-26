@@ -1,5 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { Cart, Product } from '@changuito/mcp/types';
+
+import { decodeCotoRealDia, decodeDiaPairs, type CotoRealDia, type DiaPair } from '../checkout/coto-real.ts';
 import { Redis } from '@upstash/redis';
 
 // Type-only, deliberately: a store that imported the agent loop would drag the
@@ -7,6 +9,7 @@ import { Redis } from '@upstash/redis';
 // ever moves plain data.
 import type { CompareCard } from '../protocol';
 import type { Turn } from './loop';
+import type { CotoCacheItem, SearchRecord } from './render-tools';
 
 /**
  * Where a conversation lives between two requests.
@@ -67,6 +70,12 @@ interface StoredTurn {
    */
   compareFor?: string;
   compareResult?: CompareCard;
+  /** Coto hits and the searches that produced them. Optional on `v: 1`. */
+  coto?: Record<string, CotoCacheItem>;
+  searches?: SearchRecord[];
+  /** Día pairs and the chain-pick snapshot. Optional arrays, never a Map. */
+  diaPairs?: DiaPair[];
+  cotoRealDia?: CotoRealDia;
 }
 
 export function encodeTurn(turn: Turn): StoredTurn {
@@ -80,6 +89,10 @@ export function encodeTurn(turn: Turn): StoredTurn {
     drawn: turn.cache.drawn,
     compareFor: turn.cache.compareFor,
     compareResult: turn.cache.compareResult,
+    ...(turn.cache.coto ? { coto: turn.cache.coto } : {}),
+    ...(turn.cache.searches ? { searches: turn.cache.searches } : {}),
+    ...(turn.cache.diaPairs ? { diaPairs: turn.cache.diaPairs } : {}),
+    ...(turn.cache.cotoRealDia ? { cotoRealDia: turn.cache.cotoRealDia } : {}),
   };
 }
 
@@ -93,6 +106,41 @@ function asCompareCard(value: unknown): CompareCard | undefined {
   return card as CompareCard;
 }
 
+function asCoto(value: unknown): Record<string, CotoCacheItem> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const out: Record<string, CotoCacheItem> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (!raw || typeof raw !== 'object') continue;
+    const item = raw as Partial<CotoCacheItem>;
+    if (typeof item.id !== 'string' || typeof item.name !== 'string') continue;
+    if (!Number.isSafeInteger(item.shelfCentavos) || (item.shelfCentavos ?? 0) <= 0) continue;
+    out[key] = {
+      id: item.id,
+      name: item.name,
+      shelfCentavos: item.shelfCentavos as number,
+      available: item.available === true,
+      ...(typeof item.ean === 'string' ? { ean: item.ean } : {}),
+      ...(typeof item.brand === 'string' ? { brand: item.brand } : {}),
+      ...(typeof item.url === 'string' ? { url: item.url } : {}),
+      ...(typeof item.imageUrl === 'string' ? { imageUrl: item.imageUrl } : {}),
+    };
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function asSearches(value: unknown): SearchRecord[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const rows: SearchRecord[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue;
+    const row = raw as Partial<SearchRecord>;
+    if (typeof row.query !== 'string' || (row.retailer !== 'dia' && row.retailer !== 'coto')) continue;
+    if (!Number.isSafeInteger(row.available) || (row.available ?? -1) < 0) continue;
+    rows.push({ query: row.query, retailer: row.retailer, available: row.available as number });
+  }
+  return rows.length ? rows : undefined;
+}
+
 /**
  * Anything unrecognised decodes to undefined rather than throwing. A stored
  * value can outlive the code that wrote it — a deploy mid-conversation is the
@@ -103,6 +151,10 @@ export function decodeTurn(raw: unknown): Turn | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const s = raw as Partial<StoredTurn>;
   if (s.v !== 1 || !Array.isArray(s.messages) || !Array.isArray(s.products)) return undefined;
+  const coto = asCoto(s.coto);
+  const searches = asSearches(s.searches);
+  const diaPairs = decodeDiaPairs(s.diaPairs);
+  const cotoRealDia = decodeCotoRealDia(s.cotoRealDia);
 
   return {
     messages: s.messages,
@@ -114,6 +166,10 @@ export function decodeTurn(raw: unknown): Turn | undefined {
       drawn: s.drawn,
       compareFor: typeof s.compareFor === 'string' ? s.compareFor : undefined,
       compareResult: asCompareCard(s.compareResult),
+      ...(coto ? { coto } : {}),
+      ...(searches ? { searches } : {}),
+      ...(diaPairs ? { diaPairs } : {}),
+      ...(cotoRealDia ? { cotoRealDia } : {}),
     },
   };
 }

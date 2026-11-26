@@ -5,6 +5,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Cart } from '@changuito/mcp/types';
 
 import { starters } from '../lib/agent/prompt';
+import { cotoPayTarget } from '../lib/checkout/coto-real.ts';
+import { composerControls } from '../lib/composer.ts';
+import {
+  choiceMessage,
+  confirmSwitchMessage,
+  dropMessage,
+  needsSwitchConfirm,
+  substituteMessage,
+  type Chain,
+} from '../lib/retailer-choice.ts';
+import { RETAILER_NAMES } from '../lib/retailers.ts';
 import { errorCode, track, trackLoginStart } from '../lib/analytics';
 import type { ChatImage } from '../lib/chat-image.ts';
 import { canRetry, type Block, type ChatState } from '../lib/chat-state';
@@ -27,10 +38,14 @@ import { useChat } from '../lib/use-chat';
 import { useWallet } from '../lib/use-wallet.ts';
 import { CartCard } from './CartCard';
 import { ComparisonCard } from './ComparisonCard';
+import { Modal } from './Modal';
+import { MissingCard, SearchCompareCard } from './SearchCompareCard';
 import { useLang } from './LangProvider';
 import { useNetwork } from './NetworkProvider';
 import { CameraIcon, ImageIcon, MicIcon, RetryIcon } from './icons';
 import { CheckoutModal } from './CheckoutModal';
+import { CITY_ASK } from '../lib/agent/early-ask';
+import { CotoRealModal } from './CotoRealModal';
 import { PayCard, type PayCardLine } from './PayCard';
 import { ProductGrid } from './ProductGrid';
 import { useShop } from './ShopProvider';
@@ -129,6 +144,7 @@ function ChatCore({
   const { state, send, retry, stop, loginRequired, clearLoginRequired, resume, reset, currentSessionId } =
     useChat({ isAuthenticated, address, sign, network, lang });
   const [draft, setDraft] = useState('');
+  const [switchAsk, setSwitchAsk] = useState<{ from: Chain; to: Chain } | null>(null);
   const [photo, setPhoto] = useState<ChatImage | null>(null);
   const [readingPhoto, setReadingPhoto] = useState(false);
   const [photoNote, setPhotoNote] = useState<string | null>(null);
@@ -150,6 +166,7 @@ function ChatCore({
     checkoutPath?: 'solo_dia' | 'solo_coto' | 'dual';
     receiptLines?: { name: string; quantity: number; lineTotal: string }[];
   } | null>(null);
+  const [cotoModal, setCotoModal] = useState<Cart | null>(null);
   /** Which pay started. Cleared if the modal closes before escrow open. */
   const [payLock, setPayLock] = useState<null | 'dia' | 'coto'>(null);
   const payOpened = useRef(false);
@@ -174,10 +191,31 @@ function ChatCore({
   // basket as it is now. Keyed on the counter so a re-render does not reopen it.
   const payRequest = shop?.payRequest ?? 0;
   const seenPay = useRef(payRequest);
+  const setCotoReal = shop?.setCotoReal;
+  useEffect(() => {
+    if (!setCotoReal) return;
+    let gone = false;
+    fetch('/api/checkout/coto-real')
+      .then((res) => res.json())
+      .then((body: { allowed?: boolean }) => {
+        if (!gone) setCotoReal(body.allowed === true);
+      })
+      .catch(() => {
+        if (!gone) setCotoReal(false);
+      });
+    return () => {
+      gone = true;
+    };
+  }, [address, setCotoReal]);
   useEffect(() => {
     if (payRequest === seenPay.current) return;
     seenPay.current = payRequest;
     if (!shop?.canOrder || !shop.cart || shop.dualCheckout) return;
+    if (shop.cart.retailer === 'coto') {
+      if (!shop.cotoReal) return;
+      setCotoModal(shop.cart);
+      return;
+    }
     track('payment_start', { flow: 'rail' });
     setPaying({ cart: shop.cart, handoffUrl: shop.handoffUrl ?? undefined });
   }, [payRequest, shop]);
@@ -332,6 +370,13 @@ function ChatCore({
   const voiceNote =
     dictation.error === null ? null : copy[VOICE_NOTE[dictation.error]];
   const composerNote = dictation.listening ? copy.listening : (voiceNote ?? cameraNote ?? photoNote);
+  const controls = composerControls({
+    streaming: state.streaming,
+    gated,
+    readOnly,
+    readingPhoto,
+    hasDraft: Boolean(draft.trim() || photo),
+  });
 
   const closeCamera = () => {
     for (const track of streamRef.current?.getTracks() ?? []) track.stop();
@@ -475,7 +520,11 @@ function ChatCore({
               );
             case 'say':
               return (
-                <div key={b.id} className="bubble is-agent">
+                <div
+                  key={b.id}
+                  className="bubble is-agent"
+                  data-testid={(b.text ?? '').trim() === CITY_ASK ? 'chat-ask-city' : undefined}
+                >
                   <ToolTrail tools={b.tools} />
                   {b.thinking && !b.text ? <p className="thinking">{b.thinking}</p> : null}
                   {b.text ? <MarkdownText text={b.text} /> : null}
@@ -483,12 +532,22 @@ function ChatCore({
               );
             case 'products':
               return <ProductGrid key={b.id} items={b.items} note={b.note} />;
-            case 'cart':
+            case 'cart': {
+              const cotoTarget = cotoPayTarget(
+                state.blocks.map((block) => ({
+                  id: block.id,
+                  kind: block.kind,
+                  retailer: block.kind === 'cart' ? block.cart.retailer : undefined,
+                })),
+                shop?.cotoReal === true,
+              );
+              const thisCoto = b.cart.retailer === 'coto' && b.id === cotoTarget;
               return (
                 <CartCard
                   key={b.id}
                   cart={b.cart}
                   handoffUrl={b.handoffUrl}
+                  cotoPay={thisCoto}
                   // No longer gated on a wallet. The frame-checkout flow asks
                   // for an importe and a code, and the shopper pays the súper
                   // themselves — there is nothing here to sign, so requiring a
@@ -499,8 +558,14 @@ function ChatCore({
                     // what was bought, and a Pagar on it invites paying twice.
                     // A dual-checkout basket pays from the cards under the compare.
                     // Solo Día (demo on, Coto search off): one PayCard, still fees.
-                    canOrder && !b.dualCheckout
+                    // A Coto cart pays only when this block is the current one
+                    // and the wallet is allowlisted. That is not the demo PayCard.
+                    canOrder && !b.dualCheckout && b.orderable !== false && (b.cart.retailer !== 'coto' || thisCoto)
                       ? (cart) => {
+                          if (cart.retailer === 'coto') {
+                            setCotoModal(cart);
+                            return;
+                          }
                           track('payment_start', { flow: 'frame' });
                           setPaying(
                             b.soloDia
@@ -515,6 +580,36 @@ function ChatCore({
                         }
                       : undefined
                   }
+                />
+              );
+            }
+            case 'search_compare':
+              return (
+                <SearchCompareCard
+                  key={b.id}
+                  block={b}
+                  onChoose={(next) => {
+                    const current = state.cart?.cart;
+                    const lines = current?.lines.length ?? 0;
+                    if (
+                      current &&
+                      needsSwitchConfirm({ retailer: current.retailer, lines }, next) &&
+                      (current.retailer === 'dia' || current.retailer === 'coto')
+                    ) {
+                      setSwitchAsk({ from: current.retailer, to: next });
+                      return;
+                    }
+                    submit(choiceMessage(next));
+                  }}
+                />
+              );
+            case 'missing':
+              return (
+                <MissingCard
+                  key={b.id}
+                  block={b}
+                  onSubstitute={() => submit(substituteMessage(b.item, b.retailer))}
+                  onDrop={() => submit(dropMessage(b.item))}
                 />
               );
             case 'compare':
@@ -677,6 +772,7 @@ function ChatCore({
         <textarea
           ref={composer}
           className="composer-input"
+          data-testid="chat-input"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -688,23 +784,25 @@ function ChatCore({
           placeholder={placeholder}
           rows={2}
           enterKeyHint="send"
-          disabled={state.streaming || gated}
+          disabled={controls.inputDisabled}
           autoFocus
         />
-        {state.streaming ? (
-          <button type="button" className="btn btn-ghost" onClick={stop} aria-label={copy.stopAria}>
-            {copy.stop}
-          </button>
-        ) : (
+        <div className="composer-actions">
+          {controls.showStop ? (
+            <button type="button" className="btn btn-ghost" onClick={stop} aria-label={copy.stopAria}>
+              {copy.stop}
+            </button>
+          ) : null}
           <button
             type="submit"
             className="btn"
             data-testid="composer-send"
-            disabled={(!draft.trim() && !photo) || gated || readingPhoto}
+            disabled={controls.sendDisabled}
+            aria-disabled={controls.sendDisabled ? 'true' : undefined}
           >
             {copy.send}
           </button>
-        )}
+        </div>
         <div className="composer-tools">
           <button
             type="button"
@@ -743,6 +841,11 @@ function ChatCore({
             {composerNote}
           </p>
         ) : null}
+        {controls.hint ? (
+          <p className="composer-hint" role="status" data-testid="composer-send-hint">
+            {copy.sendDisabledHint}
+          </p>
+        ) : null}
         <input
           ref={fileRef}
           className="composer-file ph-no-capture"
@@ -779,6 +882,48 @@ function ChatCore({
             </button>
           </div>
         </div>
+      ) : null}
+
+      {switchAsk ? (
+        <Modal
+          title={uiCopy(lang).switch.confirmTitle}
+          onClose={() => setSwitchAsk(null)}
+          testId="switch-confirm"
+        >
+          <p>{uiCopy(lang).switch.confirmBody(RETAILER_NAMES[switchAsk.from], RETAILER_NAMES[switchAsk.to])}</p>
+          <div className="missing-actions">
+            <button
+              type="button"
+              className="btn"
+              data-testid="switch-confirm-yes"
+              onClick={() => {
+                const message = confirmSwitchMessage(switchAsk.from, switchAsk.to);
+                setSwitchAsk(null);
+                submit(message);
+              }}
+            >
+              {uiCopy(lang).switch.confirm}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              data-testid="switch-cancel"
+              onClick={() => setSwitchAsk(null)}
+            >
+              {uiCopy(lang).switch.cancel(RETAILER_NAMES[switchAsk.from])}
+            </button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {cotoModal && currentSessionId() ? (
+        <CotoRealModal
+          cart={cotoModal}
+          sessionId={currentSessionId() as string}
+          postalCode={state.snapshot?.location?.postalCode}
+          city={state.snapshot?.city}
+          onClose={() => setCotoModal(null)}
+        />
       ) : null}
 
       {paying ? (

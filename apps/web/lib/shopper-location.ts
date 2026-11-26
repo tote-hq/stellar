@@ -101,8 +101,18 @@ export function priorLines(raw: unknown): string[] {
 
 type ToolSession = {
   client: Client;
-  state: { getLocation(): unknown };
+  state: {
+    getLocation(): unknown;
+    getCity?(): string | undefined;
+    notePostal?(code: string): void;
+  };
 };
+
+function maySetLocation(state: ToolSession['state']): boolean {
+  if (state.getLocation()) return true;
+  if (typeof state.getCity !== 'function') return true;
+  return Boolean(state.getCity());
+}
 
 function knownRetailer(id: string | undefined): ShopperPlace['retailer'] | undefined {
   return RETAILERS.some((r) => r.id === id) ? (id as ShopperPlace['retailer']) : undefined;
@@ -135,6 +145,10 @@ export async function applyShopperPlace(session: ToolSession, texts: string[]): 
   const current = session.state.getLocation() as { retailer?: string; postalCode?: string } | undefined;
   const place = placeToSet(current, texts);
   if (!place) return false;
+  if (!maySetLocation(session.state)) {
+    session.state.notePostal?.(place.postalCode);
+    return false;
+  }
   try {
     const res = await session.client.callTool(
       { name: 'set_location', arguments: { retailer: place.retailer, postal_code: place.postalCode } },

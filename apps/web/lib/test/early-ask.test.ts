@@ -2,7 +2,17 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { STARTERS } from '../agent/prompt.ts';
-import { EARLY_LOCATION_ASK, EARLY_LOCATION_ASK_EN, earlyLocationAsk, mentionsPostalCode } from '../agent/early-ask.ts';
+import {
+  CITY_ASK,
+  cityFromAnswer,
+  earlyCityAsk,
+  EARLY_LOCATION_ASK,
+  EARLY_LOCATION_ASK_EN,
+  earlyLocationAsk,
+  isCityQuestion,
+  mentionsPostalCode,
+  rememberCity,
+} from '../agent/early-ask.ts';
 
 const first = (text: string) => earlyLocationAsk({ hasLocation: false, firstMessage: true, text });
 
@@ -40,5 +50,27 @@ describe('earlyLocationAsk', () => {
     for (const t of ['por menos de $10.000', 'con $10000', 'leche de 1 litro', '12 huevos', 'arroz 500g']) {
       assert.equal(mentionsPostalCode(t), false, t);
     }
+  });
+});
+
+describe('earlyCityAsk', () => {
+  it('asks after a postal code and before a location, and stores only that answer', () => {
+    assert.equal(CITY_ASK, '¿En qué ciudad o localidad está ese código postal?');
+    assert.equal(earlyCityAsk({ hasLocation: false, hasCity: false, knownPostal: true }), CITY_ASK);
+    assert.equal(earlyCityAsk({ hasLocation: true, hasCity: false, knownPostal: true }), null);
+    assert.equal(earlyCityAsk({ hasLocation: false, hasCity: false, knownPostal: false }), null);
+    assert.equal(cityFromAnswer('Palermo'), 'Palermo');
+    assert.equal(cityFromAnswer('leche, pan'), null);
+    const state: { city?: string; getCity: () => string | undefined; setCity: (city: string) => void } = {
+      getCity: () => state.city,
+      setCity: (city) => {
+        state.city = city;
+      },
+    };
+    rememberCity(state, [{ role: 'assistant', content: [{ type: 'text', text: 'hola' }] }], 'Palermo');
+    assert.equal(state.city, undefined);
+    assert.equal(isCityQuestion(CITY_ASK), true);
+    rememberCity(state, [{ role: 'assistant', content: [{ type: 'text', text: CITY_ASK }] }], 'Villa Crespo');
+    assert.equal(state.city, 'Villa Crespo');
   });
 });

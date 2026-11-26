@@ -181,4 +181,17 @@ describe('autoCompare', () => {
     assert.equal(pending?.t === 'compare' && 'checkoutDemo' in pending, false);
     assert.equal(done?.t === 'compare' && done.status === 'ok' && done.checkoutDemo, true);
   });
+
+  it('does not run on a Coto cart', async () => {
+    const events: UiEvent[] = [];
+    const note = await autoCompare({
+      ...base,
+      cache: cacheFor('coto'),
+      enabled: true,
+      emit: (event) => events.push(event),
+      compare: async () => finished,
+    });
+    assert.equal(note, undefined);
+    assert.equal(events.length, 0);
+  });
 });

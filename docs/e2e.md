@@ -54,17 +54,12 @@ win over that file.
   The postal-code reply is, because a guest stuck before it was the blocker
   in issue [#51](https://github.com/raptor0929/changuito/issues/51); the
   server now answers it without a model hop.
-- **Checkout.** One test, the whole flow: a scripted turn draws a basket, the
-  importe is quoted with its código and confirmed on the second poll, the
-  fixture store renders inside the frame, a single-use card is issued and its
-  3DS code counts down, **Ya lo pagué** is corroborated before the receipt is
-  written, and the card is given back in the same breath. Then: the chat is
-  read-only, a second order in it is refused, and the receipt survives a
-  reload and reopens from the history rail. Two assertions are guardrails
-  rather than features — that the PAN, the CVV and the one-time code never
-  reach `localStorage` or `sessionStorage`, and that traces, video and
-  screenshots are off, because this repo is public and those numbers are on
-  screen for most of the run.
+- **Checkout.** Project `checkout`, against `next dev`, not a deployment.
+  The virtual-card path is gone. The spec seeds one basket, mocks quote /
+  lock / status as `demo`, and asserts the dialog stops at "Llegamos hasta
+  el pago" with a test-mode receipt. A second test opens `/dev/checkout` and
+  checks the fixture says it is not the supermarket. Traces, video, and
+  screenshots are off.
 - **App, auth.** Skipped unless both `CHANGUTO_E2E_EMAIL` and
   `CHANGUTO_E2E_PASSWORD` are non-empty. It opens **Empezá a comprar** and
   uses the email field. Traces and screenshots are off for this spec so a
@@ -130,8 +125,29 @@ Screenshot and video are on. Do not commit `test-results/`.
 
 ## GitHub Actions
 
-Actions runs `.github/workflows/unit.yml` on every pull request and on every
-push to `main`. That job is `npm test` only. Playwright is not a workflow in
-this repo: run it locally with `npm run test:e2e`.
+`.github/workflows/unit.yml` runs `npm test` and the web typecheck on every
+pull request. Docs-only changes skip that job. It does not run on push to
+`main`.
+
+`.github/workflows/e2e-weekly.yml` runs Monday at 05:00 in
+America/Argentina/Buenos_Aires (`0 8 * * 1` UTC), and on `workflow_dispatch`.
+It has three parts:
+
+- Soroban `cargo test` for `contracts/`.
+- Project `checkout`: a local `next dev` on port 3124, Cloudflare's published
+  Turnstile dummy keys, and route mocks. It does not call the model, the
+  database, or mainnet. Traces, video, and screenshots are off.
+- Project `shell`: a read-only look at the public shopper. It does not send
+  a chat message. `landing` is not in this workflow. Cloudflare's interactive
+  challenge blocks the GitHub runner on www.changuito.me, so a weekly landing
+  smoke cannot see the page. `e2e/landing.spec.ts` stays in the repo and still
+  runs when you ask for that project locally.
+
+`@quarantine` tests are excluded (`grepInvert` in `playwright.config.ts` and
+`--grep-invert` in the workflow). HTML and JUnit land as artifacts for 7 days.
+
+`npm run test:e2e` locally still runs the projects you name. A run with no
+`--project` also starts the checkout dev server, because that suite is part
+of the full set.
 
 Never commit `e2e/.env` or a real inbox.

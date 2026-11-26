@@ -61,6 +61,13 @@ test.describe('landing', () => {
     await page.goto('/whitelist');
 
     await expect(page.getByRole('heading', { level: 1, name: /lista para beta/ })).toBeVisible();
+    const source = page.getByTestId('whitelist-source');
+    await expect(page.getByLabel('¿Dónde te enteraste de nosotros?')).toBeVisible();
+    await expect(source.getByRole('option', { name: 'Por Fabio' })).toHaveCount(1);
+    await expect(source.getByRole('option', { name: 'Por Simoneth' })).toHaveCount(1);
+    await expect(source.locator('optgroup[label="Eventos"]')).toHaveCount(0);
+    await expect(source.getByRole('option', { name: 'Nerdearla' })).toHaveCount(0);
+
     await page.getByRole('button', { name: 'Anotame' }).click();
     await expect(page.getByRole('alert').filter({ hasText: 'Completá tu nombre.' }).first()).toBeVisible();
     await expect(page.getByRole('alert').filter({ hasText: 'Completá tu email.' }).first()).toBeVisible();
