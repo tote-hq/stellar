@@ -41,7 +41,7 @@ export default function AdminDesk() {
       <ul>
         {notes.map((note) => (
           <li key={note.id}>
-            <a href={`/orders/${note.orderId ?? ''}`}>{note.body}</a>
+            {note.orderId ? <a href={`/orders/${note.orderId}`}>{note.body}</a> : <span>{note.body}</span>}
             {note.readAt ? null : (
               <button
                 type="button"
