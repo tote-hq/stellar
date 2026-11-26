@@ -92,8 +92,9 @@ describe('admin gate', () => {
     }
   });
 
-  it('does not link a note without an order id to /orders/', () => {
+  it('links a desk note to its order and does not invent an id', () => {
     const src = readFileSync(new URL('../../app/admin-portal/page.tsx', import.meta.url), 'utf8');
+    assert.match(src, /<a href=\{`\/orders\/\$\{note\.orderId\}`\}>/);
     assert.doesNotMatch(src, /orderId \?\? ''/);
   });
 });

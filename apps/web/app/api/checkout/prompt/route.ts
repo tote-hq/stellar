@@ -35,9 +35,12 @@ export async function POST(req: Request): Promise<Response> {
   if (!pending) {
     return Response.json({ error: 'No hay una pregunta pendiente.' }, { status: 409, headers: { 'cache-control': 'no-store' } });
   }
-  const sent = rec.jobId && rec.jobId !== 'none'
-    ? await postCotoShopperAnswer(rec.jobId, pending.fieldRef ?? 'admin', answer)
-    : true;
+  // An operator question has no sandbox field. Forwarding it answers 409 and leaves the row pending.
+  const sent = pending.source === 'admin'
+    ? true
+    : rec.jobId && rec.jobId !== 'none'
+      ? await postCotoShopperAnswer(rec.jobId, pending.fieldRef ?? 'admin', answer)
+      : true;
   if (!sent) {
     return Response.json({ error: 'No pudimos guardar la respuesta.' }, { status: 502, headers: { 'cache-control': 'no-store' } });
   }
