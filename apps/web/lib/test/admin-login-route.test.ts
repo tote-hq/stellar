@@ -6,24 +6,6 @@ import { after, before, beforeEach, describe, it, mock } from 'node:test';
  * never the password, the hash, or the session secret.
  */
 
-const verify = {
-  mode: 'false' as 'false' | 'true' | 'throw',
-  errorName: 'CompileError',
-};
-
-mock.module('@noble/hashes/argon2', {
-  namedExports: {
-    argon2id: () => {
-      if (verify.mode === 'throw') {
-        const err = new Error('wasm');
-        err.name = verify.errorName;
-        throw err;
-      }
-      return new Uint8Array(32).fill(1);
-    },
-  },
-});
-
 const db = {
   user: null as { id: string; passwordHash: string } | null,
   failures: 0,
@@ -45,6 +27,8 @@ mock.module(new URL('../admin/store.ts', import.meta.url).href, {
 
 const PASSWORD = 'wrong-probe';
 const HASH =
+  'pbkdf2-sha256$100000$cm91dGUtc2FsdC0xNmJ5dGU$M0yjG2iGwKpTlThqm5pC1ktw3CCUGetzyaqTGXTqOro';
+const OLD_ARGON2 =
   '$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0c2E$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const SECRET = 'test-admin-session';
 
@@ -60,8 +44,6 @@ describe('POST /api/admin/login 401 branch', () => {
   });
 
   beforeEach(() => {
-    verify.mode = 'false';
-    verify.errorName = 'CompileError';
     db.user = null;
     db.failures = 0;
     db.recorded = 0;
@@ -114,13 +96,12 @@ describe('POST /api/admin/login 401 branch', () => {
     assertSafe();
   });
 
-  it('logs verify_threw plus the error name when the verifier throws', async () => {
-    db.user = { id: 'user-1', passwordHash: HASH };
-    verify.mode = 'throw';
+  it('logs verify_threw plus the error name when the stored hash is not pbkdf2', async () => {
+    db.user = { id: 'user-1', passwordHash: OLD_ARGON2 };
     const res = await post();
     assert.equal(res.status, 401);
     assert.deepEqual(res.body, { error: 'Usuario o contraseña incorrectos.' });
-    assert.deepEqual(logs, ['[admin/login] 401 verify_threw:CompileError']);
+    assert.deepEqual(logs, ['[admin/login] 401 verify_threw:Error']);
     assert.equal(db.recorded, 1);
     assertSafe();
   });
