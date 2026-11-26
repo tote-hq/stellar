@@ -146,7 +146,7 @@ export async function POST(req: Request): Promise<Response> {
           // banner reads, so the model does not ask for it again.
           const earlier = priorLines(body.prior);
           const shown = shownProducts(body.shown);
-          rememberCity(session.state, turn.messages, body.message);
+          rememberCity(session.state, turn.messages, body.message, earlier);
           if (owner) await presetLocationFromProfile(session, owner);
           await applyShopperPlace(session, [...earlier, body.message]);
           turn.cache.cotoPay = owner ? await admitCotoRequest(owner) : false;

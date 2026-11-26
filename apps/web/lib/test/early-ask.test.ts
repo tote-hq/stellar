@@ -93,6 +93,20 @@ describe('earlyCityAsk', () => {
     assert.equal(state.city, 'Ciudad de Buenos Aires');
   });
 
+  it('stores the CABA alias on the first reply when the transcript and pending postal are gone', () => {
+    for (const text of ['caba', 'CABA', 'C.A.B.A.', 'ciudad de buenos aires']) {
+      const state: { city?: string; getCity: () => string | undefined; setCity: (city: string) => void } = {
+        getCity: () => state.city,
+        setCity: (city) => {
+          state.city = city;
+        },
+      };
+      rememberCity(state, [], text, ['1414']);
+      assert.equal(state.city, 'Ciudad de Buenos Aires', text);
+      assert.equal(canonicalCity(text), 'Ciudad de Buenos Aires', text);
+    }
+  });
+
   it('stores caba after a model-worded city question when a postal code is pending', () => {
     const state: {
       city?: string;

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { Cart } from '@changuito/mcp/types';
 
+import { canonicalCity } from '../lib/agent/early-ask.ts';
 import { COTO_REAL_KIND, HOME_MINIMUM_CENTAVOS, HOME_MINIMUM_COPY } from '../lib/checkout/coto-real.ts';
 import { OpenConfirmationPending, submitOpen } from '../lib/checkout/open-submission.ts';
 import { fetchAs } from '../lib/fetch-as.ts';
@@ -96,7 +97,7 @@ export function CotoRealModal({
           cart,
           checkoutKind: COTO_REAL_KIND,
           postalCode: postal,
-          city,
+          city: canonicalCity(city),
           fulfillment,
           street,
           number,
@@ -160,7 +161,7 @@ export function CotoRealModal({
   }
 
   return (
-    <div className="modal-back" role="presentation" onClick={onClose}>
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div
         className="modal"
         role="dialog"
