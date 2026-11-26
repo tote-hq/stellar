@@ -1,16 +1,25 @@
 """Coto real worker: phase order, AV5 log, 60s refund, no card in the result."""
 
 import asyncio
+import hashlib
+import hmac
 import json
+import os
 import unittest
+from pathlib import Path
+from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 from coto_real import (
     NEEDS_HUMAN_MS,
     NEEDS_SHOPPER_MS,
+    consume_screen_ticket,
+    issue_screen_ticket,
     phase_order_ok,
     public_job,
     run_coto_real,
     viewer_url,
+    watch_coto_viewer,
 )
 
 
@@ -101,6 +110,7 @@ class CotoRealTest(unittest.TestCase):
             token="tok", origin="https://sandbox.example",
         ))
         self.assertTrue(any("code=needs_human admin_viewer_url=" in line for line in logs))
+        self.assertTrue(any("&part=screen" in line for line in logs))
         self.assertTrue(any("code=needs_human_timeout" in line for line in logs))
         self.assertNotIn("admin_viewer_url", json.dumps(out))
         self.assertEqual(out["result"]["code"], "needs_human_timeout")
@@ -146,6 +156,101 @@ class CotoRealTest(unittest.TestCase):
         self.assertNotIn("4242", blob)
         self.assertEqual(shown["prompt"]["label"], "¿Celular?")
         self.assertNotIn("card", shown)
+
+    def test_coto_chromium_uses_the_vnc_display(self):
+        from coto_live import browser_env
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("DISPLAY", None)
+            self.assertEqual(browser_env()["DISPLAY"], ":99")
+            os.environ["DISPLAY"] = ":7"
+            self.assertEqual(browser_env()["DISPLAY"], ":7")
+
+    def test_the_deadline_renews_past_sixty_seconds_while_someone_is_watching(self):
+        driver = Scripted({"payment": {"needs_human": True}})
+        clock = {"t": 0}
+        job = {"job_id": "job1", "items": [{"sku": "1"}], "delivery": {"street": "Calle"}}
+
+        async def tick(_seconds):
+            clock["t"] += 1_000
+            if clock["t"] == 30_000:
+                job["viewer_seen"] = 30_000
+            if clock["t"] >= 70_000:
+                driver.polls.append({"cleared": True})
+
+        out = asyncio.run(run_coto_real(
+            job, driver, now_ms=lambda: clock["t"], sleep=tick, log=lambda _line: None,
+            token="tok", origin="https://sandbox.example",
+        ))
+        self.assertGreaterEqual(clock["t"], 61_000)
+        self.assertNotEqual(out["result"]["code"], "needs_human_timeout")
+
+    def test_a_watched_deadline_still_stops_at_the_shopper_cap(self):
+        driver = Scripted({"payment": {"needs_human": True}})
+        clock = {"t": 0}
+        steps = {"n": 0}
+        job = {
+            "job_id": "job1", "items": [{"sku": "1"}], "delivery": {"street": "Calle"},
+            "viewer_seen": 10**12,
+        }
+
+        async def jump(_seconds):
+            steps["n"] += 1
+            if steps["n"] > 3:
+                raise AssertionError("deadline was not capped")
+            clock["t"] = NEEDS_SHOPPER_MS + 1
+
+        out = asyncio.run(run_coto_real(
+            job, driver, now_ms=lambda: clock["t"], sleep=jump, log=lambda _line: None,
+            token="tok", origin="https://sandbox.example",
+        ))
+        self.assertEqual(out["result"]["code"], "needs_human_timeout")
+        self.assertLessEqual(steps["n"], 3)
+
+    def test_a_screen_ticket_is_single_use_job_bound_and_stays_out_of_the_log(self):
+        open_job = {"job_id": "ab" * 16, "status": "running", "phase": "needs_human", "mode": "coto_real"}
+        token = issue_screen_ticket(open_job, 1_000)
+        self.assertRegex(token, r"^[A-Za-z0-9_-]{40,64}$")
+        self.assertFalse(consume_screen_ticket(token, "other-job", 1_001))
+        self.assertTrue(consume_screen_ticket(token, open_job["job_id"], 1_001))
+        self.assertFalse(consume_screen_ticket(token, open_job["job_id"], 1_001))
+        self.assertIsNone(issue_screen_ticket({"status": "done", "phase": "placed"}, 1_000))
+        leaked = issue_screen_ticket(open_job, 2_000)
+        logs = []
+        driver = Scripted({"payment": {"needs_human": True}})
+        clock = {"t": 0}
+
+        async def jump(_seconds):
+            clock["t"] += NEEDS_HUMAN_MS + 1
+
+        out = asyncio.run(run_coto_real(
+            {"job_id": "job1", "items": [{"sku": "1"}], "delivery": {"street": "Calle"}},
+            driver, now_ms=lambda: clock["t"], sleep=jump, log=logs.append,
+            token="tok", origin="https://sandbox.example",
+        ))
+        blob = "\n".join(logs) + json.dumps(out) + json.dumps(public_job(open_job))
+        self.assertNotIn(leaked, blob)
+        self.assertNotIn("ticket=", blob)
+
+    def test_watching_stops_when_the_job_closes(self):
+        job = {"job_id": "ab" * 16, "status": "running", "phase": "needs_human", "mode": "coto_real"}
+        clock = {"t": 0}
+
+        async def tick(_seconds):
+            clock["t"] += 1_000
+            if clock["t"] >= 2_000:
+                job["status"] = "failed"
+
+        asyncio.run(watch_coto_viewer(job, tick, lambda: clock["t"]))
+        self.assertEqual(job["viewer_seen"], 1_000)
+        self.assertEqual(job["status"], "failed")
+
+    def test_viewer_js_does_not_open_a_socket_without_a_connect_message(self):
+        src = (Path(__file__).parent / "viewer" / "viewer.js").read_text()
+        before, after = src.split("if (event.data?.type !== 'changuito-viewer-connect') return;", 1)
+        self.assertNotIn("new RFB", before)
+        self.assertIn("new RFB", after)
+        self.assertNotIn("new WebSocket", src)
 
     def test_needs_shopper_timeout_refunds_and_a_matching_answer_resumes(self):
         driver = Scripted({"checkout": {"needs_shopper": {
@@ -463,6 +568,51 @@ class CotoRealPostTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("SENTINEL", blob)
         jobs.pop(created["job_id"], None)
         jobs.pop(created2["job_id"], None)
+
+
+@unittest.skipUnless(_sandbox_deps(), "sandbox dependencies are not installed; uv run python -m unittest")
+class CotoViewerRouteTest(unittest.IsolatedAsyncioTestCase):
+    async def test_signature_renews_while_needs_human_and_stops_when_terminal(self):
+        import io
+        from contextlib import redirect_stdout
+
+        from fastapi import HTTPException
+
+        import server
+
+        server.TOKEN = "viewer-test-token"
+        os.environ["SANDBOX_PUBLIC_URL"] = "https://sandbox.example"
+        job_id = "cd" * 16
+        server.jobs[job_id] = {
+            "job_id": job_id,
+            "mode": "coto_real",
+            "status": "running",
+            "phase": "needs_human",
+            "viewer_exp": 1,
+        }
+        try:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                body = await server.job_viewer(job_id)
+            query = parse_qs(urlsplit(body["url"]).query)
+            exp = int(query["exp"][0])
+            expected = hmac.new(
+                server.TOKEN.encode(), f"{job_id}.{exp}".encode(), hashlib.sha256,
+            ).hexdigest()
+            self.assertEqual(query["sig"], [expected])
+            self.assertEqual(query["part"], ["screen"])
+            self.assertEqual(body["job_id"], job_id)
+            self.assertRegex(body["ticket"], r"^[A-Za-z0-9_-]{40,64}$")
+            self.assertNotIn(body["ticket"], body["url"])
+            self.assertNotIn(body["ticket"], buf.getvalue())
+            self.assertGreater(server.jobs[job_id]["viewer_seen"], 1)
+            server.jobs[job_id]["status"] = "failed"
+            server.jobs[job_id]["phase"] = "payment"
+            with self.assertRaises(HTTPException) as caught:
+                await server.job_viewer(job_id)
+            self.assertEqual(caught.exception.status_code, 404)
+        finally:
+            server.jobs.pop(job_id, None)
 
 
 if __name__ == "__main__":

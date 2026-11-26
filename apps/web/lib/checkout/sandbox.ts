@@ -290,12 +290,42 @@ export async function postCotoShopperAnswer(
   return res.ok;
 }
 
-/** Recomputed by the sandbox while the signature is inside 60s. Not stored. */
-export async function readCotoViewer(jobId: string, env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
-  if (!env.SANDBOX_URL) return null;
+/** Origin of `SANDBOX_URL`, for the admin document's frame-src. Null when it is unset or not a URL. */
+export function sandboxOrigin(env: NodeJS.ProcessEnv = process.env): string | null {
+  const raw = env.SANDBOX_URL;
+  if (!raw) return null;
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return null;
+  }
+}
+
+export interface CotoViewer {
+  url: string;
+  ticket: string;
+  jobId: string;
+}
+
+/**
+ * Signed while the operator still needs the Coto screen. Not stored.
+ * A URL whose origin is not the sandbox is dropped.
+ */
+export async function readCotoViewer(
+  jobId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<CotoViewer | null> {
+  const expected = sandboxOrigin(env);
+  if (!expected) return null;
   const { base, headers } = remote(env);
   const res = await fetch(`${base}/jobs/${encodeURIComponent(jobId)}/viewer`, { headers, cache: 'no-store' });
   if (!res.ok) return null;
-  const body = (await res.json()) as { url?: unknown };
-  return typeof body.url === 'string' ? body.url : null;
+  const body = (await res.json()) as { url?: unknown; ticket?: unknown; job_id?: unknown };
+  if (typeof body.url !== 'string' || typeof body.ticket !== 'string' || typeof body.job_id !== 'string') return null;
+  try {
+    if (new URL(body.url).origin !== expected) return null;
+  } catch {
+    return null;
+  }
+  return { url: body.url, ticket: body.ticket, jobId: body.job_id };
 }

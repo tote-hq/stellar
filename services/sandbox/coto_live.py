@@ -15,6 +15,13 @@ from coto_fields import plan_delivery
 from coto_real import run_coto_real
 
 
+def browser_env() -> dict[str, str]:
+    """Chromium on the display x11vnc serves at 127.0.0.1:5901. Same default as sandbox.py."""
+    env = dict(os.environ)
+    env["DISPLAY"] = os.environ.get("DISPLAY", ":99")
+    return env
+
+
 class LiveCotoDriver:
     def __init__(self, page, user: str, password: str):
         self.page = page
@@ -211,7 +218,7 @@ async def run_live(job, *, user: str, password: str, token: str, origin: str) ->
     from playwright.async_api import async_playwright
 
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=False)
+        browser = await playwright.chromium.launch(headless=False, env=browser_env())
         page = await browser.new_page()
         try:
             driver = LiveCotoDriver(page, user, password)

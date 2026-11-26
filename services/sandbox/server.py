@@ -301,15 +301,24 @@ async def answer(job_id: str, body: ShopperAnswer) -> dict:
 
 @app.get("/jobs/{job_id}/viewer", dependencies=[Depends(auth)])
 async def job_viewer(job_id: str) -> dict:
-    from coto_real import viewer_url
+    from coto_real import issue_screen_ticket, viewer_open, viewer_url
 
     job = jobs.get(job_id)
-    exp = job.get("viewer_exp") if isinstance(job, dict) else None
-    now = int(time.time() * 1000)
-    if not isinstance(exp, int) or not (now < exp <= now + 60_000):
+    if not isinstance(job, dict) or job.get("mode") != "coto_real" or not viewer_open(job):
         raise HTTPException(404, "viewer closed")
+    now = int(time.time() * 1000)
+    ticket = issue_screen_ticket(job, now)
+    if not ticket:
+        raise HTTPException(404, "viewer closed")
+    exp = now + 60_000
+    job["viewer_exp"] = exp
+    job["viewer_seen"] = now
     origin = os.environ.get("SANDBOX_PUBLIC_URL") or "https://sandbox.local"
-    return {"url": viewer_url(job_id, TOKEN, origin, exp)}
+    return {
+        "url": viewer_url(job_id, TOKEN, origin, exp, part="screen"),
+        "ticket": ticket,
+        "job_id": job_id,
+    }
 
 
 @app.get("/jobs/{job_id}", dependencies=[Depends(auth)])
@@ -414,7 +423,7 @@ async def cancel_order(order_id: str, body: CancelOrder):
 
 @app.websocket('/viewer/{job_id}/socket')
 async def viewer_socket(ws: WebSocket, job_id: str):
-    await sessions.relay(ws, job_id)
+    await sessions.relay(ws, job_id, jobs.get(job_id))
 
 
 @app.post('/viewer/{job_id}/card')

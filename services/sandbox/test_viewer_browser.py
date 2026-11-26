@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import tempfile
+import unittest
 from pathlib import Path
 
 import uvicorn
@@ -124,6 +125,15 @@ async def main():
             xvfb.terminate()
             vnc.wait(timeout=10)
             xvfb.wait(timeout=10)
+
+
+class ViewerScriptTests(unittest.TestCase):
+    def test_viewer_js_does_not_open_a_socket_without_a_connect_message(self):
+        src = (Path(__file__).parent / 'viewer' / 'viewer.js').read_text()
+        before, after = src.split("if (event.data?.type !== 'changuito-viewer-connect') return;", 1)
+        self.assertNotIn('new RFB', before)
+        self.assertIn('new RFB', after)
+        self.assertNotIn('new WebSocket', src)
 
 
 if __name__ == '__main__':

@@ -11,8 +11,22 @@ const config: NextConfig = {
     // development `fixtureSecurityHeaders` is empty and the rule is not
     // added at all — see lib/security-headers.ts for why that is two locks.
     const fixture = fixtureSecurityHeaders();
+    // SANDBOX_URL is a runtime binding, so the admin document's frame-src
+    // cannot be baked here. This host gets no CSP from the config; middleware
+    // sets the one header, with the sandbox origin, on the document.
+    const security = appSecurityHeaders();
+    const csp = security.filter((header) => header.key === 'Content-Security-Policy');
+    const rest = security.filter((header) => header.key !== 'Content-Security-Policy');
     return [
-      { source: '/:path*', headers: appSecurityHeaders() },
+      { source: '/:path*', headers: rest },
+      {
+        source: '/:path*',
+        headers: csp,
+        missing: [
+          { type: 'host', value: 'admin.changuito.me' },
+          { type: 'host', value: 'admin.localhost' },
+        ],
+      },
       ...(fixture.length ? [{ source: FIXTURE_PATH, headers: fixture }] : []),
     ];
   },
