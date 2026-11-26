@@ -102,9 +102,11 @@ export function searchCompareNote(args: {
 }
 
 /**
- * Chosen-chain card. Best type score first, then the lower price.
- * Ids already on a card go after the ones this thread has not shown,
- * so "más opciones" is not a second copy of the same row.
+ * Chosen-chain card. Best type score first. Within one score, ids this
+ * thread has not shown come before ones already on a card, then the lower
+ * price. "más opciones" (every hit ties) still leads with a new SKU. A
+ * precise ask still leads with the best match, even when that SKU was
+ * already drawn.
  */
 function rankedView(
   items: readonly SearchCompareItem[],
@@ -116,17 +118,14 @@ function rankedView(
   const typed = items.filter(
     (item) => item.available && item.shelfCentavos > 0 && ofQueryType(query, item),
   );
-  const byRank = (a: SearchCompareItem, b: SearchCompareItem) => {
+  typed.sort((a, b) => {
     const score = typeScore(query, b) - typeScore(query, a);
     if (score !== 0) return score;
+    const seen = Number(shownSet.has(a.id)) - Number(shownSet.has(b.id));
+    if (seen !== 0) return seen;
     return a.shelfCentavos - b.shelfCentavos;
-  };
-  const fresh: SearchCompareItem[] = [];
-  const again: SearchCompareItem[] = [];
-  for (const item of typed) (shownSet.has(item.id) ? again : fresh).push(item);
-  fresh.sort(byRank);
-  again.sort(byRank);
-  return [...fresh, ...again].slice(0, limit);
+  });
+  return typed.slice(0, limit);
 }
 
 function recordSearch(cache: RenderCache, query: string, retailer: 'dia' | 'coto', available: number): void {

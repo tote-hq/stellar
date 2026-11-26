@@ -540,5 +540,28 @@ describe('ranked search', () => {
     assert.equal(card.coto[0]?.id, 'paper');
     assert.equal(card.coto[0]?.shelfCentavos, 4500);
     assert.match(seenNote, /seen=paper/);
+
+    // Already drawn, and the live search only returns napkins. Score still wins.
+    const shown = emptyCache();
+    shown.coto = remembered.coto;
+    shown.shown = ['paper'];
+    const shownEvents: UiEvent[] = [];
+    const shownSearch = beginChainSearch({
+      chain: 'coto',
+      id: 'shown-paper',
+      query: 'papel higienico campanita soft',
+      cache: shown,
+      emit: (event) => shownEvents.push(event),
+      searcher: {
+        async search() {
+          return [{ ...coto(100), id: 'napkins', name: 'Servilletas Campanita Soft' }];
+        },
+      },
+    });
+    const shownNote = await shownSearch.finish();
+    const shownCard = shownEvents[1];
+    if (shownCard?.t !== 'search_compare' || shownCard.status === 'pending') assert.fail('expected a card');
+    assert.equal(shownCard.coto[0]?.id, 'paper');
+    assert.match(shownNote, /pickCoto=paper/);
   });
 });

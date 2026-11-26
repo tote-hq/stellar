@@ -396,11 +396,12 @@ same thing. Stopping after `choose_retailer` on an Armar turn leaves the
 compare card on screen and no cart. While both chains are open, the search
 card shows one product per type per chain, the cheapest in the best-matching
 tier, picked on the server (`pickDia` / `pickCoto`). After a chain is chosen,
-that chain's card lists up to six, ranked. A later search for the same query
-puts ids not yet in `RenderCache.shown` first. A typed set that is empty tries
-a short wider pass, in-process under the row already open, before the card
-says the type is missing. Hits remembered on the turn that score for the query
-join that pass; the note marks them `seen`. A type that matches a cart line is
+that chain's card lists up to six, ranked by type score. Within one score,
+ids not yet in `RenderCache.shown` come before ones already shown, then
+price. A precise ask still leads with the best match after it has been drawn.
+A typed set that is empty tries a short wider pass, in-process under the row
+already open, before the card says the type is missing. Hits remembered on
+the turn that score for the query join that pass; the note marks them `seen`. A type that matches a cart line is
 `inCart` and is not "no está". After "Quiero seguir en {store}.", the composer
 offers Armar and says she can keep typing. Armar adds the pick, one per type.
 `pairDia` / `pairCoto` stay the item the fee gap
