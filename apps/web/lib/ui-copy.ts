@@ -274,6 +274,7 @@ export interface SearchCompareCopy {
   diaError: string;
   chooseDia: string;
   chooseCoto: string;
+  missingType: (type: string, store: string) => string;
 }
 
 export interface MissingCopy {
@@ -539,6 +540,7 @@ const ES: UiCopy = {
     diaError: 'No pudimos consultar Día.',
     chooseDia: 'Seguir en Día',
     chooseCoto: 'Seguir en Coto',
+    missingType: (type, store) => `No encontramos ${type} disponible en ${store}`,
   },
   missing: {
     prompt: (item, store) => `${item} no está en ${store}. ¿Lo sustituís o lo sacamos?`,
@@ -789,6 +791,7 @@ const EN: UiCopy = {
     diaError: "We couldn't reach Día.",
     chooseDia: 'Continue at Día',
     chooseCoto: 'Continue at Coto',
+    missingType: (type, store) => `We couldn't find ${type} available at ${store}`,
   },
   missing: {
     prompt: (item, store) => `${item} isn't at ${store}. Substitute it or drop it?`,

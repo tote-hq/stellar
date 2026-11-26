@@ -2,24 +2,93 @@
 
 import type { Block } from '../lib/chat-state';
 import { feeCentavosOf } from '../lib/checkout/compare-fee.ts';
+import { cheapestAvailable } from '../lib/one-per-type.ts';
 import { pesos } from '../lib/orders-copy.ts';
 import type { SearchCompareItem } from '../lib/protocol.ts';
 import { RETAILER_NAMES } from '../lib/retailers.ts';
 import type { Chain } from '../lib/retailer-choice.ts';
-import { uiCopy } from '../lib/ui-copy.ts';
+import { uiCopy, type SearchCompareCopy } from '../lib/ui-copy.ts';
 import { useLang } from './LangProvider';
 import { ProductCard } from './ProductGrid';
 
-function priced(items: SearchCompareItem[]): SearchCompareItem[] {
-  return items.filter((item) => item.available && item.shelfCentavos > 0);
+type SearchBlock = Extract<Block, { kind: 'search_compare' }>;
+
+/**
+ * The line on a type that has no product card.
+ * An error status for this chain replaces the missing-type sentence.
+ * While the type is still pending, Coto names the wait and Día stays quiet.
+ */
+function typeNote(
+  chain: Chain,
+  block: SearchBlock,
+  picked: boolean,
+  type: string,
+  store: string,
+  copy: SearchCompareCopy,
+): string | null {
+  if (block.status === 'pending') return chain === 'coto' ? copy.pendingCoto : null;
+  if (picked) return null;
+  if (chain === 'dia' && block.status === 'dia_error') return copy.diaError;
+  if (chain === 'coto' && block.status === 'coto_error') return copy.cotoError;
+  if (chain === 'coto' && block.status === 'coto_timed_out') return copy.cotoTimedOut;
+  return copy.missingType(type, store);
+}
+
+function TypeSlot({
+  typeLabel,
+  note,
+  announce,
+  item,
+  price,
+  unit,
+}: {
+  typeLabel: string;
+  note: string | null;
+  announce?: boolean;
+  item?: SearchCompareItem;
+  price?: string;
+  unit?: string;
+}) {
+  if (item && price) {
+    return (
+      <ProductCard
+        kind={typeLabel}
+        name={item.name}
+        brand={item.brand}
+        imageUrl={item.imageUrl}
+        imageAlt=""
+        price={price}
+        unit={unit}
+      />
+    );
+  }
+  return (
+    <li className="card card-empty">
+      <div className="card-img">
+        <span className="card-img-empty" aria-hidden="true">
+          🛒
+        </span>
+      </div>
+      <div className="card-body">
+        <span className="card-kind">{typeLabel}</span>
+        {note ? (
+          <span className="card-name" role={announce ? 'status' : undefined}>
+            {note}
+          </span>
+        ) : null}
+      </div>
+    </li>
+  );
 }
 
 /**
- * Both chains for one query, before a cart exists.
- * Prices come from the event. A side with no positive price has no rows and no button.
+ * One row of types, Coto then Día, before a cart exists.
+ * Each chain shows one card per type. The pick is `cheapestAvailable`,
+ * so a stored block that still lists several rows draws one card too.
+ * Prices come from the event. A chain with no pick has no buttons.
  */
 export function SearchCompareCard({
-  block,
+  blocks,
   chains,
   showChoose,
   showBuild,
@@ -27,7 +96,7 @@ export function SearchCompareCard({
   onChoose,
   onBuild,
 }: {
-  block: Extract<Block, { kind: 'search_compare' }>;
+  blocks: SearchBlock[];
   chains: Chain[];
   showChoose: boolean;
   showBuild: boolean;
@@ -38,39 +107,38 @@ export function SearchCompareCard({
   const lang = useLang();
   const copy = uiCopy(lang);
   const search = copy.searchCompare;
-  const pending = block.status === 'pending';
+  const label = blocks.map((block) => block.query).filter(Boolean).join(', ');
+  const pending = blocks.some((block) => block.status === 'pending');
   return (
-    <section className="search-compare" data-testid="search-compare" aria-label={block.query}>
+    <div className="search-compare" data-testid="search-compare" aria-label={label}>
       {chains.map((chain) => {
-        const items = priced(chain === 'dia' ? block.dia : block.coto);
-        // While both chains are still loading, Día has no rows yet. The Coto
-        // note is the pending line; an empty Día heading would sit above it.
-        if (pending && items.length === 0 && chain === 'dia' && chains.includes('coto')) return null;
         const store = RETAILER_NAMES[chain];
+        const slots = blocks.map((block) => {
+          const items = chain === 'dia' ? block.dia : block.coto;
+          return { block, item: cheapestAvailable(items) };
+        });
+        const anyPick = slots.some((slot) => slot.item);
         return (
           <section key={chain} className="search-compare-section" aria-label={store}>
             <h3 className="search-compare-store">{store}</h3>
-            <ChainNote chain={chain} block={block} />
-            {items.length > 0 ? (
-              <ul className="grid">
-                {items.map((item) => (
-                  <ProductCard
-                    key={item.id}
-                    name={item.name}
-                    brand={item.brand}
-                    imageUrl={item.imageUrl}
-                    imageAlt={item.name}
-                    price={pesos(item.shelfCentavos, lang)}
-                    unit={
-                      item.unitMultiplier && item.measurementUnit
-                        ? `${item.unitMultiplier} ${item.measurementUnit}`
-                        : undefined
-                    }
-                  />
-                ))}
-              </ul>
-            ) : null}
-            {items.length > 0 ? (
+            <ul className="grid">
+              {slots.map(({ block, item }) => (
+                <TypeSlot
+                  key={block.id}
+                  typeLabel={block.query}
+                  note={typeNote(chain, block, Boolean(item), block.query, store, search)}
+                  announce={block.status === 'pending' && chain === 'coto'}
+                  item={item}
+                  price={item ? pesos(item.shelfCentavos, lang) : undefined}
+                  unit={
+                    item?.unitMultiplier && item.measurementUnit
+                      ? `${item.unitMultiplier} ${item.measurementUnit}`
+                      : undefined
+                  }
+                />
+              ))}
+            </ul>
+            {anyPick ? (
               <div className="search-compare-actions">
                 {showChoose ? (
                   <button
@@ -100,36 +168,8 @@ export function SearchCompareCard({
           </section>
         );
       })}
-    </section>
+    </div>
   );
-}
-
-function ChainNote({
-  chain,
-  block,
-}: {
-  chain: Chain;
-  block: Extract<Block, { kind: 'search_compare' }>;
-}) {
-  const copy = uiCopy(useLang()).searchCompare;
-  if (block.status === 'pending') {
-    return chain === 'coto' ? (
-      <p className="search-compare-note" role="status">
-        {copy.pendingCoto}
-      </p>
-    ) : null;
-  }
-  if (chain === 'dia') {
-    if (block.status === 'dia_error') return <p className="search-compare-note">{copy.diaError}</p>;
-    if (priced(block.dia).length === 0) return <p className="search-compare-note">{copy.diaEmpty}</p>;
-    return null;
-  }
-  if (block.status === 'coto_error') return <p className="search-compare-note">{copy.cotoError}</p>;
-  if (block.status === 'coto_timed_out') return <p className="search-compare-note">{copy.cotoTimedOut}</p>;
-  if (block.status === 'coto_empty' || priced(block.coto).length === 0) {
-    return <p className="search-compare-note">{copy.cotoEmpty}</p>;
-  }
-  return null;
 }
 
 /**

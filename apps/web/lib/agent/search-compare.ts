@@ -12,6 +12,7 @@ import type { Product } from '@changuito/mcp/types';
 
 import { feeCentavosOf } from '../checkout/compare-fee.ts';
 import { mergeDiaPair } from '../checkout/coto-real.ts';
+import { cheapestAvailable } from '../one-per-type.ts';
 import type { SearchCompareItem, UiEvent } from '../protocol.ts';
 import type { RenderCache } from './render-tools.ts';
 
@@ -60,17 +61,28 @@ export function searchCompareNote(args: {
   coto: number;
   matched: number;
   gapCentavos?: number;
-  /** The one pair the fee was computed on. The model adds that id, not every row. */
+  /** The one pair the fee was computed on. Armar does not add this id. */
   pair?: { diaSkuId: string; cotoId: string };
+  /** The card the shopper saw. Armar adds this id, one per type. */
+  pickDia?: string;
+  pickCoto?: string;
   hits: ReadonlyArray<{ id: string; name: string; shelfCentavos: number; available: boolean }>;
 }): string {
   const gap = args.gapCentavos === undefined ? 'gap=unknown' : `gapCentavos=${args.gapCentavos}`;
   const pair = args.pair ? ` pairDia=${args.pair.diaSkuId} pairCoto=${args.pair.cotoId}` : '';
-  const head = `[search_compare: id=${args.id} dia=${args.dia} coto=${args.coto} matched=${args.matched} ${gap}${pair}]`;
+  const pickDia = args.pickDia ? ` pickDia=${args.pickDia}` : '';
+  const pickCoto = args.pickCoto ? ` pickCoto=${args.pickCoto}` : '';
+  const head = `[search_compare: id=${args.id} dia=${args.dia} coto=${args.coto} matched=${args.matched} ${gap}${pair}${pickDia}${pickCoto}]`;
   const lines = args.hits
     .filter((hit) => hit.available && hit.shelfCentavos > 0)
     .map((hit) => `${hit.id} · ${hit.name} · ${ars.format(hit.shelfCentavos / 100)}`);
   return [head, ...lines].join('\n');
+}
+
+/** At most one card per chain. The candidate count stays with `recordSearch`. */
+function pickedView(items: SearchCompareItem[]): SearchCompareItem[] {
+  const one = cheapestAvailable(items);
+  return one ? [one] : [];
 }
 
 function recordSearch(cache: RenderCache, query: string, retailer: 'dia' | 'coto', available: number): void {
@@ -210,8 +222,10 @@ export function beginDualSearch(args: {
         });
       }
 
-      const diaView = dia.failed ? [] : diaItems(dia.products);
-      const cotoView = cotoItems(folded.coto);
+      const diaCandidates = dia.failed ? [] : diaItems(dia.products);
+      const cotoCandidates = cotoItems(folded.coto);
+      const diaView = pickedView(diaCandidates);
+      const cotoView = pickedView(cotoCandidates);
       const feeCentavos =
         folded.gapCentavos === undefined ? undefined : feeCentavosOf(folded.gapCentavos);
 
@@ -242,8 +256,8 @@ export function beginDualSearch(args: {
           confidence: folded.pair.confidence,
         });
       }
-      recordSearch(args.cache, args.query, 'dia', diaView.length);
-      recordSearch(args.cache, args.query, 'coto', cotoView.length);
+      recordSearch(args.cache, args.query, 'dia', diaCandidates.length);
+      recordSearch(args.cache, args.query, 'coto', cotoCandidates.length);
 
       args.emit({
         t: 'search_compare',
@@ -264,7 +278,9 @@ export function beginDualSearch(args: {
         matched: folded.pair ? 1 : 0,
         gapCentavos: folded.gapCentavos,
         ...(folded.pair ? { pair: folded.pair } : {}),
-        hits: cotoView,
+        ...(diaView[0] ? { pickDia: diaView[0].id } : {}),
+        ...(cotoView[0] ? { pickCoto: cotoView[0].id } : {}),
+        hits: [...diaView, ...cotoView],
       });
     },
   };
@@ -318,7 +334,8 @@ export function beginChainSearch(args: {
             coto: { ok: false, reason: 'error' },
           });
         }
-        const cotoView = cotoItems(folded.coto);
+        const cotoCandidates = cotoItems(folded.coto);
+        const cotoView = pickedView(cotoCandidates);
         const cotoCache = { ...(args.cache.coto ?? {}) };
         for (const hit of folded.coto) {
           cotoCache[hit.id] = {
@@ -333,7 +350,7 @@ export function beginChainSearch(args: {
           };
         }
         args.cache.coto = cotoCache;
-        recordSearch(args.cache, args.query, 'coto', cotoView.length);
+        recordSearch(args.cache, args.query, 'coto', cotoCandidates.length);
         args.emit({
           t: 'search_compare',
           id: args.id,
@@ -349,6 +366,7 @@ export function beginChainSearch(args: {
           dia: 0,
           coto: cotoView.length,
           matched: 0,
+          ...(cotoView[0] ? { pickCoto: cotoView[0].id } : {}),
           hits: cotoView,
         });
       },
@@ -358,8 +376,9 @@ export function beginChainSearch(args: {
   return {
     async finish(dia) {
       const failed = dia?.failed === true;
-      const diaView = failed || !dia ? [] : diaItems(dia.products);
-      recordSearch(args.cache, args.query, 'dia', diaView.length);
+      const diaCandidates = failed || !dia ? [] : diaItems(dia.products);
+      const diaView = pickedView(diaCandidates);
+      recordSearch(args.cache, args.query, 'dia', diaCandidates.length);
       args.emit({
         t: 'search_compare',
         id: args.id,
@@ -375,6 +394,7 @@ export function beginChainSearch(args: {
         dia: diaView.length,
         coto: 0,
         matched: 0,
+        ...(diaView[0] ? { pickDia: diaView[0].id } : {}),
         hits: diaView,
       });
     },

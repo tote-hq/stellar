@@ -66,6 +66,24 @@ export function isCityQuestion(text: string | null | undefined): boolean {
 
 const LIST_WORD = /\b(leche|pan|yerba|arroz|fideos|carne|queso|huevos|aceite|azúcar|azucar)\b/i;
 
+/**
+ * The name stored for the city.
+ * Lowercase, strip accents, drop dots, collapse spaces. `caba`, `c.a.b.a.`
+ * and `ciudad de buenos aires` become `Ciudad de Buenos Aires`. Anything else
+ * comes back trimmed, with its original casing.
+ */
+export function canonicalCity(text: string): string {
+  const folded = text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\./g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (folded === 'caba' || folded === 'ciudad de buenos aires') return 'Ciudad de Buenos Aires';
+  return text.trim().replace(/\s+/g, ' ');
+}
+
 /** The whole trimmed reply, or null when it reads as a shopping list. */
 export function cityFromAnswer(text: string): string | null {
   const city = text.trim().replace(/\s+/g, ' ');
@@ -74,7 +92,7 @@ export function cityFromAnswer(text: string): string | null {
   if (city.split(' ').length > 6) return null;
   if (LIST_WORD.test(city)) return null;
   if (/https?:/i.test(city)) return null;
-  return city;
+  return canonicalCity(city);
 }
 
 export function earlyCityAsk(args: {

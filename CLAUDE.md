@@ -47,6 +47,10 @@ put it in. That matters most directly above a button that spends money.
 If you add a render tool, keep the property. The moment an input carries a
 value rather than a reference, the grid can be wrong.
 
+A search grid under dual compare is a server pick, not a model call. The card
+shows one available product per type per chain, chosen in `one-per-type.ts`.
+The model does not choose which row of that search to show.
+
 ### 2. The cart draws itself, and §1 does not apply to it
 
 *First the bug: two cart cards in one reply, the first without a link. Then the
@@ -369,9 +373,11 @@ carrito de Día …" (or Coto). That sentence calls `choose_retailer` if the
 order is not already that chain, then `add_to_cart` and `get_cart_link` in
 the same turn. The prompt, the tool description and the tool result say the
 same thing. Stopping after `choose_retailer` on an Armar turn leaves the
-compare card on screen and no cart. The compared item is `pairDia` /
-`pairCoto` on the `search_compare` line, not every row on the card. The gap
-and the 20% fee are drawn on the close table, after a cart exists.
+compare card on screen and no cart. The search card shows one product per
+type per chain, picked on the server (`pickDia` / `pickCoto`). Armar adds
+that pick, one per type. `pairDia` / `pairCoto` stay the item the fee gap
+was computed on. They are not what Armar adds when they differ from the pick.
+The gap and the 20% fee are drawn on the close table, after a cart exists.
 
 A Coto basket is lines held on the session snapshot (`order`, `coto`) and
 priced from `CotoCatalog.getProduct` on every read. The id is a stable

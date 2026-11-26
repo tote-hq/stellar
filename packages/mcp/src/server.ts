@@ -384,7 +384,9 @@ export function registerCatalogTools(
         '"Quiero seguir en Día." or "Quiero seguir en Coto." — call this, confirm in one line, and ' +
         'do not call add_to_cart. Later searches are that store only. ' +
         '"Armá el carrito de Día" or "Armá el carrito de Coto" — call this if the order is not already ' +
-        'that store, then in the same turn call add_to_cart with ids from that chain, then get_cart_link. ' +
+        'that store, then in the same turn call add_to_cart with pickDia or pickCoto from each ' +
+        'search_compare line for that chain, one per type, then get_cart_link. ' +
+        'pairDia and pairCoto are the fee pair, not the ids to add. ' +
         'Do not end that turn before the cart has lines.',
       inputSchema: {
         retailer: z.enum(['dia', 'coto']).describe('The store the shopper named.'),
@@ -418,7 +420,8 @@ export function registerCatalogTools(
           `If the shopper said "Quiero seguir en ${store}.", confirm in one line and do not call add_to_cart. ` +
           `Later searches are ${next} only. ` +
           `If the shopper said "Armá el carrito de ${store}", in this same turn call add_to_cart with only ids from this chain ` +
-          '(pairDia when the order is dia, pairCoto when it is coto, from the last search_compare line when it has them), ' +
+          '(pickDia when the order is dia, pickCoto when it is coto, one per search_compare line; ' +
+          'pairDia and pairCoto are the fee pair and are not the ids to add when they differ), ' +
           'then call get_cart_link. Do not end the turn before that. ' +
           'A Día card is not drawn until get_cart_link returns. A Coto card is drawn from the lines and has no store link.';
         return text(note);
