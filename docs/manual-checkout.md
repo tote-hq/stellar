@@ -94,7 +94,7 @@ Apply additive migration `0009_manual_checkout.sql`, which seeds
 | --- | --- |
 | `SANDBOX_DATA_DIR` | `/data`, backed by a Railway persistent volume |
 | `SANDBOX_PUBLIC_URL` | Exact worker HTTPS origin, without trailing slash |
-| `VIEWER_PARENT_ORIGINS` | Exact allowed Changuito origins, comma-separated |
+| `VIEWER_PARENT_ORIGINS` | Exact allowed Changuito origins, comma-separated. Include `https://admin.changuito.me`: the admin order page embeds the Coto real screen |
 | `SANDBOX_CALLBACK_URL` | App URL ending `/api/checkout/events` |
 
 Keep the existing `SANDBOX_TOKEN` equal on both services and server-only. Set
