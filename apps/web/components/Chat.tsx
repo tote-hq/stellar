@@ -121,17 +121,35 @@ function queryBeforeCart(blocks: Block[], cartId: string): string | undefined {
   return undefined;
 }
 
-function offerBuildCart(blocks: Block[], streaming: boolean, readOnly: boolean): boolean {
-  if (streaming || readOnly) return false;
+function newestCotoCart(blocks: Block[]): number {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i];
+    if (block?.kind === 'cart' && block.cart.retailer === 'coto') return i;
+  }
+  return -1;
+}
+
+/** `search` is Armar after a chain choice. `products` is the older products-only path. */
+function offerBuildCart(
+  blocks: Block[],
+  streaming: boolean,
+  readOnly: boolean,
+  order: string | undefined,
+): 'search' | 'products' | null {
+  if (streaming || readOnly) return null;
   let products = -1;
+  let search = -1;
   let cart = -1;
   for (let i = 0; i < blocks.length; i++) {
     const block = blocks[i];
     if (!block) continue;
     if (block.kind === 'products') products = i;
+    else if (block.kind === 'search_compare' && block.status !== 'pending') search = i;
     else if (block.kind === 'cart') cart = i;
   }
-  return products > cart;
+  if ((order === 'dia' || order === 'coto') && search > cart) return 'search';
+  if (products > cart) return 'products';
+  return null;
 }
 
 /**
@@ -599,7 +617,9 @@ function ChatCore({
     track('error_shown', { code: errorCode(lastError.message) });
   }, [state.blocks]);
 
-  const showBuildCart = offerBuildCart(state.blocks, state.streaming, readOnly);
+  const order = state.snapshot?.order;
+  const buildOffer = offerBuildCart(state.blocks, state.streaming, readOnly, order);
+  const buildChain = order === 'dia' || order === 'coto' ? order : undefined;
 
   return (
     // `is-empty` is the hook for the mobile first-screen layout. The class is
@@ -635,7 +655,6 @@ function ChatCore({
                   data-testid={(b.text ?? '').trim() === CITY_ASK ? 'chat-ask-city' : undefined}
                 >
                   <ToolTrail tools={b.tools} />
-                  {b.thinking && !b.text ? <p className="thinking">{b.thinking}</p> : null}
                   {b.text ? <MarkdownText text={b.text} /> : null}
                 </div>
               );
@@ -650,21 +669,22 @@ function ChatCore({
                 />
               );
             case 'cart': {
-              const live = shop?.cart?.retailer === 'coto' ? shop.cart : b.cart;
+              const newestCoto = b.cart.retailer === 'coto' && index === newestCotoCart(state.blocks);
+              const liveBasket = newestCoto && shop?.cart?.retailer === 'coto' ? shop.cart : b.cart;
               const gate =
                 b.cart.retailer === 'coto'
                   ? cotoPayGate({
                       admission: shop?.cotoAdmission ?? 'pending',
                       orderState: shop?.orderState ?? 'none',
                       readOnly,
-                      dualCheckout: Boolean(b.dualCheckout),
-                      cart: live,
+                      dualCheckout: Boolean(shop?.dualCheckout),
+                      cart: liveBasket,
                     })
                   : undefined;
               return (
                 <CartCard
                   key={b.id}
-                  cart={b.cart}
+                  cart={liveBasket}
                   handoffUrl={b.handoffUrl}
                   cotoGate={gate}
                   // No longer gated on a wallet. The frame-checkout flow asks
@@ -835,17 +855,25 @@ function ChatCore({
             />
           </p>
         ) : null}
-        {showBuildCart ? (
+        {buildOffer ? (
           <div className="chat-build">
             <button
               type="button"
               className="btn"
               data-testid="chat-build-cart"
               disabled={gated}
-              onClick={() => submit(copy.buildCartAsk)}
+              aria-label={
+                buildOffer === 'search' && buildChain
+                  ? `${copy.buildCart}, ${RETAILER_NAMES[buildChain]}`
+                  : undefined
+              }
+              onClick={() =>
+                submit(buildOffer === 'search' && buildChain ? buildCartMessage(buildChain) : copy.buildCartAsk)
+              }
             >
               {copy.buildCart}
             </button>
+            {buildOffer === 'search' ? <p data-testid="chat-keep-typing">{copy.keepTyping}</p> : null}
           </div>
         ) : null}
         {receipt ? <ReceiptCard receipt={receipt} /> : null}

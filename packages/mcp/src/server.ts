@@ -382,7 +382,7 @@ export function registerCatalogTools(
         'basket priced from the Coto catalog. It has no store link. Payment is the Pay control ' +
         'on the rail and the card, not a Día cart. ' +
         'This call does not draw a cart. ' +
-        '"Quiero seguir en Día." or "Quiero seguir en Coto." — call this, confirm in one line, and ' +
+        '"Quiero seguir en Día." or "Quiero seguir en Coto." — call this, confirm in one line and say that she can keep adding products or press Armar carrito, and ' +
         'do not call add_to_cart. Later searches are that store only. ' +
         '"Armá el carrito de Día" or "Armá el carrito de Coto" — call this if the order is not already ' +
         'that store, then in the same turn call add_to_cart with pickDia or pickCoto from each ' +
@@ -418,7 +418,7 @@ export function registerCatalogTools(
         const store = next === 'dia' ? 'Día' : 'Coto';
         const note =
           cleared +
-          `If the shopper said "Quiero seguir en ${store}.", confirm in one line and do not call add_to_cart. ` +
+          `If the shopper said "Quiero seguir en ${store}.", confirm in one line and say that she can keep adding products or press Armar carrito, and do not call add_to_cart. ` +
           `Later searches are ${next} only. ` +
           `If the shopper said "Armá el carrito de ${store}", in this same turn call add_to_cart with only ids from this chain ` +
           '(pickDia when the order is dia, pickCoto when it is coto, one per search_compare line; ' +

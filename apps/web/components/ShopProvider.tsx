@@ -220,7 +220,12 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     setCreatedAt(chat.createdAt);
     setCart(chat.cart);
     setHandoffUrl(chat.handoffUrl);
-    setDualCheckout(chat.dualCheckout === true || dualCheckoutOn({ blocks: chat.blocks, cart: undefined }));
+    setDualCheckout(
+      dualCheckoutOn({
+        blocks: chat.blocks,
+        cart: chat.cart ? { cart: chat.cart, dualCheckout: chat.dualCheckout } : undefined,
+      }),
+    );
     setOrderState(chat.orderState);
     setReceipt(chat.receipt);
     setReadOnly(!live);

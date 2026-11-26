@@ -9,7 +9,7 @@
  */
 import type { Product } from '../types.js';
 import type { CatalogItem } from './coto.js';
-import { ofQueryType } from './food-type.js';
+import { ofQueryType, typeScore } from './food-type.js';
 import { pickSameProduct, type CotoSearcher } from './match.js';
 
 export type SearchCompareStatus = 'ok' | 'coto_empty' | 'coto_error' | 'coto_timed_out' | 'dia_error';
@@ -85,6 +85,28 @@ export function toSearchHit(item: CatalogItem): SearchHit | null {
   return hit;
 }
 
+/**
+ * Cheapest item in the highest `typeScore` tier. A tie on the score keeps
+ * today's rule: the lowest price, and a price tie keeps catalog order.
+ */
+function bestOfType<T extends { name: string; brand?: string }>(
+  items: readonly T[],
+  query: string,
+  priceOf: (item: T) => number,
+): T | undefined {
+  let bestScore = 0;
+  for (const item of items) {
+    const score = typeScore(query, item);
+    if (score > bestScore) bestScore = score;
+  }
+  if (bestScore <= 0) return undefined;
+  const tier: T[] = [];
+  for (const item of items) {
+    if (typeScore(query, item) === bestScore) tier.push(item);
+  }
+  return cheapest(tier, priceOf);
+}
+
 function cheapest<T>(items: readonly T[], priceOf: (item: T) => number): T | undefined {
   let best: T | undefined;
   let bestPrice = 0;
@@ -145,12 +167,17 @@ function cotoToPick(item: CatalogItem): TypedPick {
 
 /**
  * Pure. `diaFailed` wins the status even when Coto returned rows.
- * `query` is the type. Picks are the cheapest available hit of that type.
- * A tie keeps catalog order. The gap is the two picks, and only when they
- * are the same product.
+ * `query` is the type. Each pick is the cheapest available hit in the best
+ * `typeScore` tier for that side. When every hit scores the same, that is
+ * the cheapest. A price tie keeps catalog order. The gap is the two picks,
+ * and only when they are the same product.
+ * `diaQuery` and `cotoQuery` type one side against a wider term. Absent,
+ * both sides use `query`.
  */
 export function assembleSearchCompare(args: {
   query: string;
+  diaQuery?: string;
+  cotoQuery?: string;
   diaProducts: readonly Product[];
   diaFailed: boolean;
   coto: CotoLookup;
@@ -166,14 +193,16 @@ export function assembleSearchCompare(args: {
 
   const result: SearchCompareResult = { status, coto: args.coto.ok ? hits : [], match: 'none' };
 
+  const diaType = args.diaQuery ?? args.query;
+  const cotoType = args.cotoQuery ?? args.query;
   const typedDia = args.diaFailed
     ? []
-    : args.diaProducts.filter((product) => diaAvailable(product) && ofQueryType(args.query, product));
+    : args.diaProducts.filter((product) => diaAvailable(product) && ofQueryType(diaType, product));
   const typedCoto = args.coto.ok
-    ? args.coto.items.filter((item) => cotoAvailable(item) && Boolean(item.id) && Boolean(item.name) && ofQueryType(args.query, item))
+    ? args.coto.items.filter((item) => cotoAvailable(item) && Boolean(item.id) && Boolean(item.name) && ofQueryType(cotoType, item))
     : [];
 
-  const cotoPick = cheapest(typedCoto, (item) => item.shelfPrice.centavos);
+  const cotoPick = bestOfType(typedCoto, cotoType, (item) => item.shelfPrice.centavos);
   if (cotoPick) result.cotoPick = cotoToPick(cotoPick);
 
   if (cotoPick) {
@@ -195,7 +224,7 @@ export function assembleSearchCompare(args: {
       result.gapCentavos = Math.abs(same.match.price.centavos - cotoCentavos);
       return result;
     }
-    const diaPick = cheapest(typedDia, (product) => product.price.centavos);
+    const diaPick = bestOfType(typedDia, diaType, (product) => product.price.centavos);
     if (diaPick) {
       result.diaPick = diaToPick(diaPick);
       result.match = 'similar';
@@ -203,7 +232,7 @@ export function assembleSearchCompare(args: {
     return result;
   }
 
-  const diaPick = cheapest(typedDia, (product) => product.price.centavos);
+  const diaPick = bestOfType(typedDia, diaType, (product) => product.price.centavos);
   if (diaPick) result.diaPick = diaToPick(diaPick);
   return result;
 }
@@ -212,10 +241,11 @@ export async function lookupCoto(
   query: string,
   coto: CotoSearcher,
   signal?: AbortSignal,
+  limit = 12,
 ): Promise<CotoLookup> {
   try {
     if (signal?.aborted) return { ok: false, reason: 'timed_out' };
-    const items = await coto.search(query, { limit: 12 });
+    const items = await coto.search(query, { limit });
     if (signal?.aborted) return { ok: false, reason: 'timed_out' };
     return { ok: true, items };
   } catch (error) {

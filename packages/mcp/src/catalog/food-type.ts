@@ -151,3 +151,54 @@ export function ofQueryType(query: string, item: FoodName): boolean {
   }
   return false;
 }
+
+/**
+ * How many of the query's content words the name meets. The head counts
+ * double, including when only a listed synonym of the head meets the name.
+ * Zero when `ofQueryType` is false, so a pet food or an empty query scores nothing.
+ */
+export function typeScore(query: string, item: FoodName): number {
+  if (!ofQueryType(query, item)) return 0;
+  const parts = contentTokens(query);
+  const head = parts[0];
+  if (!head) return 0;
+  const nameWords = tokens(item.name);
+  let score = 0;
+  if (wordMeets(nameWords, head)) score += 2;
+  else {
+    for (const synonym of HEAD_SYNONYMS[head] ?? []) {
+      if (wordMeets(nameWords, synonym)) {
+        score += 2;
+        break;
+      }
+    }
+  }
+  for (const part of parts.slice(1)) {
+    if (wordMeets(nameWords, part)) score += 1;
+  }
+  return score;
+}
+
+/**
+ * Wider searches for a query the first pass could not type.
+ * The head on its own, when the query has more than one content word, then
+ * that head's entries below. Not a taxonomy: the words the evidence missed.
+ */
+const WIDER: Record<string, readonly string[]> = {
+  pasta: ['fideo'],
+  spaghetti: ['fideo spaghetti', 'tallarin'],
+  spaguetti: ['fideo spaghetti', 'tallarin'],
+  huevo: ['huevos blanco'],
+  parmesano: ['queso rallado'],
+  panceta: ['bacon'],
+};
+
+export function widerQueries(query: string): string[] {
+  const parts = contentTokens(query);
+  const head = parts[0];
+  if (!head) return [];
+  const out: string[] = [];
+  if (parts.length > 1) out.push(head);
+  for (const term of WIDER[head] ?? []) out.push(term);
+  return out;
+}

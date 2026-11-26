@@ -264,6 +264,26 @@ describe('product cards', () => {
     assert.equal(drawn?.t === 'cart' && drawn.dualCheckout, true);
   });
 
+  it('never stamps dual checkout on a Coto cart', () => {
+    const cache = emptyCache();
+    cache.dualCheckout = true;
+    cache.cotoPay = true;
+    const basket = cart([line('c1', 1, 1000)]);
+    basket.retailer = 'coto';
+    basket.cartId = 'coto-1';
+    rememberStructured(cache, { cart: basket });
+    const { events, emit } = recorder();
+    assert.equal(autoRenderCart(cache, emit), true);
+    const drawn = events.find((e) => e.t === 'cart');
+    assert.equal(drawn?.t === 'cart' && drawn.dualCheckout, undefined);
+
+    cache.drawn = undefined;
+    const explicit = recorder();
+    runRenderTool(cache, { id: 'r1', name: 'render_cart', input: {} }, explicit.emit);
+    const shown = explicit.events.find((e) => e.t === 'cart');
+    assert.equal(shown?.t === 'cart' && shown.dualCheckout, undefined);
+  });
+
   it('draws a Coto basket with no link and not orderable, and still hides a Día basket without a link', () => {
     const cache = emptyCache();
     const { events, emit } = recorder();

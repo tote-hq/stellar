@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { changuitoPrompt, stateBanner } from '../agent/prompt.ts';
+import { changuitoPrompt, payBanner, stateBanner } from '../agent/prompt.ts';
 
 describe('Coto-only prompt', () => {
   it('drops the cannot-be-paid line and keeps the Coto-only rule in both languages', () => {
@@ -20,5 +20,45 @@ describe('Coto-only prompt', () => {
       stateBanner({ retailer: 'coto', postalCode: '1425', order: 'coto', cartLines: 2, cartTotal: '$10' }),
       '[session: coto, CP 1425, order coto, cart 2 line(s), $10]',
     );
+    assert.equal(
+      stateBanner({ retailer: 'coto', postalCode: '1425', order: 'coto', pay: 'button' }),
+      '[session: coto, CP 1425, order coto, cart empty, pay button]',
+    );
+    assert.equal(
+      stateBanner({ retailer: 'coto', postalCode: '1425', order: 'coto', pay: 'gate' }),
+      '[session: coto, CP 1425, order coto, cart empty, pay gate]',
+    );
+    assert.equal(
+      payBanner({
+        order: 'coto',
+        retailer: 'coto',
+        cotoPay: true,
+        lines: [{ available: true, quantity: 1 }],
+        totalCentavos: 100,
+      }),
+      'button',
+    );
+    assert.equal(
+      payBanner({
+        order: 'coto',
+        retailer: 'coto',
+        cotoPay: true,
+        dualCheckout: true,
+        lines: [{ available: true, quantity: 1 }],
+        totalCentavos: 100,
+      }),
+      'gate',
+    );
+    assert.equal(payBanner({ order: 'dia', retailer: 'dia', cotoPay: true }), undefined);
+    for (const lang of ['es', 'en'] as const) {
+      const prompt = changuitoPrompt(lang);
+      assert.match(prompt, /pay button/);
+      assert.match(prompt, /pay gate/);
+      assert.match(prompt, /Name the "Pagar" button only when the banner says pay button/);
+      assert.match(prompt, /Any text before a tool call is at most/);
+      assert.match(prompt, /one short line, in the shopper's language, saying what is being searched/);
+      assert.match(prompt, /Armar carrito/);
+      assert.doesNotMatch(prompt, /from the "Pagar" button/);
+    }
   });
 });
