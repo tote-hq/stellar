@@ -134,10 +134,13 @@ export function assistantAskedCity(text: string | null | undefined): boolean {
 }
 
 /**
- * Stores the city when the previous message was the fixed question, and also
- * when a postal code is already known and the reply is either the CABA alias
- * or an answer to a city question the model worded itself.
- * `cityFromAnswer` still rejects a shopping list.
+ * Stores the city when the previous message was the fixed question, or when
+ * the whole reply is the CABA alias, or when a postal code is already known
+ * and the reply answers a city question the model worded itself.
+ * The alias needs nothing else: `pendingPostal` is not in the snapshot and
+ * the turn store can come back empty, so the first `caba` was dropped and the
+ * chat asked again. `prior` is the browser's earlier lines, which still hold
+ * the postal code. `cityFromAnswer` still rejects a shopping list.
  */
 export function rememberCity(
   state: {
@@ -147,16 +150,18 @@ export function rememberCity(
   },
   messages: readonly { role?: string; content?: unknown }[],
   text: string,
+  prior: readonly string[] = [],
 ): void {
   if (state.getCity?.()) return;
   const city = cityFromAnswer(text);
   if (!city) return;
-  if (isCityQuestion(lastAssistantText(messages))) {
+  if (city === 'Ciudad de Buenos Aires' || isCityQuestion(lastAssistantText(messages))) {
     state.setCity?.(city);
     return;
   }
-  const postalKnown = Boolean(state.getPendingPostal?.()) || transcriptHasPostal(messages, text);
-  if (!postalKnown) return;
-  const alias = city === 'Ciudad de Buenos Aires';
-  if (alias || assistantAskedCity(lastAssistantText(messages))) state.setCity?.(city);
+  const postalKnown =
+    Boolean(state.getPendingPostal?.()) ||
+    transcriptHasPostal(messages, text) ||
+    prior.some((line) => mentionsPostalCode(line));
+  if (postalKnown && assistantAskedCity(lastAssistantText(messages))) state.setCity?.(city);
 }
