@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { after, describe, it, mock } from 'node:test';
 
+delete process.env.DATABASE_URL;
+process.env.ARS_PER_USD = '1000';
+
 mock.module('@changuito/mcp/compare', {
   namedExports: {
     cotoPricer() {
@@ -73,15 +76,17 @@ describe('coto-real quote gates', () => {
     console.warn = original;
     const { __setCotoRealTurnReaderForTests } = await import('../checkout/coto-real-http.ts');
     const { __setCotoAdmitForTests } = await import('../checkout/coto-admit.ts');
+    const { __setAdminStoreForTests } = await import('../admin/store.ts');
     __setCotoRealTurnReaderForTests(null);
-    __setCotoAdmitForTests({ flags: null, present: null });
+    __setCotoAdmitForTests({ flags: null });
+    __setAdminStoreForTests(null);
   });
 
   async function post(body: Record<string, unknown>, turn: ReturnType<typeof snapshotTurn> | undefined) {
     const { postCotoRealQuote, __setCotoRealTurnReaderForTests } = await import('../checkout/coto-real-http.ts');
     const { __setCotoAdmitForTests } = await import('../checkout/coto-admit.ts');
     process.env.COTO_REAL_ENABLED = '1';
-    __setCotoAdmitForTests({ flags: async () => true, present: async () => false });
+    __setCotoAdmitForTests({ flags: async () => true });
     __setCotoRealTurnReaderForTests(async () => turn as never);
     logs.length = 0;
     console.warn = (...args: unknown[]) => {
@@ -102,9 +107,12 @@ describe('coto-real quote gates', () => {
 
   it('quotes past a missing Día snapshot and does not ask to compare again', async () => {
     const res = await post({ postalCode: POSTAL, city: 'CABA', fulfillment: 'pickup' }, undefined);
-    assert.equal(res.status, 409);
-    assert.deepEqual(logs, [['coto-pay gate=card']]);
-    assert.equal(JSON.stringify(await res.json()).includes('Volvé a comparar'), false);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.checkoutKind, 'coto_real_v1');
+    assert.match(body.orderId, /^[0-9a-f]{64}$/);
+    assert.equal(joined().includes('coto-pay gate=card'), false);
+    assert.equal(JSON.stringify(body).includes('Volvé a comparar'), false);
     leaked(joined());
   });
 
@@ -137,10 +145,28 @@ describe('coto-real quote gates', () => {
     leaked(joined());
   });
 
-  it('logs card when the shared card is missing', async () => {
+  it('quotes without a shared card row and does not notify missing_card', async () => {
+    const notes: string[] = [];
+    const { __setAdminStoreForTests } = await import('../admin/store.ts');
+    const { MISSING_CARD_COPY } = await import('../checkout/coto-real.ts');
+    __setAdminStoreForTests({
+      async notifyOnce(kind: string) {
+        notes.push(kind);
+      },
+    } as never);
     const res = await post({ postalCode: POSTAL, city: 'CABA', fulfillment: 'pickup' }, snapshotTurn());
-    assert.equal(res.status, 409);
-    assert.deepEqual(logs, [['coto-pay gate=card']]);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.match(body.orderId, /^[0-9a-f]{64}$/);
+    assert.equal(typeof body.amount, 'string');
+    assert.ok(body.amount.length > 0);
+    assert.equal(body.feeCentavos, 20);
+    assert.equal(body.gapCentavos, 100);
+    assert.equal(body.feeBasis, 'gap');
+    const text = JSON.stringify(body);
+    assert.equal(text.includes(MISSING_CARD_COPY), false);
+    assert.equal(notes.includes('missing_card'), false);
+    assert.equal(joined().includes('coto-pay gate=card'), false);
     leaked(joined());
   });
 });

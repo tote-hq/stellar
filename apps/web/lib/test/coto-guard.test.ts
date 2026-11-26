@@ -80,6 +80,8 @@ describe('cotoCheckoutBlocked', () => {
     assert.equal(realStart.includes('startJob'), false);
     assert.equal(realStart.includes('getProfile'), false);
     assert.equal(realStart.includes('password'), false);
+    assert.equal(realStart.includes('loadSharedCard'), false);
+    assert.equal(realStart.includes('shared_card'), false);
     const open = read('app/api/checkout/open/route.ts');
     const channels = read('app/api/checkout/channels/route.ts');
     const earlier = (source: string, left: string, right: string) => {
