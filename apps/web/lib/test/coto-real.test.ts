@@ -292,4 +292,15 @@ describe('coto real quote', () => {
     assert.equal(modal.includes('PayCard'), false);
     assert.equal(modal.includes('quoteCotoDemo'), false);
   });
+
+  it('shows the checkout prompt only for the order the poll is watching', () => {
+    const modal = readFileSync(join(import.meta.dirname, '../../components/CotoRealModal.tsx'), 'utf8');
+    const pollGuard = modal.indexOf('if (!orderId || !wallet.address) return;');
+    const promptForm = modal.indexOf('data-testid="checkout-prompt"');
+    const promptGate = modal.lastIndexOf('{prompt ?', promptForm);
+    assert.ok(pollGuard > 0 && pollGuard < promptForm);
+    assert.ok(promptGate > pollGuard && promptGate < promptForm);
+    const effect = modal.slice(modal.lastIndexOf('useEffect', pollGuard), pollGuard + 600);
+    assert.match(effect, /\/api\/checkout\/status\?orderId=\$\{orderId\}/);
+  });
 });

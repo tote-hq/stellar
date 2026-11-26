@@ -162,6 +162,20 @@ export async function GET(req: Request): Promise<Response> {
           finished = 'refund';
           rec.payment = job.result?.payment ?? 'not_attempted';
           rec.error = shopperCopy(job.result?.code, job.result?.payment);
+        } else {
+          // The pending row is the question this shopper answers, including one an operator asked in another phase.
+          try {
+            const pending = await adminStore().pendingPrompt(rec.orderId);
+            if (pending) {
+              prompt = {
+                label: pending.label,
+                fieldRef: pending.fieldRef,
+                options: pending.options,
+              };
+            }
+          } catch (err) {
+            console.error('[checkout/status] prompt', err instanceof Error ? err.name : 'query');
+          }
         }
       } else if (job.status === 'done' || job.status === 'failed') {
         rec.payment = job.result?.payment ?? 'not_attempted';
