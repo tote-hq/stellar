@@ -1,11 +1,10 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 
 /**
- * Temporary admin check. argon2id at the stored node-argon2 defaults took
- * about ten seconds on the Worker, long enough that a login looked dead.
- * WebCrypto PBKDF2-HMAC-SHA256 at 100,000 iterations is the most Workers
- * will run, takes milliseconds, and does not compile WebAssembly. Old
- * argon2 password_hash rows do not verify and have to be replaced.
+ * Temporary admin check. A password_hash that starts with pbkdf2-sha256$ is
+ * WebCrypto PBKDF2-HMAC-SHA256. Anything else is the password itself, compared
+ * in constant time, so a row can be filled in by hand. The password is never
+ * logged. The plaintext form is temporary.
  */
 
 const ITERATIONS = 100_000;
@@ -32,6 +31,13 @@ function b64(bytes: Uint8Array): string {
 
 function b64decode(encoded: string): Uint8Array {
   return new Uint8Array(Buffer.from(encoded, 'base64url'));
+}
+
+/** Equal-length digests, so a shorter row is not a faster reject. */
+function sameText(a: string, b: string): boolean {
+  const left = createHash('sha256').update(a, 'utf8').digest();
+  const right = createHash('sha256').update(b, 'utf8').digest();
+  return timingSafeEqual(left, right);
 }
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
@@ -69,6 +75,9 @@ export async function hashPassword(password: string): Promise<string> {
 
 /** The name only. A verifier message can echo the hash string. */
 export async function passwordMatches(password: string, hash: string): Promise<PasswordMatch> {
+  if (!hash.startsWith('pbkdf2-sha256$')) {
+    return sameText(password, hash) ? { ok: true } : { ok: false, reason: 'mismatch' };
+  }
   try {
     const match = PHC.exec(hash);
     const iterations = match ? Number(match[1]) : 0;

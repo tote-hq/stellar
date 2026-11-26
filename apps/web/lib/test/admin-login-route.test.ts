@@ -28,8 +28,8 @@ mock.module(new URL('../admin/store.ts', import.meta.url).href, {
 const PASSWORD = 'wrong-probe';
 const HASH =
   'pbkdf2-sha256$100000$cm91dGUtc2FsdC0xNmJ5dGU$M0yjG2iGwKpTlThqm5pC1ktw3CCUGetzyaqTGXTqOro';
-const OLD_ARGON2 =
-  '$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0c2E$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+const PLAIN = 'plain-fixture';
+const BROKEN_PBKDF2 = 'pbkdf2-sha256$100000$not-valid$also-not';
 const SECRET = 'test-admin-session';
 
 describe('POST /api/admin/login 401 branch', () => {
@@ -59,15 +59,19 @@ describe('POST /api/admin/login 401 branch', () => {
     else process.env.ADMIN_SESSION_SECRET = savedSecret;
   });
 
-  const post = async (username = 'simoneth') => {
+  const post = async (username = 'simoneth', password = PASSWORD) => {
     const res = await POST(
       new Request('https://admin.changuito.me/api/admin/login', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ username, password: PASSWORD }),
+        body: JSON.stringify({ username, password }),
       }),
     );
-    return { status: res.status, body: (await res.json()) as { error?: string } };
+    return {
+      status: res.status,
+      cookie: res.headers.get('set-cookie'),
+      body: (await res.json()) as { error?: string; csrf?: string },
+    };
   };
 
   const assertSafe = () => {
@@ -96,13 +100,36 @@ describe('POST /api/admin/login 401 branch', () => {
     assertSafe();
   });
 
-  it('logs verify_threw plus the error name when the stored hash is not pbkdf2', async () => {
-    db.user = { id: 'user-1', passwordHash: OLD_ARGON2 };
+  it('accepts a password stored as the password_hash text and does not log it', async () => {
+    db.user = { id: 'user-1', passwordHash: PLAIN };
+    const res = await post('simoneth', PLAIN);
+    assert.equal(res.status, 200);
+    assert.equal(typeof res.body.csrf, 'string');
+    assert.equal(res.cookie?.includes('chg_admin='), true);
+    assert.deepEqual(logs, []);
+    assert.equal(db.recorded, 0);
+    assert.equal(JSON.stringify(logs).includes(PLAIN), false);
+  });
+
+  it('logs verify_false when the stored text is not the password', async () => {
+    db.user = { id: 'user-1', passwordHash: PLAIN };
+    const res = await post();
+    assert.equal(res.status, 401);
+    assert.deepEqual(res.body, { error: 'Usuario o contraseña incorrectos.' });
+    assert.deepEqual(logs, ['[admin/login] 401 verify_false']);
+    assert.equal(db.recorded, 1);
+    assert.equal(logs.join('\n').includes(PLAIN), false);
+    assertSafe();
+  });
+
+  it('logs verify_threw plus the error name when a pbkdf2 hash is broken', async () => {
+    db.user = { id: 'user-1', passwordHash: BROKEN_PBKDF2 };
     const res = await post();
     assert.equal(res.status, 401);
     assert.deepEqual(res.body, { error: 'Usuario o contraseña incorrectos.' });
     assert.deepEqual(logs, ['[admin/login] 401 verify_threw:Error']);
     assert.equal(db.recorded, 1);
+    assert.equal(logs.join('\n').includes(BROKEN_PBKDF2), false);
     assertSafe();
   });
 
