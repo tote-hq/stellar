@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { DEPLOYMENTS, NETWORK_IDS } from '../deployments.ts';
+import { adminDocumentCsp } from '../admin/gate.ts';
 import { appContentSecurityPolicy, appSecurityHeaders, fixtureSecurityHeaders } from '../security-headers.ts';
 
 const none = { ga: '', meta: '', clarity: '', posthog: false };
@@ -57,5 +58,18 @@ describe('the checkout fixture exception', () => {
   it('lets us, and only us, frame it in development', () => {
     assert.match(fixture('development', 'Content-Security-Policy')!, /frame-ancestors 'self'/);
     assert.equal(fixture('development', 'X-Frame-Options'), 'SAMEORIGIN');
+  });
+});
+
+describe('admin viewer frame-src', () => {
+  it('adds the sandbox origin on the admin document and leaves it off the shopper policy', () => {
+    const shopper = appContentSecurityPolicy('production', none);
+    assert.equal(shopper.includes('https://sandbox.example'), false);
+    const admin = adminDocumentCsp({ NODE_ENV: 'production', SANDBOX_URL: 'https://sandbox.example/v1' });
+    const frame = admin.split(';').find((part) => part.trim().startsWith('frame-src')) ?? '';
+    assert.match(frame, /https:\/\/sandbox\.example(?![\w.-])/);
+    assert.equal(admin.split('frame-src').length - 1, 1);
+    const bare = adminDocumentCsp({ NODE_ENV: 'production' });
+    assert.equal(bare.includes('sandbox.example'), false);
   });
 });

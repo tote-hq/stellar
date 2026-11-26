@@ -8,9 +8,12 @@ written only to the log sink.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import os
+import secrets
+import time
 from typing import Awaitable, Callable
 
 POLL_S = 1.0
@@ -46,9 +49,57 @@ def phase_order_ok(phases: list[str]) -> bool:
     return phases.index("delivery") < phases.index("shop")
 
 
-def viewer_url(job_id: str, token: str, origin: str, exp: int) -> str:
+# sha256(ticket) -> (job_id, expires_ms). The raw ticket is never stored or logged.
+_SCREEN_TICKETS: dict[str, tuple[str, int]] = {}
+
+
+def viewer_open(job) -> bool:
+    return isinstance(job, dict) and job.get("status") == "running" and job.get("phase") == "needs_human"
+
+
+def issue_screen_ticket(job, now: int) -> str | None:
+    """Single-use screen ticket. Only while the operator still needs the Coto screen."""
+    if not viewer_open(job):
+        return None
+    dead = [key for key, (_job_id, exp) in _SCREEN_TICKETS.items() if exp <= now]
+    for key in dead:
+        _SCREEN_TICKETS.pop(key, None)
+    token = secrets.token_urlsafe(32)
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    _SCREEN_TICKETS[digest] = (str(job.get("job_id") or ""), now + NEEDS_HUMAN_MS)
+    return token
+
+
+def consume_screen_ticket(ticket: str, job_id: str, now: int) -> bool:
+    digest = hashlib.sha256(ticket.encode()).hexdigest()
+    row = _SCREEN_TICKETS.get(digest)
+    if row is None:
+        return False
+    stored, exp = row
+    if now >= exp:
+        _SCREEN_TICKETS.pop(digest, None)
+        return False
+    if stored != job_id:
+        return False
+    _SCREEN_TICKETS.pop(digest, None)
+    return True
+
+
+async def watch_coto_viewer(job, sleep: Sleep | None = None, now_ms: Now | None = None) -> None:
+    """Renews viewer_seen once a second while a socket is up, and returns when the screen closes."""
+    pause = sleep or asyncio.sleep
+    clock = now_ms or (lambda: int(time.time() * 1000))
+    while viewer_open(job):
+        job["viewer_seen"] = clock()
+        await pause(1)
+
+
+def viewer_url(job_id: str, token: str, origin: str, exp: int, part: str = "") -> str:
     sig = hmac.new(token.encode(), f"{job_id}.{exp}".encode(), hashlib.sha256).hexdigest()
-    return f"{origin.rstrip('/')}/viewer/?job={job_id}&exp={exp}&sig={sig}"
+    url = f"{origin.rstrip('/')}/viewer/?job={job_id}&exp={exp}&sig={sig}"
+    if part == "screen":
+        url += "&part=screen"
+    return url
 
 
 def _fail(phase: str, code: str, phases: list[str], payment: str = "not_attempted") -> dict:
@@ -85,14 +136,22 @@ async def _human(job, driver, where: str, phases, now_ms, sleep, log, token, ori
     job["status"] = "running"
     job["phase"] = "needs_human"
     start = now_ms()
-    deadline = start + NEEDS_HUMAN_MS
-    job["viewer_exp"] = deadline
+
+    def deadline() -> int:
+        # An operator on the screen (viewer_seen) keeps the job alive. Nobody
+        # watching still times out at 60s. The shopper cap is the ceiling.
+        seen = int(job.get("viewer_seen") or 0)
+        renewed = max(start + NEEDS_HUMAN_MS, seen + NEEDS_HUMAN_MS)
+        return min(renewed, start + NEEDS_SHOPPER_MS)
+
+    job["viewer_exp"] = deadline()
     if token:
-        url = viewer_url(str(job.get("job_id") or ""), token, origin, deadline)
+        url = viewer_url(str(job.get("job_id") or ""), token, origin, job["viewer_exp"], part="screen")
         log(f"phase={where} code=needs_human admin_viewer_url={url}")
     else:
         log(f"phase={where} code=needs_human")
-    while now_ms() < deadline:
+    while now_ms() < deadline():
+        job["viewer_exp"] = deadline()
         await sleep(POLL_S)
         polled = await driver.poll()
         if polled.get("placed"):

@@ -3,6 +3,8 @@
  * human gate, and does not query Postgres from here.
  */
 
+import { sandboxOrigin } from '../checkout/sandbox.ts';
+import { appContentSecurityPolicy } from '../security-headers.ts';
 import { adminSessionSecret } from './secret.ts';
 import { readAdminCookie, verifyAdminCookie, type AdminPayload } from './cookie.ts';
 import { LOGIN_HEADERS, loginDocument } from './login-html.ts';
@@ -99,4 +101,10 @@ export async function decideAdmin(req: {
   }
 
   return { status: 404, body: '', headers: { 'cache-control': 'private, no-store' }, handled: true };
+}
+
+/** CSP for an admin document. frame-src adds the sandbox origin at runtime. */
+export function adminDocumentCsp(env: NodeJS.ProcessEnv = process.env): string {
+  const origin = sandboxOrigin(env);
+  return appContentSecurityPolicy(env.NODE_ENV, undefined, origin ? [origin] : []);
 }

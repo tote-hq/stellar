@@ -73,9 +73,20 @@ export function analyticsCspSources(ids: AnalyticsIds = ANALYTICS_IDS): { script
 
 const join = (xs: string[]) => (xs.length ? ` ${xs.join(' ')}` : '');
 
+/** An origin, and nothing a caller could use to add another CSP directive. */
+function isFrameOrigin(value: string): boolean {
+  if (!/^https?:\/\/[^\s;]+$/.test(value)) return false;
+  try {
+    return new URL(value).origin === value;
+  } catch {
+    return false;
+  }
+}
+
 export function appContentSecurityPolicy(
   nodeEnv: string | undefined = process.env.NODE_ENV,
   ids: AnalyticsIds = ANALYTICS_IDS,
+  frameOrigins: readonly string[] = [],
 ): string {
   const isProd = nodeEnv === 'production';
   const vendors = analyticsCspSources(ids);
@@ -90,7 +101,7 @@ export function appContentSecurityPolicy(
     // finishes the order on. 'self' is the dev fixture at /dev/checkout,
     // which stands in for a store that has no sandbox. This is the frames
     // *we* may open; being framed is still refused outright, below.
-    `frame-src 'self' ${TURNSTILE_ORIGIN} ${STOREFRONT_ORIGINS.join(' ')}`,
+    `frame-src 'self' ${TURNSTILE_ORIGIN} ${STOREFRONT_ORIGINS.join(' ')}${join(frameOrigins.filter(isFrameOrigin))}`,
     "worker-src 'self' blob:",
     "frame-ancestors 'none'",
     "base-uri 'self'",

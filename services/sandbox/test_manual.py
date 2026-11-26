@@ -308,5 +308,140 @@ class CartPayAgainTests(unittest.TestCase):
         self.assertIsNone(self.store.get(self.id)['store_order_id'])
 
 
+def _relay_deps():
+    try:
+        import fastapi  # noqa: F401
+        return True
+    except ModuleNotFoundError:
+        return False
+
+
+class _Socket:
+    def __init__(self, origin, protocols):
+        self.headers = {'origin': origin}
+        self.scope = {'subprotocols': protocols}
+        self.codes = []
+        self.accepted = None
+
+    async def close(self, code=1000):
+        self.codes.append(code)
+
+    async def accept(self, subprotocol=None):
+        self.accepted = subprotocol
+
+    async def receive_bytes(self):
+        await asyncio.Future()
+
+    async def send_bytes(self, data):
+        return None
+
+
+class _Reader:
+    async def read(self, _n):
+        return b''
+
+
+class _Writer:
+    def write(self, _data):
+        return None
+
+    async def drain(self):
+        return None
+
+    def close(self):
+        return None
+
+    async def wait_closed(self):
+        return None
+
+
+@unittest.skipUnless(_relay_deps(), 'sandbox dependencies are not installed; uv run python -m unittest')
+class CotoRelayTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        from manual import ManualSessions
+
+        self.origin = 'https://sandbox.example'
+        os.environ['SANDBOX_PUBLIC_URL'] = self.origin
+        self.sessions = ManualSessions()
+        self.opened = []
+
+    async def _open(self, host, port):
+        self.opened.append((host, port))
+        return _Reader(), _Writer()
+
+    def _job(self, job_id='ab' * 16, status='running', phase='needs_human'):
+        return {'job_id': job_id, 'mode': 'coto_real', 'status': status, 'phase': phase}
+
+    async def test_a_coto_socket_relays_to_5901_and_leaves_the_dia_session_alone(self):
+        from coto_real import issue_screen_ticket
+
+        job = self._job()
+        ticket = issue_screen_ticket(job, int(time.time() * 1000))
+        ws = _Socket(self.origin, ['changuito.viewer', ticket])
+        with patch('manual.asyncio.open_connection', self._open):
+            await asyncio.wait_for(self.sessions.relay(ws, job['job_id'], job), 2)
+        self.assertEqual(self.opened, [('127.0.0.1', 5901)])
+        self.assertEqual(ws.accepted, 'changuito.viewer')
+        self.assertIsNone(self.sessions.active)
+        self.assertEqual(self.sessions.controllers, {})
+        self.assertIsNone(self.sessions.store)
+
+    async def test_a_reused_ticket_is_refused(self):
+        from coto_real import issue_screen_ticket
+
+        job = self._job()
+        ticket = issue_screen_ticket(job, int(time.time() * 1000))
+        first = _Socket(self.origin, ['changuito.viewer', ticket])
+        second = _Socket(self.origin, ['changuito.viewer', ticket])
+        with patch('manual.asyncio.open_connection', self._open):
+            await asyncio.wait_for(self.sessions.relay(first, job['job_id'], job), 2)
+            await self.sessions.relay(second, job['job_id'], job)
+        self.assertEqual(self.opened, [('127.0.0.1', 5901)])
+        self.assertEqual(second.codes, [1008])
+
+    async def test_a_foreign_ticket_is_refused_and_still_works_for_its_job(self):
+        from coto_real import consume_screen_ticket, issue_screen_ticket
+
+        now = int(time.time() * 1000)
+        own = self._job('aa' * 16)
+        other = self._job('bb' * 16)
+        ticket = issue_screen_ticket(own, now)
+        ws = _Socket(self.origin, ['changuito.viewer', ticket])
+        with patch('manual.asyncio.open_connection', self._open):
+            await self.sessions.relay(ws, other['job_id'], other)
+        self.assertEqual(ws.codes, [1008])
+        self.assertEqual(self.opened, [])
+        self.assertTrue(consume_screen_ticket(ticket, own['job_id'], now + 1))
+
+    async def test_an_expired_ticket_a_wrong_origin_and_a_terminal_job_are_refused(self):
+        from coto_real import issue_screen_ticket
+
+        past = int(time.time() * 1000) - 120_000
+        expired_job = self._job('cc' * 16)
+        expired = issue_screen_ticket(expired_job, past)
+        expired_ws = _Socket(self.origin, ['changuito.viewer', expired])
+        wrong = self._job('dd' * 16)
+        wrong_ticket = issue_screen_ticket(wrong, int(time.time() * 1000))
+        wrong_ws = _Socket('https://evil.example', ['changuito.viewer', wrong_ticket])
+        terminal = self._job('ee' * 16, status='done', phase='placed')
+        terminal_ws = _Socket(self.origin, ['changuito.viewer', 'a' * 43])
+        with patch('manual.asyncio.open_connection', self._open):
+            await self.sessions.relay(expired_ws, expired_job['job_id'], expired_job)
+            await self.sessions.relay(wrong_ws, wrong['job_id'], wrong)
+            await self.sessions.relay(terminal_ws, terminal['job_id'], terminal)
+        self.assertEqual(expired_ws.codes, [1008])
+        self.assertEqual(wrong_ws.codes, [1008])
+        self.assertEqual(terminal_ws.codes, [1008])
+        self.assertEqual(self.opened, [])
+
+    async def test_a_dia_relay_without_a_session_still_refuses_and_does_not_open_vnc(self):
+        ws = _Socket(self.origin, ['changuito.viewer', 'b' * 43])
+        with patch('manual.asyncio.open_connection', self._open):
+            await self.sessions.relay(ws, 'dia-job', None)
+        self.assertEqual(ws.codes, [1008])
+        self.assertEqual(self.opened, [])
+        self.assertIsNone(self.sessions.active)
+
+
 if __name__ == '__main__':
     unittest.main()
