@@ -266,7 +266,7 @@ describe('POST /api/checkout/quote compare + Coto accept', () => {
     const sessionId = '00000000-0000-4000-8000-0000000000aa';
     const previous = process.env.COTO_REAL_ENABLED;
     process.env.COTO_REAL_ENABLED = '1';
-    __setCotoAdmitForTests({ flags: async () => true, present: async () => true });
+    __setCotoAdmitForTests({ flags: async () => true });
     const cotoCart = {
       ...cart,
       retailer: 'coto',
@@ -367,7 +367,7 @@ describe('POST /api/checkout/quote compare + Coto accept', () => {
       assert.equal((await checkoutStore().listByBuyer(BUYER)).length, before + 1);
     } finally {
       __setCotoRealTurnReaderForTests(null);
-      __setCotoAdmitForTests({ flags: null, present: null });
+      __setCotoAdmitForTests({ flags: null });
       priceImpl = async () => {
         throw new Error('coto real reprice is not this test');
       };

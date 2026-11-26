@@ -12,7 +12,9 @@ the escrow, polls it, and settles or refunds on the result.
 deliver if their account has no saved address ({postcode, street, number,
 phone, complement}), from their encrypted profile in the web app. `card` is
 the card to pay with ({pan, cvv, exp_month, exp_year, holder, kind}), from the
-web app's `shared_card` row; without it the run stops at the payment step.
+web app's `shared_card` row; without it a Día run stops at the payment step.
+A `coto_real` job does not store a card. Payment uses the card saved on the
+Coto account. A card sent by an older web build is accepted and discarded.
 Both live on the in-memory job until the run ends and are then deleted;
 `GET /jobs/{id}` never returns them and nothing logs them. Nothing here reads a
 login or a card from the environment. A manual session does not take a card on
@@ -234,7 +236,7 @@ async def create(body: JobIn) -> dict:
     if body.mode == 'coto_real':
         home = body.fulfillment != 'pickup'
         city = (body.city or '').strip() or (body.delivery.city.strip() if body.delivery else '')
-        if body.shopper is not None or body.card is None or (home and body.delivery is None) or not city:
+        if body.shopper is not None or (home and body.delivery is None) or not city:
             print("POST /jobs rejected coto_real field=delivery", flush=True)
             raise HTTPException(422, 'invalid coto job')
         for existing in jobs.values():
@@ -247,7 +249,6 @@ async def create(body: JobIn) -> dict:
             "fulfillment": body.fulfillment,
             "city": city,
             "delivery": body.delivery.model_dump() if body.delivery else None,
-            "card": body.card.model_dump(),
         }
         await queue.put(job_id)
         return {"job_id": job_id}

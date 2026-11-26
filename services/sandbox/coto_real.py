@@ -1,8 +1,9 @@
 """Coto real checkout on the sandbox.
 
 Phases are login, delivery, empty cart, shop, checkout, payment.
-Delivery runs before shop. The ops card stays in this process.
-A signed noVNC URL is written only to the log sink.
+Delivery runs before shop. Payment uses the card saved on the Coto account.
+This module does not read or send a card number. A signed noVNC URL is
+written only to the log sink.
 """
 
 from __future__ import annotations
@@ -48,17 +49,6 @@ def phase_order_ok(phases: list[str]) -> bool:
 def viewer_url(job_id: str, token: str, origin: str, exp: int) -> str:
     sig = hmac.new(token.encode(), f"{job_id}.{exp}".encode(), hashlib.sha256).hexdigest()
     return f"{origin.rstrip('/')}/viewer/?job={job_id}&exp={exp}&sig={sig}"
-
-
-def load_ops_card(job: dict) -> dict | None:
-    """The card stored on this job. COTO_SHARED_CARD_JSON is not read."""
-    data = job.get("card") if isinstance(job, dict) else None
-    if not isinstance(data, dict):
-        return None
-    pan = data.get("pan")
-    if not isinstance(pan, str) or not pan.isdigit() or not 13 <= len(pan) <= 19:
-        return None
-    return data
 
 
 def _fail(phase: str, code: str, phases: list[str], payment: str = "not_attempted") -> dict:
@@ -150,7 +140,7 @@ async def _shopper(job, driver, where, phases, now_ms, sleep, log, ask: dict) ->
     return _fail(where, "needs_shopper_timeout", phases)
 
 
-async def run_coto_real(job, driver, *, now_ms: Now, sleep: Sleep, log: Log, card: dict | None,
+async def run_coto_real(job, driver, *, now_ms: Now, sleep: Sleep, log: Log,
                          token: str = "", origin: str = "https://sandbox.local") -> dict:
     phases: list[str] = []
 
@@ -209,9 +199,7 @@ async def run_coto_real(job, driver, *, now_ms: Now, sleep: Sleep, log: Log, car
     checked = await one("checkout", await driver.checkout())
     if checked:
         return emit(checked)
-    if card is None:
-        return emit(_fail("payment", "ops_unavailable", phases))
-    paid = await one("payment", await driver.payment(card))
+    paid = await one("payment", await driver.payment())
     if paid:
         return emit(paid)
     return emit(_fail("payment", "payment_failed", phases))
@@ -220,7 +208,6 @@ async def run_coto_real(job, driver, *, now_ms: Now, sleep: Sleep, log: Log, car
 async def coto_real_worker(job: dict) -> None:
     """Railway entry. Live browser only when COTO_REAL_LIVE=1. Otherwise the lock is refunded."""
     env = os.environ
-    card = None
     try:
         blocked = False
         if env.get("COTO_REAL_LIVE") != "1":
@@ -234,10 +221,6 @@ async def coto_real_worker(job: dict) -> None:
         if not password:
             print("coto-pay gate=COTO_OPS_PASSWORD", flush=True)
             blocked = True
-        card = load_ops_card(job)
-        if card is None:
-            print("coto-pay gate=job_card", flush=True)
-            blocked = True
         if blocked:
             job.update(**_fail("login", "ops_unavailable", []))
             return
@@ -247,7 +230,6 @@ async def coto_real_worker(job: dict) -> None:
             job,
             user=user,
             password=password,
-            card=card,
             token=env.get("SANDBOX_TOKEN") or "",
             origin=env.get("SANDBOX_PUBLIC_URL") or "https://sandbox.local",
         )
@@ -259,4 +241,3 @@ async def coto_real_worker(job: dict) -> None:
         job.pop("delivery", None)
         job.pop("_delivery_input", None)
         job.pop("card", None)
-        card = None

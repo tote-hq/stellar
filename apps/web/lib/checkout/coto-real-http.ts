@@ -13,11 +13,9 @@ import { basketHash, DEFAULT_TIMEOUT_SECS, newOrderId, toHex } from '../order.ts
 import { centsToUnits } from '../stellar.ts';
 import { checkoutStore } from './store.ts';
 import { quoteRate } from './rate.ts';
-import { adminStore } from '../admin/store.ts';
-import { admitCotoRequest, sharedCardPresent } from './coto-admit.ts';
+import { admitCotoRequest } from './coto-admit.ts';
 import {
   COTO_REAL_KIND,
-  MISSING_CARD_COPY,
   MISSING_CITY_COPY,
   normalizePostal,
   quoteBuyerError,
@@ -127,15 +125,6 @@ export async function postCotoRealQuote(
     fulfillment,
   });
   if (!quoted.ok) return Response.json({ error: quoted.error }, { status: 400 });
-  if (!(await sharedCardPresent())) {
-    console.warn('coto-pay gate=card');
-    try {
-      await adminStore().notifyOnce('missing_card', null, 'Falta la tarjeta de la cuenta.');
-    } catch (err) {
-      console.error('[checkout/coto] missing-card notice', err instanceof Error ? err.name : 'insert');
-    }
-    return Response.json({ error: MISSING_CARD_COPY }, { status: 409 });
-  }
 
   let rate;
   try {
