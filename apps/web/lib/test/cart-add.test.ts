@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import type { Cart, Product } from '@changuito/mcp/types';
 
 import { emptyCache, type RenderCache } from '../agent/render-tools.ts';
+import { cardAddReason } from '../chat-state.ts';
 import { addCardToCart, parseCartAddBody, type CartAddCall, type CartAddSession } from '../cart-add.ts';
 
 const SID = '11111111-1111-4111-8111-111111111111';
@@ -225,5 +226,43 @@ describe('addCardToCart', () => {
     if (result.ok) return;
     assert.equal(result.error, 'freeze_denied');
     assert.equal(calls.length, 0);
+  });
+
+  it('a missing turn plus a Coto id in the catalog adds the line and carries the cart event', async () => {
+    const cache = emptyCache();
+    const { calls, session, call } = harness({ order: 'coto', cache });
+    const result = await addCardToCart({
+      session,
+      cache,
+      chain: 'coto',
+      id: 'c9',
+      owner: null,
+      compareOn: true,
+      cotoEnabled: true,
+      freshTurn: true,
+      catalog: {
+        async getProduct(id) {
+          if (id !== 'c9') return null;
+          return { id: 'c9', name: 'Picada', shelfCentavos: 1000, available: true };
+        },
+      },
+      call,
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok || !result.event) assert.fail('expected a cart event');
+    assert.equal(result.event.t, 'cart');
+    assert.equal(result.event.cart.lines[0]?.skuId, 'c9');
+    assert.deepEqual(
+      calls.map((row) => row.name),
+      ['add_to_cart'],
+    );
+  });
+
+  it('a failed add names a reason instead of a bare failure', () => {
+    assert.equal(cardAddReason('add_failed'), 'add_failed');
+    assert.equal(cardAddReason('unknown_product'), 'unknown_product');
+    assert.equal(cardAddReason('no_turn'), 'no_turn');
+    assert.equal(cardAddReason(undefined), 'add_failed');
+    assert.equal(cardAddReason('something-else'), 'add_failed');
   });
 });

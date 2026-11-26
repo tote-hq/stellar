@@ -78,6 +78,8 @@ interface StoredTurn {
   cotoRealDia?: CotoRealDia;
   /** Día sku ids already on a search row. Optional array, never a Map. */
   compared?: string[];
+  /** This request's Coto admission. Optional on `v: 1`. */
+  cotoPay?: boolean;
 }
 
 export function encodeTurn(turn: Turn): StoredTurn {
@@ -96,6 +98,7 @@ export function encodeTurn(turn: Turn): StoredTurn {
     ...(turn.cache.diaPairs ? { diaPairs: turn.cache.diaPairs } : {}),
     ...(turn.cache.cotoRealDia ? { cotoRealDia: turn.cache.cotoRealDia } : {}),
     ...(turn.cache.compared ? { compared: turn.cache.compared } : {}),
+    ...(typeof turn.cache.cotoPay === 'boolean' ? { cotoPay: turn.cache.cotoPay } : {}),
   };
 }
 
@@ -185,6 +188,7 @@ export function decodeTurn(raw: unknown): Turn | undefined {
       ...(diaPairs ? { diaPairs } : {}),
       ...(cotoRealDia ? { cotoRealDia } : {}),
       ...(compared ? { compared } : {}),
+      ...(typeof s.cotoPay === 'boolean' ? { cotoPay: s.cotoPay } : {}),
     },
   };
 }

@@ -276,6 +276,33 @@ describe('product cards', () => {
     assert.equal(drawn?.t === 'cart' && drawn.handoffUrl, undefined);
     assert.equal(drawn?.t === 'cart' && drawn.orderable, false);
 
+    cache.cotoPay = true;
+    cache.drawn = undefined;
+    assert.equal(autoRenderCart(cache, emit), true);
+    const payable = events.filter((e) => e.t === 'cart').at(-1);
+    assert.equal(payable?.t === 'cart' && payable.orderable, true);
+
+    const zero = emptyCache();
+    zero.cotoPay = true;
+    const emptyTotal = cart([line('c1', 1, 0)]);
+    emptyTotal.retailer = 'coto';
+    emptyTotal.cartId = 'coto-0';
+    emptyTotal.total = { centavos: 0, display: '$0' };
+    rememberStructured(zero, { cart: emptyTotal });
+    const zeroEvents = recorder();
+    assert.equal(autoRenderCart(zero, zeroEvents.emit), true);
+    const blocked = zeroEvents.events.find((e) => e.t === 'cart');
+    assert.equal(blocked?.t === 'cart' && blocked.orderable, false);
+
+    const rendered = recorder();
+    const admitted = emptyCache();
+    admitted.cotoPay = true;
+    rememberStructured(admitted, { cart: coto });
+    const explicit = runRenderTool(admitted, { id: 'r1', name: 'render_cart', input: {} }, rendered.emit);
+    assert.equal(explicit.is_error, undefined);
+    const shown = rendered.events.find((e) => e.t === 'cart');
+    assert.equal(shown?.t === 'cart' && shown.orderable, true);
+
     const dia = emptyCache();
     const rec = recorder();
     rememberStructured(dia, addToCart(cart()));

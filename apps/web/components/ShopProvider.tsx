@@ -93,9 +93,9 @@ interface ShopValue {
   requestPay: () => void;
   /** The thread's pay cards are the way to pay. The rail does not offer another. */
   dualCheckout: boolean;
-  /** True when this wallet may pay the current Coto cart. The server decides. */
-  cotoReal: boolean;
-  setCotoReal: (allowed: boolean) => void;
+  /** Where the Coto admission fetch is. The server decides `allowed`. */
+  cotoAdmission: 'pending' | 'failed' | 'allowed' | 'denied';
+  setCotoAdmission: (next: 'pending' | 'failed' | 'allowed' | 'denied') => void;
 }
 
 const ShopContext = createContext<ShopValue | null>(null);
@@ -113,7 +113,7 @@ export function ShopProvider({ children }: { children: ReactNode }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [payRequest, setPayRequest] = useState(0);
   const [dualCheckout, setDualCheckout] = useState(false);
-  const [cotoReal, setCotoReal] = useState(false);
+  const [cotoAdmission, setCotoAdmission] = useState<'pending' | 'failed' | 'allowed' | 'denied'>('pending');
   const requestPay = useCallback(() => setPayRequest((n) => n + 1), []);
 
   // After hydration, never during render: reading storage while rendering
@@ -270,13 +270,13 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       payRequest,
       requestPay,
       dualCheckout,
-      cotoReal,
-      setCotoReal,
+      cotoAdmission,
+      setCotoAdmission,
     }),
     [
       chats, activeChatId, cart, handoffUrl, orderState, receipt, readOnly,
       publish, openChat, newChat, forgetChat, settle, request, ack, historyOpen,
-      payRequest, requestPay, dualCheckout, cotoReal,
+      payRequest, requestPay, dualCheckout, cotoAdmission,
     ],
   );
 

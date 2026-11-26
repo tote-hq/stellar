@@ -125,14 +125,38 @@ export function transcriptHasPostal(messages: readonly { role?: string; content?
   return messages.some((message) => message.role === 'user' && mentionsPostalCode(messageText(message.content)));
 }
 
-/** Stores the city only when the previous assistant message was the question. */
+const CITY_WORD = /ciudad|localidad|city|locality/i;
+
+/** The last assistant text asked for a city, in the fixed question or in its own words. */
+export function assistantAskedCity(text: string | null | undefined): boolean {
+  if (isCityQuestion(text)) return true;
+  return CITY_WORD.test(text ?? '');
+}
+
+/**
+ * Stores the city when the previous message was the fixed question, and also
+ * when a postal code is already known and the reply is either the CABA alias
+ * or an answer to a city question the model worded itself.
+ * `cityFromAnswer` still rejects a shopping list.
+ */
 export function rememberCity(
-  state: { getCity?: () => string | undefined; setCity?: (city: string) => void },
+  state: {
+    getCity?: () => string | undefined;
+    setCity?: (city: string) => void;
+    getPendingPostal?: () => string | undefined;
+  },
   messages: readonly { role?: string; content?: unknown }[],
   text: string,
 ): void {
   if (state.getCity?.()) return;
-  if (!isCityQuestion(lastAssistantText(messages))) return;
   const city = cityFromAnswer(text);
-  if (city) state.setCity?.(city);
+  if (!city) return;
+  if (isCityQuestion(lastAssistantText(messages))) {
+    state.setCity?.(city);
+    return;
+  }
+  const postalKnown = Boolean(state.getPendingPostal?.()) || transcriptHasPostal(messages, text);
+  if (!postalKnown) return;
+  const alias = city === 'Ciudad de Buenos Aires';
+  if (alias || assistantAskedCity(lastAssistantText(messages))) state.setCity?.(city);
 }

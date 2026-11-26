@@ -1,4 +1,8 @@
+import { cotoPricer } from '@changuito/mcp/compare';
+
+import { newTurnState } from '@/lib/agent/loop';
 import { addCardToCart, parseCartAddBody } from '@/lib/cart-add';
+import { admitCotoRequest } from '@/lib/checkout/coto-admit';
 import { chatDualCompareEnabled, getRetailerSearch } from '@/lib/config';
 import { requireHuman } from '@/lib/human-gate';
 import { readLoggedInUser } from '@/lib/login-gate';
@@ -44,8 +48,9 @@ export async function POST(req: Request): Promise<Response> {
     const compareOn = await chatDualCompareEnabled();
     const retailers = await getRetailerSearch();
     const { result, snapshot } = await withSession(parsed.body.sessionId, parsed.body.snapshot, async (session) => {
-      const turn = await turns.get(parsed.body.sessionId);
-      if (!turn) return { ok: false as const, status: 409, error: 'no_turn' };
+      const stored = await turns.get(parsed.body.sessionId);
+      const turn = stored ?? newTurnState();
+      turn.cache.cotoPay = owner ? await admitCotoRequest(owner) : false;
       const outcome = await addCardToCart({
         session,
         cache: turn.cache,
@@ -54,9 +59,32 @@ export async function POST(req: Request): Promise<Response> {
         owner,
         compareOn,
         cotoEnabled: retailers.enabled.coto === true,
+        freshTurn: !stored,
+        catalog:
+          parsed.body.chain === 'coto'
+            ? {
+                async getProduct(id: string) {
+                  const item = await cotoPricer().getProduct(id);
+                  if (!item || !Number.isSafeInteger(item.shelfPrice.centavos) || item.shelfPrice.centavos <= 0) {
+                    return null;
+                  }
+                  return {
+                    id: item.id,
+                    name: item.name,
+                    shelfCentavos: item.shelfPrice.centavos,
+                    available: item.available,
+                    ...(item.ean ? { ean: item.ean } : {}),
+                    ...(item.brand ? { brand: item.brand } : {}),
+                    ...(item.url ? { url: item.url } : {}),
+                    ...(item.imageUrl ? { imageUrl: item.imageUrl } : {}),
+                  };
+                },
+              }
+            : undefined,
         call: async (name, input) => {
           const reply = await callMcpTool(session.client, { id: `card-${name}`, name, input });
-          return { isError: reply.block.is_error === true, structured: reply.structured };
+          const message = typeof reply.block.content === 'string' ? reply.block.content : undefined;
+          return { isError: reply.block.is_error === true, structured: reply.structured, message };
         },
       });
       if (outcome.ok) await turns.set(parsed.body.sessionId, turn);

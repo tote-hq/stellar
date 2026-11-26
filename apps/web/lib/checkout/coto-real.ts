@@ -395,27 +395,6 @@ export function deliveryBeforeShop(phases: readonly string[]): boolean {
   return delivery !== -1 && shop !== -1 && delivery < shop;
 }
 
-export interface PayBlock {
-  id: string;
-  kind: string;
-  retailer?: string;
-}
-
-/** The latest Coto cart after the latest user message, and only when admitted. */
-export function cotoPayTarget(blocks: readonly PayBlock[], allowed: boolean): string | undefined {
-  if (!allowed) return undefined;
-  let start = 0;
-  for (let i = 0; i < blocks.length; i += 1) {
-    if (blocks[i]?.kind === 'user') start = i + 1;
-  }
-  let id: string | undefined;
-  for (let i = start; i < blocks.length; i += 1) {
-    const block = blocks[i];
-    if (block?.kind === 'cart' && block.retailer === 'coto') id = block.id;
-  }
-  return id;
-}
-
 export function decodeDiaPairs(value: unknown): DiaPair[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const pairs: DiaPair[] = [];

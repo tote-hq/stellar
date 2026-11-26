@@ -93,6 +93,43 @@ describe('earlyCityAsk', () => {
     assert.equal(state.city, 'Ciudad de Buenos Aires');
   });
 
+  it('stores caba after a model-worded city question when a postal code is pending', () => {
+    const state: {
+      city?: string;
+      postal?: string;
+      getCity: () => string | undefined;
+      setCity: (city: string) => void;
+      getPendingPostal: () => string | undefined;
+    } = {
+      postal: '1425',
+      getCity: () => state.city,
+      setCity: (city) => {
+        state.city = city;
+      },
+      getPendingPostal: () => state.postal,
+    };
+    rememberCity(
+      state,
+      [{ role: 'assistant', content: [{ type: 'text', text: '¿En qué ciudad estás para ubicar la sucursal?' }] }],
+      'caba',
+    );
+    assert.equal(state.city, 'Ciudad de Buenos Aires');
+    const list: typeof state = {
+      postal: '1425',
+      getCity: () => list.city,
+      setCity: (city) => {
+        list.city = city;
+      },
+      getPendingPostal: () => list.postal,
+    };
+    rememberCity(
+      list,
+      [{ role: 'assistant', content: [{ type: 'text', text: '¿En qué ciudad estás para ubicar la sucursal?' }] }],
+      'leche, pan',
+    );
+    assert.equal(list.city, undefined);
+  });
+
   it('names a known city and pending postal code before a retailer is set', () => {
     assert.equal(stateBanner({}), '[session: no supermarket or postal code set yet]');
     assert.equal(

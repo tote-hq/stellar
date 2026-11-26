@@ -68,9 +68,42 @@ export function cartAdded(
   };
 }
 
+/** Why a card click did not add the line. The card shows this, plus Reintentar. */
+export type CardAddReason =
+  | 'busy'
+  | 'no_session'
+  | 'no_turn'
+  | 'unknown_product'
+  | 'freeze_denied'
+  | 'switch_required'
+  | 'choose_failed'
+  | 'add_failed'
+  | 'network';
+
+export type CardAddOutcome =
+  | { result: 'added' }
+  | { result: 'failed'; reason: CardAddReason }
+  | { result: 'confirm' };
+
+const CARD_ADD_SERVER_REASONS = new Set<CardAddReason>([
+  'no_turn',
+  'unknown_product',
+  'freeze_denied',
+  'switch_required',
+  'choose_failed',
+  'add_failed',
+]);
+
+/** A server error code, or `add_failed` when the body names nothing we show. */
+export function cardAddReason(error: string | undefined): CardAddReason {
+  if (error && CARD_ADD_SERVER_REASONS.has(error as CardAddReason)) return error as CardAddReason;
+  return 'add_failed';
+}
+
 /** Body of POST /api/cart/add. `event` is null when the line was written and nothing new was drawn. */
 export interface CartAddReply {
   ok?: boolean;
+  error?: string;
   event?: Extract<UiEvent, { t: 'cart' }> | null;
   snapshot?: SessionSnapshot;
 }
@@ -147,7 +180,7 @@ export type Block =
       handoffUrl?: string;
       dualCheckout?: boolean;
       soloDia?: boolean;
-      /** False when this basket cannot be paid. A Coto order. */
+      /** False when this Coto basket is not admitted or has nothing to charge. */
       orderable?: boolean;
     }
   | {

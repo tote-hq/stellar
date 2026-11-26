@@ -7,6 +7,7 @@ import { lastShown } from './chat-recall';
 import {
   applyCartAddReply,
   applyEvent,
+  cardAddReason,
   endTurn,
   failTurn,
   idNumber,
@@ -15,6 +16,7 @@ import {
   retryUser,
   seedIds,
   sendUser,
+  type CardAddOutcome,
   type CartAddReply,
   type ChatState,
   type SendFailure,
@@ -388,8 +390,9 @@ export function useChat(auth?: UseChatAuth) {
    * Add the product on a card. Not a chat turn: the server prices the id.
    * Refused while a turn is streaming, so the click cannot race the model.
    */
-  const addCard = useCallback(async (chain: 'dia' | 'coto', id: string): Promise<'added' | 'failed'> => {
-    if (inFlight.current || !sessionId.current) return 'failed';
+  const addCard = useCallback(async (chain: 'dia' | 'coto', id: string): Promise<CardAddOutcome> => {
+    if (inFlight.current) return { result: 'failed', reason: 'busy' };
+    if (!sessionId.current) return { result: 'failed', reason: 'no_session' };
     try {
       const res = await fetch('/api/cart/add', {
         method: 'POST',
@@ -404,12 +407,18 @@ export function useChat(auth?: UseChatAuth) {
         }),
       });
       const data = (await res.json().catch(() => null)) as CartAddReply | null;
-      const applied = applyCartAddReply(snapshot.current, res.ok, data);
+      if (!res.ok || !data || data.ok !== true) {
+        return { result: 'failed', reason: cardAddReason(data?.error) };
+      }
+      const applied = applyCartAddReply(snapshot.current, true, data);
       snapshot.current = applied.snapshot;
-      if (applied.result === 'added') setState(applied.apply);
-      return applied.result;
+      if (applied.result === 'added') {
+        setState(applied.apply);
+        return { result: 'added' };
+      }
+      return { result: 'failed', reason: 'add_failed' };
     } catch {
-      return 'failed';
+      return { result: 'failed', reason: 'network' };
     }
   }, []);
 

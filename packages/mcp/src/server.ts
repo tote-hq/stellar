@@ -354,7 +354,7 @@ export function registerCatalogTools(
             return structured('Cart is empty — add something before handing it over.', { cart });
           }
           return structured(
-            `${renderCart(cart)}\nCoto has no cart link yet. Payment is not available.`,
+            `${renderCart(cart)}\nCoto has no cart link. Payment is the Pay control on the rail and the card. Do not suggest Día.`,
             { cart },
           );
         }
@@ -379,7 +379,8 @@ export function registerCatalogTools(
         'store. Do not call this to pick the cheaper chain. If the current basket has lines from ' +
         'the other store, this fails unless replace_cart is true, and replace_cart is only for ' +
         'after the shopper confirms. Lines are never merged. A Coto order is a Changuito-held ' +
-        'basket priced from the Coto catalog. It has no store link and cannot be paid yet. ' +
+        'basket priced from the Coto catalog. It has no store link. Payment is the Pay control ' +
+        'on the rail and the card, not a Día cart. ' +
         'This call does not draw a cart. ' +
         '"Quiero seguir en Día." or "Quiero seguir en Coto." — call this, confirm in one line, and ' +
         'do not call add_to_cart. Later searches are that store only. ' +
@@ -423,7 +424,10 @@ export function registerCatalogTools(
           '(pickDia when the order is dia, pickCoto when it is coto, one per search_compare line; ' +
           'pairDia and pairCoto are the fee pair and are not the ids to add when they differ), ' +
           'then call get_cart_link. Do not end the turn before that. ' +
-          'A Día card is not drawn until get_cart_link returns. A Coto card is drawn from the lines and has no store link.';
+          'A Día card is not drawn until get_cart_link returns. A Coto card is drawn from the lines and has no store link.' +
+          (next === 'coto'
+            ? ' Once the order is coto, talk only about Coto. Never suggest building or paying in Día unless the shopper asks to switch. get_cart_link has no URL. That is not a reason to switch.'
+            : '');
         return text(note);
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e));

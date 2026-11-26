@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Cart } from '@changuito/mcp/types';
 
 import { starters } from '../lib/agent/prompt';
-import { cotoPayTarget } from '../lib/checkout/coto-real.ts';
+import { cotoPayGate } from '../lib/checkout/coto-pay-gate.ts';
 import { composerControls } from '../lib/composer.ts';
 import {
   buildCartMessage,
@@ -19,7 +19,7 @@ import {
 import { RETAILER_NAMES } from '../lib/retailers.ts';
 import { errorCode, track, trackLoginStart } from '../lib/analytics';
 import type { ChatImage } from '../lib/chat-image.ts';
-import { canRetry, searchRowAt, type Block, type ChatState } from '../lib/chat-state';
+import { canRetry, searchRowAt, type Block, type CardAddOutcome, type ChatState } from '../lib/chat-state';
 import { prepareImage } from '../lib/prepare-image';
 import { useDictation, type DictationError } from '../lib/use-dictation';
 import type { Receipt } from '../lib/chat-store.ts';
@@ -244,31 +244,44 @@ function ChatCore({
   // basket as it is now. Keyed on the counter so a re-render does not reopen it.
   const payRequest = shop?.payRequest ?? 0;
   const seenPay = useRef(payRequest);
-  const setCotoReal = shop?.setCotoReal;
+  const setCotoAdmission = shop?.setCotoAdmission;
   useEffect(() => {
-    if (!setCotoReal) return;
+    if (!setCotoAdmission) return;
+    setCotoAdmission('pending');
     let gone = false;
     fetch('/api/checkout/coto-real')
-      .then((res) => res.json())
-      .then((body: { allowed?: boolean }) => {
-        if (!gone) setCotoReal(body.allowed === true);
+      .then(async (res) => {
+        if (!res.ok) {
+          if (!gone) setCotoAdmission('failed');
+          return;
+        }
+        const body = (await res.json()) as { allowed?: boolean };
+        if (!gone) setCotoAdmission(body.allowed === true ? 'allowed' : 'denied');
       })
       .catch(() => {
-        if (!gone) setCotoReal(false);
+        if (!gone) setCotoAdmission('failed');
       });
     return () => {
       gone = true;
     };
-  }, [address, setCotoReal]);
+  }, [address, setCotoAdmission]);
   useEffect(() => {
     if (payRequest === seenPay.current) return;
     seenPay.current = payRequest;
-    if (!shop?.canOrder || !shop.cart || shop.dualCheckout) return;
+    if (!shop?.cart) return;
     if (shop.cart.retailer === 'coto') {
-      if (!shop.cotoReal) return;
+      const gate = cotoPayGate({
+        admission: shop.cotoAdmission,
+        orderState: shop.orderState,
+        readOnly: shop.readOnly,
+        dualCheckout: shop.dualCheckout,
+        cart: shop.cart,
+      });
+      if (gate !== 'pay') return;
       setCotoModal(shop.cart);
       return;
     }
+    if (!shop.canOrder || shop.dualCheckout) return;
     track('payment_start', { flow: 'rail' });
     setPaying({ cart: shop.cart, handoffUrl: shop.handoffUrl ?? undefined });
   }, [payRequest, shop]);
@@ -368,8 +381,9 @@ function ChatCore({
     void addCard(pending.chain, pending.id);
   }, [state.streaming, state.cart, addCard]);
 
-  const requestAdd = (chain: Chain, id: string) => {
-    if (state.streaming || gated || readOnly) return Promise.resolve('failed' as const);
+  const requestAdd = async (chain: Chain, id: string): Promise<CardAddOutcome> => {
+    if (state.streaming) return { result: 'failed', reason: 'busy' };
+    if (gated || readOnly) return { result: 'failed', reason: 'add_failed' };
     const current = state.cart?.cart;
     const lines = current?.lines.length ?? 0;
     if (
@@ -379,9 +393,20 @@ function ChatCore({
     ) {
       pendingAdd.current = { chain, id };
       setSwitchAsk({ from: current.retailer, to: chain });
-      return Promise.resolve('confirm' as const);
+      return { result: 'confirm' };
     }
-    return addCard(chain, id);
+    const outcome = await addCard(chain, id);
+    if (
+      outcome.result === 'failed' &&
+      outcome.reason === 'switch_required' &&
+      current &&
+      (current.retailer === 'dia' || current.retailer === 'coto')
+    ) {
+      pendingAdd.current = { chain, id };
+      setSwitchAsk({ from: current.retailer, to: chain });
+      return { result: 'confirm' };
+    }
+    return outcome;
   };
 
   const loginCopyVisible =
@@ -625,21 +650,23 @@ function ChatCore({
                 />
               );
             case 'cart': {
-              const cotoTarget = cotoPayTarget(
-                state.blocks.map((block) => ({
-                  id: block.id,
-                  kind: block.kind,
-                  retailer: block.kind === 'cart' ? block.cart.retailer : undefined,
-                })),
-                shop?.cotoReal === true,
-              );
-              const thisCoto = b.cart.retailer === 'coto' && b.id === cotoTarget;
+              const live = shop?.cart?.retailer === 'coto' ? shop.cart : b.cart;
+              const gate =
+                b.cart.retailer === 'coto'
+                  ? cotoPayGate({
+                      admission: shop?.cotoAdmission ?? 'pending',
+                      orderState: shop?.orderState ?? 'none',
+                      readOnly,
+                      dualCheckout: Boolean(b.dualCheckout),
+                      cart: live,
+                    })
+                  : undefined;
               return (
                 <CartCard
                   key={b.id}
                   cart={b.cart}
                   handoffUrl={b.handoffUrl}
-                  cotoPay={thisCoto}
+                  cotoGate={gate}
                   // No longer gated on a wallet. The frame-checkout flow asks
                   // for an importe and a code, and the shopper pays the súper
                   // themselves — there is nothing here to sign, so requiring a
@@ -650,14 +677,15 @@ function ChatCore({
                     // what was bought, and a Pagar on it invites paying twice.
                     // A dual-checkout basket pays from the cards under the compare.
                     // Solo Día (demo on, Coto search off): one PayCard, still fees.
-                    // A Coto cart pays only when this block is the current one
-                    // and the wallet is allowlisted. That is not the demo PayCard.
-                    canOrder && !b.dualCheckout && b.orderable !== false && (b.cart.retailer !== 'coto' || thisCoto)
-                      ? (cart) => {
-                          if (cart.retailer === 'coto') {
-                            setCotoModal(cart);
-                            return;
+                    // A Coto card pays the live basket when the gate says pay.
+                    b.cart.retailer === 'coto'
+                      ? gate === 'pay'
+                        ? () => {
+                            if (shop?.cart?.retailer === 'coto') setCotoModal(shop.cart);
                           }
+                        : undefined
+                      : canOrder && !b.dualCheckout && b.orderable !== false
+                      ? (cart) => {
                           track('payment_start', { flow: 'frame' });
                           setPaying(
                             b.soloDia

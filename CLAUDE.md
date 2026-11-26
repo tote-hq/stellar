@@ -98,11 +98,21 @@ fingerprint has changed since the last card. Four parts hold it up:
   moment the pairing is known. A card whose only actionable control is missing
   is the first bug again; a link carried onto a different basket opens somebody
   else's. A Coto basket is the exception, and it does not reopen that bug. It
-  has no store link and no pay control — Coto payment is not implemented — so
-  the card draws from the lines alone and says the order cannot be paid yet.
-  A Día cart without a link still does not draw. The link rule exists because
-  a Día card's action is that link. A card that is not allowed to spend
-  anything is not missing its only control.
+  has no store link. Pay is the gate on the card: `orderable` is true only
+  when `RenderCache.cotoPay` is true, a line is available, and the total is
+  above zero. That bit is this request's `admitCotoRequest` result, stored as
+  an optional `cotoPay` on the turn (not a `v` bump). The client still applies
+  its own admission state, so `orderable: true` does not show Pay to an
+  account that is not admitted. Pay on any Coto card charges the live basket.
+  The gate phrase replaces the generic "cannot be paid yet" line. A Día cart
+  without a link still does not draw. The link rule exists because a Día
+  card's action is that link.
+
+  Before the banner and before hop 0, if the cache has no cart and the session
+  still has Coto lines or a Día cart id, the loop calls `view_cart` in-process.
+  That retrieval emits no trail row. `drawn` is set to the card print so an
+  unchanged basket is not drawn again. If `view_cart` fails, the banner says
+  `cart unknown` and the model must not claim the cart is empty.
 - **`drawn` and `handoffFor` ride in `turn-store.ts` as optional fields**, not a
   `v: 2`. A version bump resets every conversation in flight at deploy time,
   which is a worse trade than one redundant card.
@@ -384,8 +394,11 @@ The gap and the 20% fee are drawn on the close table, after a cart exists.
 
 A Coto basket is lines held on the session snapshot (`order`, `coto`) and
 priced from `CotoCatalog.getProduct` on every read. The id is a stable
-`coto-<uuid>`. Oracle ATG, the store link and payment are not implemented.
-`getAdapter('coto')` still throws. `autoCompare` stays Día-only.
+`coto-<uuid>`. Oracle ATG and the store link are not implemented. An admitted
+account pays from the rail and from every Coto card; the card pays the live
+basket, and the gate phrase is what shows when it cannot. `orderable` follows
+`RenderCache.cotoPay`. `getAdapter('coto')` still throws. `autoCompare` stays
+Día-only.
 
 `render_missing` takes a query and a retailer, and only when that query was
 searched this turn on that store and came back with no available hit.
@@ -426,7 +439,7 @@ shopper confirms the existing switch dialog. The cart card then draws through
 ## Before you commit
 
 ```
-npm test                        # 790: mcp 217 · trust 1 · web 572
+npm test                        # 804: mcp 217 · trust 1 · web 586
 npm run typecheck -w @changuito/web
 npm run build
 ```

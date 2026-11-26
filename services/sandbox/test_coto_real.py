@@ -225,5 +225,31 @@ class CotoRealTest(unittest.TestCase):
         self.assertEqual(out["result"]["store_order_id"], "C-3")
 
 
+    def test_worker_prints_one_gate_line_each_and_still_fails_closed(self):
+        import io
+        import os
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        from coto_real import coto_real_worker
+
+        job = {"job_id": "job-gates", "items": []}
+        buf = io.StringIO()
+        env = {"COTO_REAL_LIVE": "0", "COTO_OPS_USER": "", "COTO_OPS_PASSWORD": "present"}
+        with patch.dict(os.environ, env, clear=False):
+            with redirect_stdout(buf):
+                asyncio.run(coto_real_worker(job))
+        text = buf.getvalue()
+        self.assertEqual(text.count("coto-pay gate=COTO_REAL_LIVE"), 1)
+        self.assertEqual(text.count("coto-pay gate=COTO_OPS_USER"), 1)
+        self.assertEqual(text.count("coto-pay gate=job_card"), 1)
+        self.assertNotIn("coto-pay gate=COTO_OPS_PASSWORD", text)
+        self.assertNotIn("ops_unavailable", text)
+        self.assertNotIn("present", text)
+        self.assertEqual(job["status"], "failed")
+        self.assertEqual(job["result"]["code"], "ops_unavailable")
+        self.assertIsNone(job["result"]["store_order_id"])
+
+
 if __name__ == "__main__":
     unittest.main()

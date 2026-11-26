@@ -118,6 +118,10 @@ test('coto cache and searches round-trip, and an older turn still decodes', () =
   assert.equal(back?.cache.coto?.c1?.name, 'Yerba');
   assert.equal(back?.cache.diaPairs?.[0]?.diaSkuId, 'd1');
   assert.equal(back?.cache.cotoRealDia?.buyer, 'GABC');
+  turn.cache.cotoPay = true;
+  const withPay = decodeTurn(JSON.parse(JSON.stringify(encodeTurn(turn))) as unknown);
+  assert.equal(withPay?.cache.cotoPay, true);
+  assert.equal(older.cache.cotoPay, undefined);
   assert.equal(back?.cache.searches?.[0]?.available, 1);
   assert.equal(encodeTurn(turn).v, 1);
 

@@ -2,6 +2,7 @@
 
 import type { Cart } from '@changuito/mcp/types';
 
+import type { CotoPayGateName } from '../lib/checkout/coto-pay-gate.ts';
 import { RETAILER_NAMES } from '../lib/retailers.ts';
 
 import { uiCopy } from '../lib/ui-copy.ts';
@@ -18,15 +19,17 @@ export function CartCard({
   cart,
   handoffUrl,
   onPay,
-  cotoPay = false,
+  cotoGate,
 }: {
   cart: Cart;
   handoffUrl?: string;
   onPay?: (cart: Cart) => void;
-  /** Allowlisted wallet, and this is the current turn's Coto cart. */
-  cotoPay?: boolean;
+  /** Set on a Coto basket. `pay` is the button; every other name is the phrase. */
+  cotoGate?: CotoPayGateName;
 }) {
-  const copy = uiCopy(useLang()).cart;
+  const lang = useLang();
+  const copy = uiCopy(lang).cart;
+  const gates = uiCopy(lang).cotoGate;
   const unavailable = cart.lines.filter((l) => !l.available);
   const store = RETAILER_NAMES[cart.retailer] ?? cart.retailer;
   const coto = cart.retailer === 'coto';
@@ -66,9 +69,9 @@ export function CartCard({
             {unavailable.length === 1 ? copy.oosOne : copy.oosMany(unavailable.length)}
           </p>
         ) : null}
-        {coto && !cotoPay ? (
-          <p className="cart-warn" data-testid="cart-coto-unpayable">
-            {copy.notPayable}
+        {coto && cotoGate && cotoGate !== 'pay' ? (
+          <p className="cart-warn" data-testid="cart-coto-gate" data-gate={cotoGate} role="status" aria-live="polite">
+            {gates[cotoGate]}
           </p>
         ) : null}
         <div className="cart-actions">
@@ -77,7 +80,7 @@ export function CartCard({
               {copy.payCta}
             </button>
           ) : null}
-          {onPay && coto && cotoPay ? (
+          {onPay && coto && cotoGate === 'pay' ? (
             <button
               type="button"
               className="btn btn-pay"

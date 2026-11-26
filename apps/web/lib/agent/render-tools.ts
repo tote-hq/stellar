@@ -77,6 +77,12 @@ export interface RenderCache {
    * before the field existed still decodes.
    */
   compared?: string[];
+  /**
+   * This request's Coto admission. Set by the route from `admitCotoRequest`,
+   * not by the model. Optional so a turn stored before the field still decodes.
+   * A missing value draws a Coto cart as not orderable.
+   */
+  cotoPay?: boolean;
 }
 
 /** A Coto catalog row the render tools may cite. Prices stay off the model input. */
@@ -130,6 +136,24 @@ export function cartLink(cache: RenderCache): string | undefined {
   return cache.cart && cache.handoffFor === cache.cart.cartId ? cache.handoffUrl : undefined;
 }
 
+/** A Coto cart is orderable only for an admitted account with something to charge. */
+export function cotoOrderable(cache: RenderCache, cart: Cart): boolean {
+  const payable = cart.lines.some((line) => line.available && line.quantity > 0) && cart.total.centavos > 0;
+  return cache.cotoPay === true && payable;
+}
+
+/**
+ * Remember a basket the UI already shows, so the next automatic draw stays quiet.
+ * The retrieval before hop 0 uses this: the rail already has the lines.
+ */
+export function sealCartDraw(cache: RenderCache): void {
+  const cart = cache.cart;
+  if (!cart) return;
+  const cotoBasket = cart.retailer === 'coto';
+  const handoffUrl = cotoBasket ? undefined : cartLink(cache);
+  cache.drawn = cardPrint(cart, handoffUrl);
+}
+
 /**
  * Everything a cart card puts on screen, as one string.
  *
@@ -173,9 +197,9 @@ function cardPrint(cart: Cart, handoffUrl?: string): string {
 export function autoRenderCart(cache: RenderCache, emit: (e: UiEvent) => void): boolean {
   const cart = cache.cart;
   if (!cart || !cart.lines.length) return false;
-  // A Coto basket has no store link and no pay control. Drawing it without a
-  // link does not reopen the Día bug: that bug was a card whose only action
-  // was missing. This card is not allowed to spend anything.
+  // A Coto basket has no store link. Drawing it without a link does not reopen
+  // the Día bug: that bug was a card whose only action was missing. Pay on a
+  // Coto card is the gate, and it is on only when this account is admitted.
   const cotoBasket = cart.retailer === 'coto';
   const handoffUrl = cotoBasket ? undefined : cartLink(cache);
   if (!cotoBasket && !handoffUrl) return false;
@@ -188,7 +212,7 @@ export function autoRenderCart(cache: RenderCache, emit: (e: UiEvent) => void): 
     t: 'cart',
     cart,
     ...(handoffUrl ? { handoffUrl } : {}),
-    ...(cotoBasket ? { orderable: false } : {}),
+    ...(cotoBasket ? { orderable: cotoOrderable(cache, cart) } : {}),
     ...(cache.dualCheckout ? { dualCheckout: true } : {}),
     ...(cache.soloDia ? { soloDia: true } : {}),
   });
@@ -285,7 +309,10 @@ export const RENDER_TOOLS: Anthropic.Tool[] = [
       "supermarket's own site. You rarely need this: once get_cart_link has run, the card is " +
       'drawn for you every time the cart changes, with the new lines, the new total and the ' +
       'link. Call this only to bring an unchanged basket back on screen — after a question ' +
-      'about it, say. Never answer a change by pointing at a card already on screen.',
+      'about it, say. Never answer a change by pointing at a card already on screen. ' +
+      'Once the banner says order coto, talk only about Coto. Payment is the Pay control ' +
+      'on the rail and the card, and you never decide it. get_cart_link on a Coto basket ' +
+      'has no URL. That is not a reason to switch to Día.',
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -372,7 +399,7 @@ export function runRenderTool(
       t: 'cart',
       cart: cache.cart,
       ...(handoffUrl ? { handoffUrl } : {}),
-      ...(cotoBasket ? { orderable: false } : {}),
+      ...(cotoBasket ? { orderable: cotoOrderable(cache, cache.cart) } : {}),
       ...(cache.dualCheckout ? { dualCheckout: true } : {}),
       ...(cache.soloDia ? { soloDia: true } : {}),
     });
