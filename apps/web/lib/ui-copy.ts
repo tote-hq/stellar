@@ -537,8 +537,8 @@ const ES: UiCopy = {
     cotoError: 'No pudimos consultar Coto. Los precios de Día sí están.',
     cotoTimedOut: 'Coto tardó demasiado. Los precios de Día sí están.',
     diaError: 'No pudimos consultar Día.',
-    chooseDia: 'Pedir en Día',
-    chooseCoto: 'Pedir en Coto',
+    chooseDia: 'Seguir en Día',
+    chooseCoto: 'Seguir en Coto',
   },
   missing: {
     prompt: (item, store) => `${item} no está en ${store}. ¿Lo sustituís o lo sacamos?`,
@@ -787,8 +787,8 @@ const EN: UiCopy = {
     cotoError: "We couldn't reach Coto. Día prices are here.",
     cotoTimedOut: 'Coto took too long. Día prices are here.',
     diaError: "We couldn't reach Día.",
-    chooseDia: 'Order at Día',
-    chooseCoto: 'Order at Coto',
+    chooseDia: 'Continue at Día',
+    chooseCoto: 'Continue at Coto',
   },
   missing: {
     prompt: (item, store) => `${item} isn't at ${store}. Substitute it or drop it?`,

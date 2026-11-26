@@ -101,12 +101,9 @@ transcript the shopper already keeps) and opens it from the history rail.
 `GET /api/human` is answered as `{ "mode": "open" }` inside the test only,
 so the human gate does not hide the card. Checkout routes are not stubbed.
 
-It asserts the card at `data-testid=compare-card`: the Spanish match line
-(`2 de 3 productos coinciden` for the fixture), no `20%` and no fee words
-on that card, a Día link whose href is the cart handoff, and a Coto link
-on `https://www.coto.com.ar/`. After each click, no request goes to
-`/api/checkout/quote`, `/api/checkout/start`, `/api/checkout/open`, or
-`/api/checkout/channels`.
+It asserts the close table at `data-testid=compare-close`: the title
+`Comparación`, the 20% Changuito fee from the stored gap, and the
+`Seguir en Día` / `Seguir en Coto` buttons. The table has no checkout link.
 
 Screenshot, video, and trace are on for this project. They land in
 `test-results/` and `playwright-report/`, which are gitignored. Do not

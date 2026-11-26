@@ -82,6 +82,8 @@ export type Block =
       coto: SearchCompareItem[];
       gapCentavos?: number;
       feeCentavos?: number;
+      /** Absent means both chains. A block drawn before the field keeps both. */
+      chains?: ('dia' | 'coto')[];
     }
   | { kind: 'missing'; id: string; query: string; retailer: 'dia' | 'coto'; item: string }
   | { kind: 'error'; id: string; message: string; recoverable: boolean };
@@ -368,6 +370,7 @@ export function applyEvent(state: ChatState, e: UiEvent): ChatState {
             ...(e.postalCode ? { postalCode: e.postalCode } : {}),
             dia: [],
             coto: [],
+            ...(e.chains ? { chains: e.chains } : {}),
           }
         : {
             kind: 'search_compare',
@@ -380,6 +383,7 @@ export function applyEvent(state: ChatState, e: UiEvent): ChatState {
             coto: e.coto,
             ...(e.gapCentavos === undefined ? {} : { gapCentavos: e.gapCentavos }),
             ...(e.feeCentavos === undefined ? {} : { feeCentavos: e.feeCentavos }),
+            ...(e.chains ? { chains: e.chains } : {}),
           };
       const blocks = prior
         ? state.blocks.map((b, i) => (i === existing ? block : b))

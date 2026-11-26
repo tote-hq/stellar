@@ -592,8 +592,8 @@ body:not(:has(.topbar)) .shell {
   }
 }
 
-/* Search-time Día and Coto. Two columns from 720px, stacked below that.
-   Tokens stay the brand plate in dark mode, same as .compare-card. */
+/* Search-time Día and Coto. One section per chain, product cards in a row.
+   The close table reuses the same plate. Tokens stay the brand plate in dark mode. */
 .search-compare,
 .missing-card {
   border: 1px solid var(--border);
@@ -607,27 +607,17 @@ body:not(:has(.topbar)) .shell {
 .search-compare-sub,
 .search-compare-note,
 .search-compare-fee { margin: 8px 0 0; font-size: 14px; color: var(--text); }
-.search-compare-cols { display: grid; gap: 12px; margin-top: 12px; }
+.search-compare-section { margin-top: 16px; }
+.search-compare-section:first-child { margin-top: 0; }
 .search-compare-store { margin: 0 0 8px; font-size: 15px; }
-.search-compare-list { list-style: none; margin: 0; padding: 0; }
-.search-compare-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 0;
-  font-size: 14px;
-}
-.search-compare-name { flex: 1 1 8rem; }
-.search-compare-price { font-variant-numeric: tabular-nums; }
-.search-compare-col .btn,
+.search-compare-section .grid { margin-top: 8px; }
+.search-compare-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.search-compare-actions .btn { min-height: 44px; min-width: 44px; }
 .missing-actions .btn { min-height: 44px; min-width: 44px; margin-top: 8px; }
 .missing-card p { margin: 0; }
 .missing-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .composer-actions { display: flex; gap: 8px; align-items: center; }
 .composer-actions .btn { min-height: 44px; }
-@media (min-width: 720px) {
-  .search-compare-cols { grid-template-columns: 1fr 1fr; }
-}
 @media (prefers-color-scheme: dark) {
   .search-compare,
   .missing-card {

@@ -391,4 +391,36 @@ describe('chat store: dual checkout flags', () => {
     assert.equal(storedPending?.kind === 'compare' && storedPending.checkoutDemo, undefined);
     assert.equal(back?.dualCheckout, true);
   });
+
+  it('keeps search-compare card fields and chains', () => {
+    const block: Block = {
+      kind: 'search_compare',
+      id: 'b-search',
+      compareId: 'sc1',
+      status: 'ok',
+      query: 'leche',
+      chains: ['dia'],
+      dia: [
+        {
+          id: 'd1',
+          name: 'Leche',
+          shelfCentavos: 1000,
+          available: true,
+          brand: 'Ser',
+          imageUrl: 'https://img.test/leche.jpg',
+          unitMultiplier: 1,
+          measurementUnit: 'lt',
+        },
+      ],
+      coto: [],
+    };
+    save({ state: { blocks: [block] } });
+    const back = loadChat('c1');
+    const stored = back?.blocks.find((b) => b.kind === 'search_compare');
+    assert.equal(stored?.kind === 'search_compare' && stored.chains?.[0], 'dia');
+    assert.equal(stored?.kind === 'search_compare' && stored.dia[0]?.imageUrl, 'https://img.test/leche.jpg');
+    assert.equal(stored?.kind === 'search_compare' && stored.dia[0]?.brand, 'Ser');
+    assert.equal(stored?.kind === 'search_compare' && stored.dia[0]?.unitMultiplier, 1);
+    assert.equal(stored?.kind === 'search_compare' && stored.dia[0]?.measurementUnit, 'lt');
+  });
 });

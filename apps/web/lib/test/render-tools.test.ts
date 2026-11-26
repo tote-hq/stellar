@@ -297,6 +297,20 @@ describe('product cards', () => {
     assert.equal(shopperNamedRetailer('coto', 'el más barato', 'Acá están los precios.'), false);
     assert.equal(shopperNamedRetailer('coto', 'Quiero pedir en Coto.', ''), true);
     assert.equal(shopperNamedRetailer('dia', 'Quiero pedir en Coto.', ''), false);
+    assert.equal(shopperNamedRetailer('coto', 'Quiero seguir en Coto.', ''), true);
+    assert.equal(shopperNamedRetailer('dia', 'Quiero seguir en Coto.', ''), false);
+    assert.equal(
+      shopperNamedRetailer('dia', 'Armá el carrito de Día con lo que charlamos y mostrame el pedido listo para pagar.', ''),
+      true,
+    );
+    assert.equal(
+      shopperNamedRetailer('coto', 'Armá el carrito de Coto con lo que charlamos y mostrame el pedido listo para pagar.', ''),
+      true,
+    );
+    assert.equal(
+      shopperNamedRetailer('coto', 'Armá el carrito de Día con lo que charlamos y mostrame el pedido listo para pagar.', ''),
+      false,
+    );
     assert.equal(shopperNamedRetailer('coto', 'sí', '¿Confirmás Coto?'), true);
   });
 

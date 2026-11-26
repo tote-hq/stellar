@@ -1,5 +1,6 @@
 /**
- * When a Pedir en {store} click has to confirm, and the messages those clicks send.
+ * When a Seguir en {store} or Armar carrito click has to confirm, and the
+ * messages those clicks send.
  *
  * No imports: the chat tests load this file by stripping types.
  * Cancel sends nothing. Confirm and a first choice are ordinary chat messages,
@@ -17,7 +18,13 @@ export function needsSwitchConfirm(
 }
 
 export function choiceMessage(retailer: Chain): string {
-  return retailer === 'dia' ? 'Quiero pedir en Día.' : 'Quiero pedir en Coto.';
+  return retailer === 'dia' ? 'Quiero seguir en Día.' : 'Quiero seguir en Coto.';
+}
+
+/** Armar carrito in one section. Names the chain so the model cannot pick the other. */
+export function buildCartMessage(chain: Chain): string {
+  const store = chain === 'dia' ? 'Día' : 'Coto';
+  return `Armá el carrito de ${store} con lo que charlamos y mostrame el pedido listo para pagar.`;
 }
 
 export function confirmSwitchMessage(from: Chain, to: Chain): string {
