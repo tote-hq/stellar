@@ -100,10 +100,11 @@ describe('coto-real quote gates', () => {
     assert.equal(text.includes(NUMBER), false);
   }
 
-  it('logs snapshot and nothing else when the compare lock is missing', async () => {
-    const res = await post({}, undefined);
-    assert.equal(res.status, 400);
-    assert.deepEqual(logs, [['coto-pay gate=snapshot']]);
+  it('quotes past a missing Día snapshot and does not ask to compare again', async () => {
+    const res = await post({ postalCode: POSTAL, city: 'CABA', fulfillment: 'pickup' }, undefined);
+    assert.equal(res.status, 409);
+    assert.deepEqual(logs, [['coto-pay gate=card']]);
+    assert.equal(JSON.stringify(await res.json()).includes('Volvé a comparar'), false);
     leaked(joined());
   });
 

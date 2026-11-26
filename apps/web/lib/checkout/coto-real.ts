@@ -192,8 +192,9 @@ export function freezeCotoReal(
   return { ok: true, snapshot };
 }
 
+/** No snapshot means no Día match yet, which quotes as an empty comparison. */
 export function quoteBuyerError(snapshot: CotoRealDia | undefined, address: string): string | undefined {
-  if (!snapshot) return 'Volvé a comparar antes de pagar.';
+  if (!snapshot) return undefined;
   if (!snapshot.buyer) return 'Confirmá Coto de nuevo con la sesión iniciada.';
   if (snapshot.buyer !== address) return 'Este changuito está asociado a otra cuenta.';
   return undefined;

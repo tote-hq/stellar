@@ -63,11 +63,8 @@ export async function postCotoRealQuote(
 
   const sessionId = typeof body.sessionId === 'string' && UUID.test(body.sessionId) ? body.sessionId : '';
   const turn = sessionId ? await readTurn(sessionId) : undefined;
+  // No Día snapshot is an empty comparison: no pairs, a 0 gap, a 0 fee.
   const snapshot = turn?.cache.cotoRealDia;
-  if (!snapshot) {
-    console.warn('coto-pay gate=snapshot');
-    return Response.json({ error: 'Volvé a comparar antes de pagar.' }, { status: 400 });
-  }
   const buyerError = quoteBuyerError(snapshot, address);
   if (buyerError) return Response.json({ error: buyerError }, { status: 400 });
 
@@ -124,7 +121,7 @@ export async function postCotoRealQuote(
   const quoted = quoteFromPriced({
     lines,
     clientTotalCentavos: cart.total.centavos,
-    pairs: snapshot.pairs,
+    pairs: snapshot?.pairs ?? [],
     postalCode,
     coverage: 'shopper',
     fulfillment,

@@ -170,7 +170,12 @@ export function CotoRealModal({
         data-testid="coto-real-modal"
         onClick={(event) => event.stopPropagation()}
       >
-        <h2 id="coto-real-title">{copy.title}</h2>
+        <header className="modal-head">
+          <h2 id="coto-real-title">{copy.title}</h2>
+          <button type="button" className="modal-x" onClick={onClose} aria-label={copy.close}>
+            ×
+          </button>
+        </header>
         <p>{copy.disclosure}</p>
         <p>{copy.never}</p>
         <fieldset data-testid="checkout-fulfillment">
@@ -330,9 +335,6 @@ export function CotoRealModal({
         >
           {quote ? copy.lockCta(quote.amountDisplay) : copy.lockCta('')}
         </button>
-        <button type="button" className="btn btn-ghost" onClick={onClose}>
-          {copy.close}
-        </button>
       </div>
     </div>
   );
@@ -414,7 +416,7 @@ function modalCopy(lang: Lang) {
     provision: 'Envío (promedio)',
     provisionHelp: 'Es un promedio para reservar el envío. No es la tarifa de esta corrida.',
     postal: 'Código postal',
-    usePostal: 'Usar este CP',
+    usePostal: 'Usar este código postal',
     cotoTotal: 'Total Coto',
     diaTotal: 'Total Día (líneas que matchean)',
     gap: 'Diferencia',

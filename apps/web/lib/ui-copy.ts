@@ -557,7 +557,7 @@ const ES: UiCopy = {
   },
   searchCompare: {
     title: 'Comparación',
-    subtitle: (cp) => `CP ${cp} · Día y Coto`,
+    subtitle: (cp) => `Código postal ${cp} · Día y Coto`,
     gapFee: (gap, fee) => `Diferencia ${gap}. Fee Changuito: ${fee} (20% de la diferencia).`,
     pendingCoto: 'Buscando en Coto…',
     diaEmpty: 'En Día no encontramos resultados para esta búsqueda.',
