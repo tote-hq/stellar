@@ -275,6 +275,16 @@ export interface SearchCompareCopy {
   chooseDia: string;
   chooseCoto: string;
   missingType: (type: string, store: string) => string;
+  same: string;
+  similar: (kind: string) => string;
+  noPair: (kind: string, store: string) => string;
+}
+
+export interface CardAddCopy {
+  adding: string;
+  added: string;
+  failed: string;
+  label: (name: string, store: string) => string;
 }
 
 export interface MissingCopy {
@@ -304,6 +314,7 @@ export interface UiCopy {
   checkout: CheckoutUiCopy;
   compare: CompareCopy;
   searchCompare: SearchCompareCopy;
+  cardAdd: CardAddCopy;
   missing: MissingCopy;
   switch: SwitchCopy;
   /** Every dialog's ✕. One key, because it is one word. */
@@ -541,6 +552,15 @@ const ES: UiCopy = {
     chooseDia: 'Seguir en Día',
     chooseCoto: 'Seguir en Coto',
     missingType: (type, store) => `No encontramos ${type} disponible en ${store}`,
+    same: 'Mismo producto',
+    similar: (kind) => `Similar · ${kind}`,
+    noPair: (kind, store) => `No encontramos ${kind} comparable en ${store}.`,
+  },
+  cardAdd: {
+    adding: 'Sumando…',
+    added: 'En el carrito',
+    failed: 'No se pudo sumar. Probá de nuevo.',
+    label: (name, store) => `${name}, ${store}: sumar al carrito de ${store}`,
   },
   missing: {
     prompt: (item, store) => `${item} no está en ${store}. ¿Lo sustituís o lo sacamos?`,
@@ -792,6 +812,15 @@ const EN: UiCopy = {
     chooseDia: 'Continue at Día',
     chooseCoto: 'Continue at Coto',
     missingType: (type, store) => `We couldn't find ${type} available at ${store}`,
+    same: 'Same product',
+    similar: (kind) => `Similar · ${kind}`,
+    noPair: (kind, store) => `We couldn't find a comparable ${kind} at ${store}.`,
+  },
+  cardAdd: {
+    adding: 'Adding…',
+    added: 'In the cart',
+    failed: "Couldn't add it. Try again.",
+    label: (name, store) => `${name}, ${store}: add to the ${store} cart`,
   },
   missing: {
     prompt: (item, store) => `${item} isn't at ${store}. Substitute it or drop it?`,

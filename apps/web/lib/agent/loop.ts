@@ -1,6 +1,8 @@
 import type Anthropic from '@anthropic-ai/sdk';
 
 import { callMcpTool, mcpToolsToAnthropic } from '../mcp/bridge';
+
+export { callMcpTool };
 import type { Session } from '../mcp/session';
 import { DEFAULT_LANG, inLang, type Lang } from '../lang.ts';
 import type { ChatImage } from '../chat-image.ts';

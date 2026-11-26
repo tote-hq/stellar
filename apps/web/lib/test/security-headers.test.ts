@@ -29,6 +29,8 @@ describe('shopper security headers', () => {
     assert.match(csp, /frame-src [^;]*https:\/\/challenges\.cloudflare\.com/);
     assert.match(csp, /connect-src [^;]*https:\/\/sdk\.api\.pollar\.xyz/);
     assert.match(csp, /img-src [^;]*https:\/\/\*\.vtexassets\.com/);
+    assert.match(csp, /img-src [^;]*https:\/\/static\.cotodigital3\.com\.ar/);
+    assert.doesNotMatch(csp, /img-src [^;]*\*\.cotodigital3/);
     assert.match(csp, /object-src 'none'/);
     assert.doesNotMatch(csp, /'unsafe-eval'/);
   });

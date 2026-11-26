@@ -253,8 +253,11 @@ export type {
   SearchCompareResult,
   SearchCompareStatus,
   SearchHit,
+  SearchMatch,
   SearchPair,
+  TypedPick,
 } from './search-compare.js';
+export { ofQueryType } from './food-type.js';
 export type { CotoSearcher } from './match.js';
 export type { CatalogItem } from './coto.js';
 export { compareForCard } from './compare-card.js';

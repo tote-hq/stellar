@@ -38,3 +38,17 @@ export function cardImageUrl(url?: string): string | undefined {
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   return undefined;
 }
+
+/**
+ * A Coto photo the card may request.
+ * An absolute catalog URL wins. Otherwise, only an 8-digit id uses the
+ * `large/{first six}00/{id}.jpg` path. That path is proven for `00015889`
+ * only. A wrong guess fails the image load and the card shows the empty
+ * square. A `coto-<uuid>` basket id never matches.
+ */
+export function cotoImageUrl(id: string | undefined, imageUrl?: string): string | undefined {
+  const catalog = cardImageUrl(imageUrl);
+  if (catalog) return catalog;
+  if (typeof id !== 'string' || !/^\d{8}$/.test(id)) return undefined;
+  return `https://static.cotodigital3.com.ar/sitios/fotos/large/${id.slice(0, 6)}00/${id}.jpg`;
+}

@@ -269,6 +269,7 @@ function packSearchItem(item: SearchCompareItem): SearchCompareItem {
     packed.unitMultiplier = item.unitMultiplier;
     packed.measurementUnit = item.measurementUnit;
   }
+  if (item.match === 'same' || item.match === 'similar') packed.match = item.match;
   return packed;
 }
 
@@ -288,6 +289,8 @@ function packSearchCompare(
   if (b.gapCentavos !== undefined) out.gapCentavos = b.gapCentavos;
   if (b.feeCentavos !== undefined) out.feeCentavos = b.feeCentavos;
   if (b.chains && b.chains.length > 0) out.chains = b.chains;
+  if (b.typeLabel) out.typeLabel = b.typeLabel;
+  if (b.noPair && b.noPair.length > 0) out.noPair = b.noPair;
   return out;
 }
 
@@ -510,6 +513,7 @@ function asSearchItem(v: unknown): SearchCompareItem | null {
     item.measurementUnit = measurementUnit;
     item.unitMultiplier = unitMultiplier;
   }
+  if (v.match === 'same' || v.match === 'similar') item.match = v.match;
   return item;
 }
 
@@ -545,6 +549,12 @@ function asSearchCompare(v: Record<string, unknown>, id: string): Extract<Block,
   if (Array.isArray(v.chains)) {
     const chains = v.chains.filter((chain): chain is 'dia' | 'coto' => chain === 'dia' || chain === 'coto');
     if (chains.length > 0) block.chains = chains;
+  }
+  const typeLabel = str(v.typeLabel);
+  if (typeLabel !== null) block.typeLabel = typeLabel;
+  if (Array.isArray(v.noPair)) {
+    const noPair = v.noPair.filter((chain): chain is 'dia' | 'coto' => chain === 'dia' || chain === 'coto');
+    if (noPair.length > 0) block.noPair = noPair;
   }
   return block;
 }

@@ -223,6 +223,28 @@ describe('product cards', () => {
     assert.deepEqual(grid[0]?.items.map((p) => p.skuId), ['7']);
   });
 
+  it('refuses a grid of SKUs already on the search row', () => {
+    const cache = emptyCache();
+    rememberStructured(cache, { products: [product('1', 'Leche'), product('2', 'Arroz')] });
+    cache.compared = ['1', '2'];
+    const { events, emit } = recorder();
+    const res = runRenderTool(cache, { id: 'u1', name: 'render_products', input: { sku_ids: ['1', '2'] } }, emit);
+    assert.equal(res.is_error, true);
+    assert.equal(events.length, 0);
+    assert.match(String(res.content), /already on the search_compare row/);
+  });
+
+  it('draws only the SKUs that are not already compared', () => {
+    const cache = emptyCache();
+    rememberStructured(cache, { products: [product('1', 'Leche'), product('2', 'Arroz')] });
+    cache.compared = ['1'];
+    const { events, emit } = recorder();
+    const res = runRenderTool(cache, { id: 'u1', name: 'render_products', input: { sku_ids: ['1', '2'] } }, emit);
+    assert.equal(res.is_error, undefined);
+    const grid = events.filter((e) => e.t === 'products');
+    assert.deepEqual(grid[0]?.items.map((p) => p.skuId), ['2']);
+  });
+
   it('RULE: refuses a SKU that never came from a search', () => {
     // An invented SKU is an invented price, above a button that spends money.
     const cache = emptyCache();

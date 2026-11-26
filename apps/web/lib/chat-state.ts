@@ -22,6 +22,99 @@ export interface ToolRun {
 }
 
 /**
+ * A card click landed a cart the model did not stream.
+ *
+ * The newest block for this cart id is replaced in place, anywhere in the
+ * transcript, so the rail and the thread stay on the same basket. A cart the
+ * shopper has not seen yet is appended. A link already on the card stays.
+ */
+export function cartAdded(
+  state: ChatState,
+  event: Extract<UiEvent, { t: 'cart' }>,
+  snapshot: SessionSnapshot | undefined,
+): ChatState {
+  let existing = -1;
+  for (let i = state.blocks.length - 1; i >= 0; i -= 1) {
+    const block = state.blocks[i];
+    if (block && block.kind === 'cart' && block.cart.cartId === event.cart.cartId) {
+      existing = i;
+      break;
+    }
+  }
+  const prior = existing === -1 ? undefined : (state.blocks[existing] as Extract<Block, { kind: 'cart' }>);
+  const handoffUrl = event.handoffUrl ?? prior?.handoffUrl;
+  const block: Extract<Block, { kind: 'cart' }> = {
+    kind: 'cart',
+    id: prior?.id ?? nextId(),
+    cart: event.cart,
+    ...(handoffUrl ? { handoffUrl } : {}),
+    ...(event.dualCheckout ? { dualCheckout: true } : {}),
+    ...(event.soloDia ? { soloDia: true } : {}),
+    ...(event.orderable === false ? { orderable: false } : {}),
+  };
+  const blocks = prior
+    ? state.blocks.map((item, index) => (index === existing ? block : item))
+    : [...state.blocks, block];
+  return {
+    ...state,
+    blocks,
+    ...(snapshot ? { snapshot } : {}),
+    cart: {
+      cart: event.cart,
+      ...(handoffUrl ? { handoffUrl } : {}),
+      ...(event.dualCheckout ? { dualCheckout: true } : {}),
+      ...(event.soloDia ? { soloDia: true } : {}),
+    },
+  };
+}
+
+/** Body of POST /api/cart/add. `event` is null when the line was written and nothing new was drawn. */
+export interface CartAddReply {
+  ok?: boolean;
+  event?: Extract<UiEvent, { t: 'cart' }> | null;
+  snapshot?: SessionSnapshot;
+}
+
+export interface CartAddReplyApplied {
+  result: 'added' | 'failed';
+  /** What the next request must send. Unchanged when the add did not succeed. */
+  snapshot: SessionSnapshot | undefined;
+  apply: (state: ChatState) => ChatState;
+}
+
+/**
+ * What a card-click response does to the session and the transcript.
+ *
+ * A 200 with `ok: true` already wrote the line, including when `autoRenderCart`
+ * drew nothing (`event` is null — a Día basket whose link call failed). The
+ * snapshot still has to land, or the next chat turn rebuilds the MCP session
+ * without that cart id. A missing card is not a failure: the shopper must not
+ * see "could not add" for a line that is in the basket, and a retry would add
+ * it again. `ok: false` and a non-2xx response leave the snapshot and the
+ * transcript untouched.
+ */
+export function applyCartAddReply(
+  held: SessionSnapshot | undefined,
+  httpOk: boolean,
+  body: CartAddReply | null,
+): CartAddReplyApplied {
+  if (!httpOk || !body || body.ok !== true) {
+    return { result: 'failed', snapshot: held, apply: (state) => state };
+  }
+  const snapshot = body.snapshot ? body.snapshot : held;
+  const event = body.event && body.event.t === 'cart' ? body.event : null;
+  return {
+    result: 'added',
+    snapshot,
+    apply: (state) => {
+      if (event) return cartAdded(state, event, snapshot);
+      if (snapshot === undefined || state.snapshot === snapshot) return state;
+      return { ...state, snapshot };
+    },
+  };
+}
+
+/**
  * Why a turn never landed.
  *
  * `login` is the only one worth resuming on its own: the gate is a door the
@@ -84,6 +177,10 @@ export type Block =
       feeCentavos?: number;
       /** Absent means both chains. A block drawn before the field keeps both. */
       chains?: ('dia' | 'coto')[];
+      /** The type label from the event's `kind`. Absent on an older block. */
+      typeLabel?: string;
+      /** Chains with no comparable product. Absent when the row does not say. */
+      noPair?: ('dia' | 'coto')[];
     }
   | { kind: 'missing'; id: string; query: string; retailer: 'dia' | 'coto'; item: string }
   | { kind: 'error'; id: string; message: string; recoverable: boolean };
@@ -423,6 +520,8 @@ export function applyEvent(state: ChatState, e: UiEvent): ChatState {
             ...(e.gapCentavos === undefined ? {} : { gapCentavos: e.gapCentavos }),
             ...(e.feeCentavos === undefined ? {} : { feeCentavos: e.feeCentavos }),
             ...(e.chains ? { chains: e.chains } : {}),
+            ...(e.kind ? { typeLabel: e.kind } : {}),
+            ...(e.noPair ? { noPair: e.noPair } : {}),
           };
       const blocks = prior
         ? state.blocks.map((b, i) => (i === existing ? block : b))

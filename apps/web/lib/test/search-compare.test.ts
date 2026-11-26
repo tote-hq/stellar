@@ -88,7 +88,7 @@ describe('dual search', () => {
     assert.equal(finished?.t === 'search_compare' && finished.status, 'ok');
     assert.match(
       note,
-      /\[search_compare: id=sc1 dia=1 coto=1 matched=1 gapCentavos=18500 pairDia=d1 pairCoto=c1 pickDia=d1 pickCoto=c1\]/,
+      /\[search_compare: id=sc1 dia=1 coto=1 matched=1 gapCentavos=18500 pairDia=d1 pairCoto=c1 pickDia=d1 pickCoto=c1 match=same\]/,
     );
     assert.match(note, /c1 · Leche Protein 1 L/);
     if (finished?.t === 'search_compare' && finished.status === 'ok') {
@@ -247,13 +247,13 @@ describe('dual search', () => {
   });
 
   it('emits one cheapest item per chain and does not follow another id', async () => {
-    // No argument on the search is a model pick. The pair can be a different
-    // id; the card and the note still name the cheapest available item.
-    const dearDia: Product = { ...dia(9000, '222'), skuId: 'dear-dia', name: 'Dear Dia' };
-    const cheapDia: Product = { ...dia(1000, '111'), skuId: 'cheap-dia', name: 'Cheap Dia' };
-    const dearCoto: CatalogItem = { ...coto(8000, '222'), id: 'dear-coto', name: 'Dear Coto' };
-    const cheapCoto: CatalogItem = { ...coto(500, '111'), id: 'cheap-coto', name: 'Cheap Coto' };
-    const gone: CatalogItem = { ...coto(100, '333'), id: 'gone-coto', name: 'Gone Coto', available: false };
+    // No argument on the search is a model pick. The card is the cheapest
+    // hit of the type. The gap is those two picks when they are the same product.
+    const dearDia: Product = { ...dia(9000, '222'), skuId: 'dear-dia', name: 'Leche cara 1 L' };
+    const cheapDia: Product = { ...dia(1000, '111'), skuId: 'cheap-dia', name: 'Leche barata 1 L' };
+    const dearCoto: CatalogItem = { ...coto(8000, '222'), id: 'dear-coto', name: 'Leche cara 1 L' };
+    const cheapCoto: CatalogItem = { ...coto(500, '111'), id: 'cheap-coto', name: 'Leche barata 1 L' };
+    const gone: CatalogItem = { ...coto(100, '333'), id: 'gone-coto', name: 'Leche agotada 1 L', available: false };
     const { events, cache, done } = run([dearCoto, cheapCoto, gone], [dearDia, cheapDia]);
     const note = await done;
     const finished = events[1];
@@ -264,20 +264,49 @@ describe('dual search', () => {
     assert.equal(finished.coto.length, 1);
     assert.equal(finished.dia[0]?.id, 'cheap-dia');
     assert.equal(finished.coto[0]?.id, 'cheap-coto');
-    assert.equal(finished.gapCentavos, 1000);
-    assert.equal(finished.feeCentavos, feeCentavosOf(1000));
+    assert.equal(finished.gapCentavos, 500);
+    assert.equal(finished.feeCentavos, feeCentavosOf(500));
     assert.match(note, /pickDia=cheap-dia/);
     assert.match(note, /pickCoto=cheap-coto/);
-    assert.match(note, /pairDia=dear-dia pairCoto=dear-coto/);
-    assert.match(note, /cheap-dia · Cheap Dia/);
-    assert.match(note, /cheap-coto · Cheap Coto/);
-    assert.doesNotMatch(note, /Dear Dia/);
-    assert.doesNotMatch(note, /Dear Coto/);
-    assert.doesNotMatch(note, /Gone Coto/);
-    assert.equal(cache.coto?.['cheap-coto']?.name, 'Cheap Coto');
-    assert.equal(cache.coto?.['dear-coto']?.name, 'Dear Coto');
-    assert.equal(cache.coto?.['gone-coto']?.name, 'Gone Coto');
+    assert.match(note, /pairDia=cheap-dia pairCoto=cheap-coto/);
+    assert.match(note, /match=same/);
+    assert.match(note, /cheap-dia · Leche barata 1 L/);
+    assert.match(note, /cheap-coto · Leche barata 1 L/);
+    assert.doesNotMatch(note, /Leche cara/);
+    assert.doesNotMatch(note, /agotada/);
+    assert.equal(cache.coto?.['cheap-coto']?.name, 'Leche barata 1 L');
+    assert.equal(cache.coto?.['dear-coto']?.name, 'Leche cara 1 L');
+    assert.equal(cache.coto?.['gone-coto']?.name, 'Leche agotada 1 L');
     assert.equal(cache.searches?.find((row) => row.retailer === 'dia')?.available, 2);
     assert.equal(cache.searches?.find((row) => row.retailer === 'coto')?.available, 2);
+    assert.deepEqual(cache.compared, ['dear-dia', 'cheap-dia']);
+  });
+
+  it('records compared Día ids and drops a pet-food hit on a Día-only search', async () => {
+    const pet: Product = {
+      ...dia(1000, '779'),
+      skuId: 'pet',
+      name: 'Snack Tasty Bite Carne Pedigree',
+      brand: 'Pedigree',
+    };
+    const milk: Product = { ...dia(2000), skuId: 'milk', name: 'Leche Protein 1 L' };
+    const events: UiEvent[] = [];
+    const cache = emptyCache();
+    const search = beginChainSearch({
+      chain: 'dia',
+      id: 'typed',
+      query: 'leche',
+      cache,
+      emit: (event) => events.push(event),
+    });
+    const note = await search.finish({ products: [pet, milk], failed: false });
+    const finished = events[1];
+    if (finished?.t !== 'search_compare' || finished.status === 'pending') {
+      assert.fail('expected a finished día search');
+    }
+    assert.deepEqual(finished.dia.map((item) => item.id), ['milk']);
+    assert.match(note, /match=none/);
+    assert.deepEqual(cache.compared, ['pet', 'milk']);
+    assert.equal(cache.searches?.find((row) => row.retailer === 'dia')?.available, 1);
   });
 });

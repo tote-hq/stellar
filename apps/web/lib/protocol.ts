@@ -67,6 +67,8 @@ export interface SearchCompareItem {
   brand?: string;
   unitMultiplier?: number;
   measurementUnit?: string;
+  /** Set when this card is one side of a same-product or same-type pair. */
+  match?: 'same' | 'similar';
 }
 
 export type SearchCompareStatus =
@@ -143,6 +145,10 @@ export type UiEvent =
       feeCentavos?: number;
       /** Absent means both chains were queried. */
       chains?: ('dia' | 'coto')[];
+      /** The type label. The query, trimmed. Absent on a block from before this field. */
+      kind?: string;
+      /** Chains with no comparable product for this type. Absent when both have one. */
+      noPair?: ('dia' | 'coto')[];
     }
   /** A requested item came back with no available hit on the chosen store. */
   | { t: 'missing'; query: string; retailer: 'dia' | 'coto'; item: string }
@@ -163,6 +169,19 @@ export type UiEvent =
        */
       brain?: string;
     };
+
+/** A card click. `chain` and `id` only. A price in the body is ignored. */
+export interface CartAddRequest {
+  sessionId: string;
+  snapshot?: SessionSnapshot;
+  network?: NetworkId;
+  chain: 'dia' | 'coto';
+  id: string;
+}
+
+export type CartAddResponse =
+  | { ok: true; event: Extract<UiEvent, { t: 'cart' }> | null; snapshot: SessionSnapshot }
+  | { ok: false; error: string };
 
 export interface ChatRequest {
   sessionId: string;

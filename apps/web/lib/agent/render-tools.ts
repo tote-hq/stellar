@@ -71,6 +71,12 @@ export interface RenderCache {
   diaPairs?: DiaPair[];
   /** Frozen when the shopper confirms Coto. Authorization is the cookie, not this stamp. */
   cotoRealDia?: CotoRealDia;
+  /**
+   * Día sku ids already shown on a search_compare row. A plain array: a Map
+   * encodes as `{}`. `render_products` drops these. Optional, so a turn stored
+   * before the field existed still decodes.
+   */
+  compared?: string[];
 }
 
 /** A Coto catalog row the render tools may cite. Prices stay off the model input. */
@@ -252,7 +258,9 @@ export const RENDER_TOOLS: Anthropic.Tool[] = [
       'results you mention, with the SKUs from that search: a second page, another brand, a ' +
       'replacement for something out of stock. A product the user has only read the name of is ' +
       'one they cannot see, and they should never have to ask for the pictures. Prices and ' +
-      'names come from the last search; you do not supply them.',
+      'names come from the last search; you do not supply them. Do not call this for a search ' +
+      'that already has a search_compare row: the server refuses those SKUs. Write one short ' +
+      'line instead. Never write "Encontré lo siguiente" under that row.',
     input_schema: {
       type: 'object',
       properties: {
@@ -317,8 +325,18 @@ export function runRenderTool(
     const ids = ((use.input as { sku_ids?: unknown })?.sku_ids ?? []) as string[];
     const note = (use.input as { note?: string })?.note;
 
-    const items = ids.map((id) => cache.products.get(id)).filter((p): p is Product => Boolean(p));
-    const missing = ids.filter((id) => !cache.products.has(id));
+    const compared = new Set(cache.compared ?? []);
+    const skippedCompared = ids.filter((id) => compared.has(id));
+    const drawable = ids.filter((id) => !compared.has(id));
+    const items = drawable.map((id) => cache.products.get(id)).filter((p): p is Product => Boolean(p));
+    const missing = drawable.filter((id) => !cache.products.has(id));
+
+    if (!items.length && skippedCompared.length > 0 && missing.length === 0) {
+      return result(
+        'These products are already on the search_compare row. Do not call render_products for a compared search; write one short line instead.',
+        true,
+      );
+    }
 
     if (!items.length) {
       // Refusing beats rendering a plausible guess: an invented SKU is an
@@ -331,9 +349,13 @@ export function runRenderTool(
     }
 
     emit({ t: 'products', items, note });
+    const comparedNote = skippedCompared.length
+      ? ` Skipped SKUs already on the search_compare row: ${skippedCompared.join(', ')}.`
+      : '';
     return result(
       `Rendered ${items.length} product card(s).` +
-        (missing.length ? ` Skipped unknown SKUs: ${missing.join(', ')}.` : ''),
+        (missing.length ? ` Skipped unknown SKUs: ${missing.join(', ')}.` : '') +
+        comparedNote,
     );
   }
 

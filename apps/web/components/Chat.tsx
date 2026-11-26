@@ -191,10 +191,13 @@ function ChatCore({
   const copy = uiCopy(lang).chat;
   // `lang` rides along so the agent answers in the language the footer is set
   // to. Nothing else about the request changes with it.
-  const { state, send, retry, stop, loginRequired, clearLoginRequired, resume, reset, currentSessionId } =
+  const { state, send, retry, stop, loginRequired, clearLoginRequired, resume, reset, currentSessionId, addCard } =
     useChat({ isAuthenticated, address, sign, network, lang });
   const [draft, setDraft] = useState('');
   const [switchAsk, setSwitchAsk] = useState<{ from: Chain; to: Chain } | null>(null);
+  /** A card click waiting for the shopper to confirm a chain switch. */
+  const pendingAdd = useRef<{ chain: Chain; id: string } | null>(null);
+  const wasStreaming = useRef(false);
   const [photo, setPhoto] = useState<ChatImage | null>(null);
   const [readingPhoto, setReadingPhoto] = useState(false);
   const [photoNote, setPhotoNote] = useState<string | null>(null);
@@ -350,6 +353,37 @@ function ChatCore({
   // still true for this render or the free-turn count is already spent.
   const gateText = loginGateBannerText({ isAuthenticated, loginRequired }, lang);
   const gated = gateText !== null;
+
+  useEffect(() => {
+    const was = wasStreaming.current;
+    wasStreaming.current = state.streaming;
+    if (!was || state.streaming) return;
+    const pending = pendingAdd.current;
+    if (!pending) return;
+    pendingAdd.current = null;
+    const cart = state.cart?.cart;
+    const lines = cart?.lines.length ?? 0;
+    const ready = !cart || lines === 0 || cart.retailer === pending.chain;
+    if (!ready) return;
+    void addCard(pending.chain, pending.id);
+  }, [state.streaming, state.cart, addCard]);
+
+  const requestAdd = (chain: Chain, id: string) => {
+    if (state.streaming || gated || readOnly) return Promise.resolve('failed' as const);
+    const current = state.cart?.cart;
+    const lines = current?.lines.length ?? 0;
+    if (
+      current &&
+      (current.retailer === 'dia' || current.retailer === 'coto') &&
+      needsSwitchConfirm({ retailer: current.retailer, lines }, chain)
+    ) {
+      pendingAdd.current = { chain, id };
+      setSwitchAsk({ from: current.retailer, to: chain });
+      return Promise.resolve('confirm' as const);
+    }
+    return addCard(chain, id);
+  };
+
   const loginCopyVisible =
     loginGateBannerText({ isAuthenticated, loginRequired: true, turnsUsed: FREE_TURNS }) !== null;
 
@@ -581,7 +615,15 @@ function ChatCore({
                 </div>
               );
             case 'products':
-              return <ProductGrid key={b.id} items={b.items} note={b.note} />;
+              return (
+                <ProductGrid
+                  key={b.id}
+                  items={b.items}
+                  note={b.note}
+                  disabled={state.streaming || gated || readOnly}
+                  onAdd={readOnly ? undefined : (id) => requestAdd('dia', id)}
+                />
+              );
             case 'cart': {
               const cotoTarget = cotoPayTarget(
                 state.blocks.map((block) => ({
@@ -664,6 +706,8 @@ function ChatCore({
                   buildDisabled={gated}
                   onChoose={(next) => onChain(next, 'choose')}
                   onBuild={(next) => onChain(next, 'build')}
+                  addDisabled={state.streaming || gated || readOnly}
+                  onAdd={readOnly ? undefined : requestAdd}
                 />
               );
             }
@@ -966,7 +1010,10 @@ function ChatCore({
       {switchAsk ? (
         <Modal
           title={uiCopy(lang).switch.confirmTitle}
-          onClose={() => setSwitchAsk(null)}
+          onClose={() => {
+            pendingAdd.current = null;
+            setSwitchAsk(null);
+          }}
           testId="switch-confirm"
         >
           <p>{uiCopy(lang).switch.confirmBody(RETAILER_NAMES[switchAsk.from], RETAILER_NAMES[switchAsk.to])}</p>
@@ -987,7 +1034,10 @@ function ChatCore({
               type="button"
               className="btn btn-ghost"
               data-testid="switch-cancel"
-              onClick={() => setSwitchAsk(null)}
+              onClick={() => {
+                pendingAdd.current = null;
+                setSwitchAsk(null);
+              }}
             >
               {uiCopy(lang).switch.cancel(RETAILER_NAMES[switchAsk.from])}
             </button>

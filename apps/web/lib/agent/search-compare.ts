@@ -7,12 +7,13 @@
  * model note for a dual search; the shopper sees it on the close table.
  * Nothing here writes a cart.
  */
-import type { CotoSearcher } from '@changuito/mcp/compare';
+import type { CotoSearcher, SearchMatch, TypedPick } from '@changuito/mcp/compare';
+import { ofQueryType } from '@changuito/mcp/compare';
 import type { Product } from '@changuito/mcp/types';
 
 import { feeCentavosOf } from '../checkout/compare-fee.ts';
 import { mergeDiaPair } from '../checkout/coto-real.ts';
-import { cheapestAvailable } from '../one-per-type.ts';
+import { cheapestAvailable, cotoImageUrl } from '../one-per-type.ts';
 import type { SearchCompareItem, UiEvent } from '../protocol.ts';
 import type { RenderCache } from './render-tools.ts';
 
@@ -66,13 +67,16 @@ export function searchCompareNote(args: {
   /** The card the shopper saw. Armar adds this id, one per type. */
   pickDia?: string;
   pickCoto?: string;
+  /** `same` is one product. `similar` is the same food type. `none` has no gap. */
+  match?: SearchMatch;
   hits: ReadonlyArray<{ id: string; name: string; shelfCentavos: number; available: boolean }>;
 }): string {
   const gap = args.gapCentavos === undefined ? 'gap=unknown' : `gapCentavos=${args.gapCentavos}`;
   const pair = args.pair ? ` pairDia=${args.pair.diaSkuId} pairCoto=${args.pair.cotoId}` : '';
   const pickDia = args.pickDia ? ` pickDia=${args.pickDia}` : '';
   const pickCoto = args.pickCoto ? ` pickCoto=${args.pickCoto}` : '';
-  const head = `[search_compare: id=${args.id} dia=${args.dia} coto=${args.coto} matched=${args.matched} ${gap}${pair}${pickDia}${pickCoto}]`;
+  const match = args.match ?? 'none';
+  const head = `[search_compare: id=${args.id} dia=${args.dia} coto=${args.coto} matched=${args.matched} ${gap}${pair}${pickDia}${pickCoto} match=${match}]`;
   const lines = args.hits
     .filter((hit) => hit.available && hit.shelfCentavos > 0)
     .map((hit) => `${hit.id} · ${hit.name} · ${ars.format(hit.shelfCentavos / 100)}`);
@@ -89,6 +93,45 @@ function recordSearch(cache: RenderCache, query: string, retailer: 'dia' | 'coto
   const searches = cache.searches ? [...cache.searches] : [];
   searches.push({ query, retailer, available });
   cache.searches = searches;
+}
+
+/** Every Día sku this search returned. `render_products` will not draw them again. */
+function rememberCompared(cache: RenderCache, products: readonly Product[]): void {
+  const ids = products.flatMap((product) => (product.skuId ? [product.skuId] : []));
+  if (!ids.length) return;
+  const seen = new Set(cache.compared ?? []);
+  for (const id of ids) seen.add(id);
+  cache.compared = [...seen];
+}
+
+function typedCount(
+  query: string,
+  items: ReadonlyArray<{ name: string; brand?: string; available: boolean; shelfCentavos: number }>,
+): number {
+  let count = 0;
+  for (const item of items) {
+    if (!item.available || !Number.isSafeInteger(item.shelfCentavos) || item.shelfCentavos <= 0) continue;
+    if (ofQueryType(query, item)) count += 1;
+  }
+  return count;
+}
+
+function pickItem(pick: TypedPick, chain: 'dia' | 'coto', match: SearchMatch): SearchCompareItem {
+  const imageUrl = chain === 'coto' ? cotoImageUrl(pick.id, pick.imageUrl) : pick.imageUrl;
+  const item: SearchCompareItem = {
+    id: pick.id,
+    name: pick.name,
+    shelfCentavos: pick.shelfCentavos,
+    available: pick.available,
+  };
+  if (pick.brand) item.brand = pick.brand;
+  if (imageUrl) item.imageUrl = imageUrl;
+  if (typeof pick.unitMultiplier === 'number' && pick.unitMultiplier > 0 && pick.measurementUnit) {
+    item.unitMultiplier = pick.unitMultiplier;
+    item.measurementUnit = pick.measurementUnit;
+  }
+  if (match === 'same' || match === 'similar') item.match = match;
+  return item;
 }
 
 function cardItem(src: {
@@ -210,12 +253,14 @@ export function beginDualSearch(args: {
       try {
         const coto = await lookup;
         folded = assembleSearchCompare({
+          query: args.query,
           diaProducts: dia.products,
           diaFailed: dia.failed,
           coto,
         });
       } catch {
         folded = assembleSearchCompare({
+          query: args.query,
           diaProducts: dia.products,
           diaFailed: dia.failed,
           coto: { ok: false, reason: 'error' },
@@ -224,8 +269,13 @@ export function beginDualSearch(args: {
 
       const diaCandidates = dia.failed ? [] : diaItems(dia.products);
       const cotoCandidates = cotoItems(folded.coto);
-      const diaView = pickedView(diaCandidates);
-      const cotoView = pickedView(cotoCandidates);
+      const diaView = folded.diaPick ? [pickItem(folded.diaPick, 'dia', folded.match)] : [];
+      const cotoView = folded.cotoPick ? [pickItem(folded.cotoPick, 'coto', folded.match)] : [];
+      const noPair: ('dia' | 'coto')[] = [];
+      if (!dia.failed && diaView.length === 0) noPair.push('dia');
+      if (folded.status !== 'coto_error' && folded.status !== 'coto_timed_out' && folded.status !== 'dia_error' && cotoView.length === 0) {
+        noPair.push('coto');
+      }
       const feeCentavos =
         folded.gapCentavos === undefined ? undefined : feeCentavosOf(folded.gapCentavos);
 
@@ -256,14 +306,17 @@ export function beginDualSearch(args: {
           confidence: folded.pair.confidence,
         });
       }
-      recordSearch(args.cache, args.query, 'dia', diaCandidates.length);
-      recordSearch(args.cache, args.query, 'coto', cotoCandidates.length);
+      recordSearch(args.cache, args.query, 'dia', typedCount(args.query, diaCandidates));
+      recordSearch(args.cache, args.query, 'coto', typedCount(args.query, cotoCandidates));
+      rememberCompared(args.cache, dia.products);
 
       args.emit({
         t: 'search_compare',
         id: args.id,
         status: folded.status,
         query: args.query,
+        kind: args.query.trim(),
+        ...(noPair.length ? { noPair } : {}),
         ...(args.postalCode ? { postalCode: args.postalCode } : {}),
         dia: diaView,
         coto: cotoView,
@@ -277,6 +330,7 @@ export function beginDualSearch(args: {
         coto: cotoView.length,
         matched: folded.pair ? 1 : 0,
         gapCentavos: folded.gapCentavos,
+        match: folded.match,
         ...(folded.pair ? { pair: folded.pair } : {}),
         ...(diaView[0] ? { pickDia: diaView[0].id } : {}),
         ...(cotoView[0] ? { pickCoto: cotoView[0].id } : {}),
@@ -323,19 +377,24 @@ export function beginChainSearch(args: {
         let folded;
         try {
           folded = assembleSearchCompare({
+            query: args.query,
             diaProducts: [],
             diaFailed: false,
             coto: await lookup,
           });
         } catch {
           folded = assembleSearchCompare({
+            query: args.query,
             diaProducts: [],
             diaFailed: false,
             coto: { ok: false, reason: 'error' },
           });
         }
-        const cotoCandidates = cotoItems(folded.coto);
-        const cotoView = pickedView(cotoCandidates);
+        const cotoCandidates = cotoItems(folded.coto).filter((item) => ofQueryType(args.query, item));
+        const cotoView = pickedView(cotoCandidates).map((item) => ({
+          ...item,
+          imageUrl: cotoImageUrl(item.id, item.imageUrl),
+        }));
         const cotoCache = { ...(args.cache.coto ?? {}) };
         for (const hit of folded.coto) {
           cotoCache[hit.id] = {
@@ -356,6 +415,10 @@ export function beginChainSearch(args: {
           id: args.id,
           status: folded.status,
           query: args.query,
+          kind: args.query.trim(),
+          ...(cotoView.length === 0 && folded.status !== 'coto_error' && folded.status !== 'coto_timed_out'
+            ? { noPair: ['coto'] as ('dia' | 'coto')[] }
+            : {}),
           ...(args.postalCode ? { postalCode: args.postalCode } : {}),
           dia: [],
           coto: cotoView,
@@ -366,6 +429,7 @@ export function beginChainSearch(args: {
           dia: 0,
           coto: cotoView.length,
           matched: 0,
+          match: 'none',
           ...(cotoView[0] ? { pickCoto: cotoView[0].id } : {}),
           hits: cotoView,
         });
@@ -376,14 +440,17 @@ export function beginChainSearch(args: {
   return {
     async finish(dia) {
       const failed = dia?.failed === true;
-      const diaCandidates = failed || !dia ? [] : diaItems(dia.products);
+      const diaCandidates = failed || !dia ? [] : diaItems(dia.products).filter((item) => ofQueryType(args.query, item));
       const diaView = pickedView(diaCandidates);
       recordSearch(args.cache, args.query, 'dia', diaCandidates.length);
+      if (dia) rememberCompared(args.cache, dia.products);
       args.emit({
         t: 'search_compare',
         id: args.id,
         status: failed ? 'dia_error' : 'ok',
         query: args.query,
+        kind: args.query.trim(),
+        ...(diaView.length === 0 && !failed ? { noPair: ['dia'] as ('dia' | 'coto')[] } : {}),
         ...(args.postalCode ? { postalCode: args.postalCode } : {}),
         dia: diaView,
         coto: [],
@@ -394,6 +461,7 @@ export function beginChainSearch(args: {
         dia: diaView.length,
         coto: 0,
         matched: 0,
+        match: 'none',
         ...(diaView[0] ? { pickDia: diaView[0].id } : {}),
         hits: diaView,
       });

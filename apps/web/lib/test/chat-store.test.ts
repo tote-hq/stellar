@@ -400,6 +400,8 @@ describe('chat store: dual checkout flags', () => {
       status: 'ok',
       query: 'leche',
       chains: ['dia'],
+      typeLabel: 'leche',
+      noPair: ['coto'],
       dia: [
         {
           id: 'd1',
@@ -410,6 +412,7 @@ describe('chat store: dual checkout flags', () => {
           imageUrl: 'https://img.test/leche.jpg',
           unitMultiplier: 1,
           measurementUnit: 'lt',
+          match: 'same',
         },
       ],
       coto: [],
@@ -422,5 +425,8 @@ describe('chat store: dual checkout flags', () => {
     assert.equal(stored?.kind === 'search_compare' && stored.dia[0]?.brand, 'Ser');
     assert.equal(stored?.kind === 'search_compare' && stored.dia[0]?.unitMultiplier, 1);
     assert.equal(stored?.kind === 'search_compare' && stored.dia[0]?.measurementUnit, 'lt');
+    assert.equal(stored?.kind === 'search_compare' && stored.dia[0]?.match, 'same');
+    assert.equal(stored?.kind === 'search_compare' && stored.typeLabel, 'leche');
+    assert.equal(stored?.kind === 'search_compare' && stored.noPair?.[0], 'coto');
   });
 });
