@@ -24,9 +24,29 @@ describe('passwordMatches', () => {
     });
   });
 
-  it('names an old argon2 string as a throw and does not echo it', async () => {
+  it('accepts a password stored as the row text', async () => {
+    const plain = 'plain-fixture';
+    assert.deepEqual(await passwordMatches(plain, plain), { ok: true });
+  });
+
+  it('rejects a different password against row text and does not echo either', async () => {
+    const plain = 'plain-fixture';
+    const res = await passwordMatches('wrong-probe', plain);
+    assert.deepEqual(res, { ok: false, reason: 'mismatch' });
+    assert.equal(JSON.stringify(res).includes(plain), false);
+    assert.equal(JSON.stringify(res).includes('wrong-probe'), false);
+  });
+
+  it('rejects an old argon2 string as row text and does not echo it', async () => {
     const bad =
       '$argon2id$v=19$m=65536,t=3,p=4$UFdWPYubAWq97fLhhoCv5Q$HCLmGmzduptdJbWua5BSEgaShOHmkfQ5Zq6+NqtQtmg';
+    const res = await passwordMatches('x', bad);
+    assert.deepEqual(res, { ok: false, reason: 'mismatch' });
+    assert.equal(JSON.stringify(res).includes(bad), false);
+  });
+
+  it('names a broken pbkdf2 string as a throw and does not echo it', async () => {
+    const bad = 'pbkdf2-sha256$100000$not-valid$also-not';
     const res = await passwordMatches('x', bad);
     assert.deepEqual(res, { ok: false, reason: 'threw', errorName: 'Error' });
     assert.equal(JSON.stringify(res).includes(bad), false);
