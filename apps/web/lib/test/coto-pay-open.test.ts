@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
-import { cotoPayOpen, restoreActiveChat } from '../checkout/coto-pay-open.ts';
+import { cotoPayOpen, openCotoOrder, restoreActiveChat, type OpenCotoRow } from '../checkout/coto-pay-open.ts';
 
 const coto = { retailer: 'coto', cartId: 'coto-1' };
 
@@ -42,6 +42,45 @@ describe('cotoPayOpen', () => {
     const opened = cotoPayOpen({ cart: cardCart, sessionId: 'live', storedSessionId: null });
     assert.equal(opened?.cart, cardCart);
     assert.notEqual(opened?.cart, other);
+  });
+});
+
+describe('openCotoOrder', () => {
+  const buyer = 'GBUYER';
+
+  function row(over: Partial<OpenCotoRow> & { orderId: string }): OpenCotoRow {
+    return {
+      buyer,
+      checkoutKind: 'coto_real_v1',
+      openSig: 'sig',
+      jobId: 'job',
+      createdAt: 1,
+      fulfillment: 'home',
+      ...over,
+    };
+  }
+
+  it('returns the newest open shopping record and carries pickup', () => {
+    const opened = openCotoOrder(
+      [
+        row({ orderId: 'older', createdAt: 1 }),
+        row({ orderId: 'other-buyer', buyer: 'SOMEONE', createdAt: 9 }),
+        row({ orderId: 'settled', outcome: 'settled', createdAt: 9 }),
+        row({ orderId: 'refunded', outcome: 'refunded', createdAt: 9 }),
+        row({ orderId: 'quoted', openSig: undefined, createdAt: 9 }),
+        row({ orderId: 'jobless', jobId: 'none', createdAt: 9 }),
+        row({ orderId: 'other-kind', checkoutKind: 'manual_fee_v1', createdAt: 9 }),
+        row({ orderId: 'newest', createdAt: 2, fulfillment: 'pickup' }),
+      ],
+      buyer,
+    );
+    assert.deepEqual(opened, { orderId: 'newest', fulfillment: 'pickup' });
+  });
+
+  it('returns null when this buyer has no open order', () => {
+    assert.equal(openCotoOrder([], buyer), null);
+    assert.equal(openCotoOrder([row({ orderId: 'quoted', openSig: '' })], buyer), null);
+    assert.equal(openCotoOrder([row({ orderId: 'home' })], 'SOMEONE'), null);
   });
 });
 

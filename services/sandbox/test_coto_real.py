@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
+from coto_live import LiveCotoDriver
 from coto_real import (
     NEEDS_HUMAN_MS,
     NEEDS_SHOPPER_MS,
@@ -613,6 +614,43 @@ class CotoViewerRouteTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(caught.exception.status_code, 404)
         finally:
             server.jobs.pop(job_id, None)
+
+
+class _GotoPage:
+    async def goto(self, *_args, **_kwargs):
+        return None
+
+
+class _BranchDriver(LiveCotoDriver):
+    def __init__(self, rows):
+        super().__init__(_GotoPage(), "ops-user", "ops-secret")
+        self.rows = rows
+
+    async def _branch_rows(self):
+        return self.rows
+
+
+VILLA_CRESPO_BRANCHES = [
+    {"name": "Villa Crespo", "address": "Thames 100, Villa Crespo"},
+    {"name": "Abasto", "address": "Av. Corrientes 3200"},
+]
+
+
+class LivePickupScreenTest(unittest.TestCase):
+    def test_pickup_uses_branch_rows_and_an_empty_list_needs_a_person(self):
+        driver = _BranchDriver(VILLA_CRESPO_BRANCHES)
+        plan = asyncio.run(driver.delivery({"fulfillment": "pickup", "city": "Villa Crespo"}))
+        options = plan["needs_shopper"]["options"]
+        self.assertEqual(plan["needs_shopper"]["label"], "¿En qué sucursal retirás?")
+        self.assertEqual(len(options), 2)
+        self.assertTrue(options[0]["suggested"])
+        self.assertFalse(options[1]["suggested"])
+
+        empty = asyncio.run(_BranchDriver([]).delivery({"fulfillment": "pickup", "city": "Villa Crespo"}))
+        self.assertTrue(empty.get("needs_human"))
+        self.assertNotIn("needs_shopper", empty)
+        self.assertNotIn("Villa Crespo", str(empty))
+        self.assertNotIn("Abasto", str(empty))
 
 
 if __name__ == "__main__":

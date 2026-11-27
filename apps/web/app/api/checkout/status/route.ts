@@ -26,7 +26,7 @@ import { createHash } from 'node:crypto';
 
 import { cotoDemoPayRecord, cotoRealRecord, settleBasis } from '../../../../lib/checkout/coto-guard.ts';
 import { adminStore } from '../../../../lib/admin/store.ts';
-import { COTO_REAL_WAIT, cotoRealOutcome, cotoShopperBody, shopperCopy, type ShopperPrompt } from '../../../../lib/checkout/coto-real.ts';
+import { COTO_REAL_WAIT, cotoRealOutcome, cotoShopperBody, shopperCopy, shopperPrompt, type ShopperPrompt } from '../../../../lib/checkout/coto-real.ts';
 import { readOrder, refundOrder, settleOrder } from '../../../../lib/checkout/escrow-server.ts';
 import { refundReason } from '../../../../lib/checkout/failure.ts';
 import { checkoutAlert, resolverFailureCode, resolverLogLine } from '../../../../lib/checkout/resolver-alert.ts';
@@ -136,22 +136,25 @@ export async function GET(req: Request): Promise<Response> {
           }
         }
         if (job.status === 'running' && job.phase === 'needs_shopper' && job.prompt?.label) {
-          prompt = {
+          const asked = shopperPrompt({
             label: job.prompt.label,
             fieldRef: job.prompt.fieldRef ?? null,
             options: job.prompt.options ?? null,
-          };
-          try {
-            await adminStore().notifyOnce('needs_shopper', rec.orderId, job.prompt.label);
-            await adminStore().openPrompt({
-              orderId: rec.orderId,
-              label: job.prompt.label,
-              fieldRef: job.prompt.fieldRef ?? null,
-              options: job.prompt.options ?? null,
-              source: 'agent',
-            });
-          } catch (err) {
-            console.error('[checkout/status] prompt', err instanceof Error ? err.name : 'insert');
+          });
+          if (asked) {
+            prompt = asked;
+            try {
+              await adminStore().notifyOnce('needs_shopper', rec.orderId, asked.label);
+              await adminStore().openPrompt({
+                orderId: rec.orderId,
+                label: asked.label,
+                fieldRef: asked.fieldRef,
+                options: asked.options,
+                source: 'agent',
+              });
+            } catch (err) {
+              console.error('[checkout/status] prompt', err instanceof Error ? err.name : 'insert');
+            }
           }
         }
         if (decision === 'settle') {
@@ -167,11 +170,11 @@ export async function GET(req: Request): Promise<Response> {
           try {
             const pending = await adminStore().pendingPrompt(rec.orderId);
             if (pending) {
-              prompt = {
+              prompt = shopperPrompt({
                 label: pending.label,
                 fieldRef: pending.fieldRef,
                 options: pending.options,
-              };
+              });
             }
           } catch (err) {
             console.error('[checkout/status] prompt', err instanceof Error ? err.name : 'query');

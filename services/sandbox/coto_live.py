@@ -11,7 +11,7 @@ import os
 import re
 import time
 
-from coto_fields import plan_delivery
+from coto_fields import pickup_branches, plan_delivery
 from coto_real import run_coto_real
 
 
@@ -50,7 +50,10 @@ class LiveCotoDriver:
 
     async def delivery(self, address: dict) -> dict:
         await self.page.goto("https://www.coto.com.ar/agregar-domicilio", wait_until="domcontentloaded")
-        screen = await self._delivery_screen()
+        if address.get("fulfillment") == "pickup":
+            screen = await self._pickup_screen()
+        else:
+            screen = await self._delivery_screen()
         plan = plan_delivery(screen, address)
         if plan.get("needs_human") and screen.get("kind") == "unknown":
             jev = self._jev()
@@ -89,6 +92,64 @@ class LiveCotoDriver:
             return {"ok": True}
         await box.first.fill(value)
         return {"ok": True}
+
+    async def _pickup_screen(self) -> dict:
+        # Choosing the control can fail on a page that has no pickup toggle.
+        # The branch list is still read; an empty list becomes needs_human.
+        try:
+            await self._choose_pickup_control()
+        except Exception:
+            pass
+        try:
+            rows = await self._branch_rows()
+        except Exception:
+            return {"kind": "pickup", "branches": []}
+        return {"kind": "pickup", "branches": pickup_branches(rows)}
+
+    async def _choose_pickup_control(self) -> None:
+        pattern = re.compile(r"retiro|retirar|sucursal", re.I)
+        for role in ("radio", "button"):
+            control = self.page.get_by_role(role, name=pattern)
+            if await control.count():
+                await control.first.click()
+                await self.page.wait_for_timeout(400)
+                return
+
+    async def _branch_rows(self) -> list:
+        """Plain rows from the pickup radios. Overridable without a browser.
+
+        The label is the wrapping <label> text, never the input name: radios
+        that share a name would otherwise collapse into one option. Radios
+        that share a name with a fulfillment toggle never reach Python.
+        """
+        raw = await self.page.evaluate(
+            """() => {
+              const mode = /^(retiro|retirar)( en sucursal| por sucursal)?$|^(env[ií]o|entrega)( a domicilio)?$|^domicilio$/;
+              const linesOf = (el) => {
+                const wrap = el.closest('label');
+                const text = wrap ? (wrap.innerText || '') : '';
+                return text.split(/\\n/).map((line) => line.trim()).filter(Boolean);
+              };
+              const radios = [...document.querySelectorAll('input[type="radio"], [role="radio"]')];
+              const toggleNames = new Set();
+              for (const el of radios) {
+                const lines = linesOf(el);
+                if (!lines.length || !mode.test(lines[0].toLowerCase())) continue;
+                const group = el.getAttribute('name');
+                if (group) toggleNames.add(group);
+              }
+              const rows = [];
+              for (const el of radios) {
+                const group = el.getAttribute('name');
+                if (group && toggleNames.has(group)) continue;
+                const lines = linesOf(el);
+                if (!lines.length) continue;
+                rows.push({ name: lines[0], address: lines.slice(1).join(' ') });
+              }
+              return rows;
+            }"""
+        )
+        return raw if isinstance(raw, list) else []
 
     async def _delivery_screen(self) -> dict:
         try:

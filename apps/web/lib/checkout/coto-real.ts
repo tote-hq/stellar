@@ -342,6 +342,13 @@ export interface ShopperPrompt {
   options: { label: string; value: string; suggested?: boolean }[] | null;
 }
 
+/** An empty pickup question is not a question. Every other prompt is unchanged. */
+export function shopperPrompt(prompt: ShopperPrompt | null | undefined): ShopperPrompt | null {
+  if (!prompt) return null;
+  if (prompt.fieldRef === 'pickup_branch' && !(prompt.options && prompt.options.length > 0)) return null;
+  return prompt;
+}
+
 export function cotoShopperBody(
   rec: {
     orderId: string;

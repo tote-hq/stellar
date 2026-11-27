@@ -25,6 +25,7 @@ import {
   refundAmount,
   resolveCoverage,
   shopperCopy,
+  shopperPrompt,
   shopperStatus,
   type DiaPair,
   type PricedLine,
@@ -302,5 +303,42 @@ describe('coto real quote', () => {
     assert.ok(promptGate > pollGuard && promptGate < promptForm);
     const effect = modal.slice(modal.lastIndexOf('useEffect', pollGuard), pollGuard + 600);
     assert.match(effect, /\/api\/checkout\/status\?orderId=\$\{orderId\}/);
+  });
+
+  it('drops an empty pickup question and leaves every other prompt unchanged', () => {
+    const empty = { label: '¿En qué sucursal retirás?', fieldRef: 'pickup_branch', options: [] as const };
+    assert.equal(shopperPrompt({ ...empty, options: [] }), null);
+    assert.equal(shopperPrompt({ ...empty, options: null }), null);
+    const two = {
+      label: '¿En qué sucursal retirás?',
+      fieldRef: 'pickup_branch',
+      options: [
+        { label: 'Villa Crespo', value: 'Villa Crespo', suggested: true },
+        { label: 'Abasto', value: 'Abasto' },
+      ],
+    };
+    assert.equal(shopperPrompt(two), two);
+    const notes = { label: 'Notas', fieldRef: 'butcher_notes', options: null };
+    assert.equal(shopperPrompt(notes), notes);
+  });
+
+  it('resumes an open order before a new checkout and clears a prompt the server stops sending', () => {
+    const modal = readFileSync(join(import.meta.dirname, '../../components/CotoRealModal.tsx'), 'utf8');
+    const resumeAt = modal.indexOf('/api/checkout/coto-real/resume');
+    const fulfillmentAt = modal.indexOf('data-testid="checkout-fulfillment"');
+    assert.ok(resumeAt !== -1 && fulfillmentAt > resumeAt);
+    const lockAt = modal.indexOf('data-testid="coto-real-lock"');
+    const gateAt = modal.lastIndexOf("resume === 'fresh'", lockAt);
+    assert.ok(gateAt !== -1 && gateAt < lockAt);
+    assert.match(modal, /setPrompt\(body\.prompt \?\? null\)/);
+    assert.match(modal, /fieldRef === 'pickup_branch'/);
+  });
+
+  it('filters the job prompt and the pending prompt before openPrompt', () => {
+    const route = readFileSync(join(import.meta.dirname, '../../app/api/checkout/status/route.ts'), 'utf8');
+    const job = route.indexOf('shopperPrompt(');
+    const pending = route.indexOf('shopperPrompt(', job + 1);
+    const open = route.indexOf('openPrompt(');
+    assert.ok(job !== -1 && pending > job && job < open);
   });
 });
