@@ -977,6 +977,15 @@ class LiveShopTest(unittest.TestCase):
         self.assertEqual(added, {"ok": True})
         self.assertEqual(page.clicks, ["Agregar"])
 
+    def test_favorites_listed_before_agregar_is_not_the_cart_click(self):
+        page = _ShopPage(["Agregar a favoritos", "Agregar"])
+        added = asyncio.run(LiveCotoDriver(page, "ops-user", "ops-secret").shop([
+            {"name": "Leche", "sku": "1", "url": "https://www.coto.com.ar/product/leche"},
+        ]))
+        self.assertEqual(added, {"ok": True})
+        self.assertEqual(page.clicks, ["Agregar"])
+        self.assertNotIn("Agregar a favoritos", page.clicks)
+
     def test_search_opens_the_named_result_and_not_a_different_one(self):
         result = "Leche Larga Vida Parcialmente Descremada Liviana 1% La Serenísima 1 l"
         line = "Leche Larga Vida Parcialmente Descremada Liviana 1% La Serenisima 1l"

@@ -18,7 +18,9 @@ from coto_real import run_coto_real
 
 _COTO_PREFIX = "https://www.coto.com.ar/"
 _ADD_WAIT_MS = 10_000
-_ADD_BUTTON = re.compile(r"^Agregar( al carrito)?\b", re.I)
+# Exact cart labels only. A word boundary after Agregar also matches
+# "Agregar a favoritos" and "Agregar a mi lista".
+_ADD_BUTTON = re.compile(r"^\s*Agregar(?: al carrito)?\s*$", re.I)
 _UNIT_GAP = re.compile(r"(\d)\s+([a-z]+)\b")
 
 
