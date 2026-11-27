@@ -96,6 +96,17 @@ const TTL_SECONDS = 60 * 60 * 24;
 const KEY = (orderId: string) => `checkout:${orderId}`;
 const BUYER_KEY = (buyer: string) => `checkout-buyer:${buyer}`;
 
+/** A stored outcome, close signature and error stay when the write has none. */
+function preserveTerminal(stored: CheckoutRecord | undefined, incoming: CheckoutRecord): CheckoutRecord {
+  if (!stored?.outcome || incoming.outcome) return incoming;
+  return {
+    ...incoming,
+    outcome: stored.outcome,
+    closeSig: stored.closeSig,
+    error: stored.error,
+  };
+}
+
 interface Store {
   get(orderId: string): Promise<CheckoutRecord | undefined>;
   set(rec: CheckoutRecord): Promise<void>;
@@ -142,7 +153,24 @@ function postgresStore(): Store {
             else manual_checkout.record || ${db().json(rec as never)} end, updated_at=now()`;
         return;
       }
-      await kvSet(KEY(rec.orderId), rec, TTL_SECONDS);
+      // outcome is terminal. A status poll that still holds the pre-close
+      // copy must not wipe a refund or a settle that already landed. One
+      // statement, so two lambdas cannot interleave a read and a write.
+      const sql = db();
+      await sql`
+        insert into kv (key, value, expires_at)
+        values (${KEY(rec.orderId)}, ${sql.json(rec as never)}, now() + make_interval(secs => ${TTL_SECONDS}))
+        on conflict (key) do update
+           set value = case
+             when jsonb_typeof(kv.value->'outcome') = 'string'
+              and jsonb_typeof(excluded.value->'outcome') is distinct from 'string'
+             then excluded.value || jsonb_build_object(
+               'outcome', kv.value->'outcome',
+               'closeSig', kv.value->'closeSig',
+               'error', kv.value->'error')
+             else excluded.value
+           end,
+               expires_at = excluded.expires_at`;
       const ids = ((await kvGet(BUYER_KEY(rec.buyer))) as string[] | undefined) ?? [];
       if (!ids.includes(rec.orderId)) {
         await kvSet(BUYER_KEY(rec.buyer), [rec.orderId, ...ids].slice(0, 50), TTL_SECONDS);
@@ -163,7 +191,7 @@ function memoryStore(): Store {
       return [...map.values()].filter((rec) => rec.buyer === buyer);
     },
     async set(rec) {
-      map.set(rec.orderId, rec);
+      map.set(rec.orderId, preserveTerminal(map.get(rec.orderId), rec));
     },
   };
 }

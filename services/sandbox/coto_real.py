@@ -229,6 +229,11 @@ async def run_coto_real(job, driver, *, now_ms: Now, sleep: Sleep, log: Log,
         if result.get("needs_human"):
             resumed = await _human(job, driver, name, phases, now_ms, sleep, log, token, origin)
             if resumed.get("cleared"):
+                # Same shape as a delivery answer: the rest of the basket is
+                # still added. A second needs_human waits again; a timeout
+                # stays needs_human_timeout.
+                if name == "shop":
+                    return await one("shop", await driver.shop(job.get("items") or []))
                 return None
             return resumed
         if result.get("needs_shopper"):

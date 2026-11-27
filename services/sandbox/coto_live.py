@@ -10,13 +10,16 @@ import asyncio
 import os
 import re
 import time
-from urllib.parse import quote
+import unicodedata
+from urllib.parse import quote, urljoin
 
 from coto_fields import pickup_branches, plan_delivery
 from coto_real import run_coto_real
 
 _COTO_PREFIX = "https://www.coto.com.ar/"
-_ADD_BUTTON = re.compile(r"^(Agregar|Agregar al carrito)$", re.I)
+_ADD_WAIT_MS = 10_000
+_ADD_BUTTON = re.compile(r"^Agregar( al carrito)?\b", re.I)
+_UNIT_GAP = re.compile(r"(\d)\s+([a-z]+)\b")
 
 
 def _sku_rejected(line: str) -> dict:
@@ -24,6 +27,19 @@ def _sku_rejected(line: str) -> dict:
     if line:
         failed["line"] = line
     return failed
+
+
+def _norm_name(text: str) -> str:
+    """Case, accents, whitespace, and a unit glued to its number (`1 l` = `1l`)."""
+    folded = unicodedata.normalize("NFKD", text)
+    folded = "".join(ch for ch in folded if not unicodedata.combining(ch))
+    folded = folded.casefold()
+    folded = re.sub(r"\s+", " ", folded).strip()
+    return _UNIT_GAP.sub(r"\1\2", folded)
+
+
+def _is_name_search(url: str) -> bool:
+    return url.startswith(_COTO_PREFIX) and "/search?" in url and "Ntt=" in url
 
 
 def _product_target(item: dict) -> str | None:
@@ -52,6 +68,10 @@ class LiveCotoDriver:
         self.page = page
         self._user = user
         self._password = password
+        self._fulfillment = "home"
+        self._branch_seen = False
+        self._added: set[str] = set()
+        self._pending_line: str | None = None
 
     def __repr__(self) -> str:
         return "LiveCotoDriver(<redacted>)"
@@ -74,6 +94,8 @@ class LiveCotoDriver:
         return {"ok": True}
 
     async def delivery(self, address: dict) -> dict:
+        fulfillment = address.get("fulfillment")
+        self._fulfillment = fulfillment if fulfillment in ("home", "pickup") else "home"
         await self.page.goto("https://www.coto.com.ar/agregar-domicilio", wait_until="domcontentloaded")
         if address.get("fulfillment") == "pickup":
             screen = await self._pickup_screen()
@@ -96,6 +118,8 @@ class LiveCotoDriver:
                 if await choice.count() == 0:
                     return {"needs_shopper": {"label": str(fill["value"]), "field_ref": fill["field"], "options": None}}
                 await choice.first.click()
+                if fill.get("field") == "pickup_branch":
+                    self._branch_seen = True
                 continue
             box = self.page.get_by_label(re.compile(re.escape(str(fill["field"])), re.I))
             if await box.count() == 0:
@@ -114,6 +138,8 @@ class LiveCotoDriver:
             if await choice.count() == 0:
                 return {"fail": "needs_shopper_timeout"}
             await choice.first.click()
+            if field_ref == "pickup_branch":
+                self._branch_seen = True
             return {"ok": True}
         await box.first.fill(value)
         return {"ok": True}
@@ -213,15 +239,60 @@ class LiveCotoDriver:
                 return {"fail": "sku_rejected"}
             name = item.get("name")
             line = name.strip() if isinstance(name, str) else ""
+            key = _norm_name(line) if line else ""
+            if key and key in self._added:
+                continue
             target = _product_target(item)
             if target is None:
                 return _sku_rejected(line)
             await self.page.goto(target, wait_until="domcontentloaded")
+            if _is_name_search(target):
+                if not await self._open_named_result(line):
+                    # A search page with no row for this name is not a rejection.
+                    # The product page is what can be missing an add control.
+                    self._pending_line = line
+                    return {"needs_human": True}
             add = self.page.get_by_role("button", name=_ADD_BUTTON)
-            if await add.count() == 0:
+            try:
+                await add.first.wait_for(state="visible", timeout=_ADD_WAIT_MS)
+            except Exception:
                 return _sku_rejected(line)
             await add.first.click()
+            if key:
+                self._added.add(key)
         return {"ok": True}
+
+    async def _open_named_result(self, line: str) -> bool:
+        """Open the result whose visible name is this line. Never a different product."""
+        wanted = _norm_name(line)
+        if not wanted:
+            return False
+        try:
+            rows = await self.page.evaluate(
+                """() => [...document.querySelectorAll('a[href]')].map((a) => ({
+                  name: (a.innerText || a.textContent || '').trim(),
+                  href: a.getAttribute('href') || ''
+                }))"""
+            )
+        except Exception:
+            return False
+        if not isinstance(rows, list):
+            return False
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            label = row.get("name")
+            href = row.get("href")
+            if not isinstance(label, str) or not isinstance(href, str) or not href.strip():
+                continue
+            if _norm_name(label) != wanted:
+                continue
+            absolute = urljoin(_COTO_PREFIX, href.strip())
+            if not absolute.startswith(_COTO_PREFIX):
+                continue
+            await self.page.goto(absolute, wait_until="domcontentloaded")
+            return True
+        return False
 
     async def checkout(self) -> dict:
         await self.page.goto("https://www.coto.com.ar/caja", wait_until="domcontentloaded")
@@ -269,6 +340,10 @@ class LiveCotoDriver:
         # Payment signals (an order id, a decline, a one-time code) must not clear it.
         if where == "delivery":
             if await self._delivery_done():
+                return {"cleared": True}
+            return {"waiting": True}
+        if where == "shop":
+            if await self._shop_cleared():
                 return {"cleared": True}
             return {"waiting": True}
         placed = await self._order_id()
@@ -323,10 +398,45 @@ class LiveCotoDriver:
             return False
         return raw is True
 
+    async def _page_text(self) -> str:
+        try:
+            return await self.page.locator("body").inner_text()
+        except Exception:
+            return ""
+
+    def _on_cart(self) -> bool:
+        try:
+            url = self.page.url
+        except Exception:
+            return False
+        return isinstance(url, str) and "/carrito" in url
+
+    async def _shop_cleared(self) -> bool:
+        pending = self._pending_line
+        if not isinstance(pending, str) or not pending.strip():
+            return False
+        if not self._on_cart():
+            return False
+        if _norm_name(pending) not in _norm_name(await self._page_text()):
+            return False
+        self._added.add(_norm_name(pending))
+        self._pending_line = None
+        return True
+
     async def _delivery_done(self) -> bool:
+        # Pickup stays open until a branch was actually chosen. Leaving
+        # agregar-domicilio with nothing checked used to look like success
+        # and the line was then refunded.
+        chosen = await self._branch_chosen()
+        if chosen:
+            self._branch_seen = True
+        if self._fulfillment == "pickup":
+            if chosen:
+                return True
+            return self._branch_seen and self._left_delivery_page()
         if self._left_delivery_page():
             return True
-        return await self._branch_chosen()
+        return chosen
 
     async def _order_id(self) -> str | None:
         try:
