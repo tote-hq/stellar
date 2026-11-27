@@ -57,7 +57,8 @@ class Scripted:
     async def payment(self):
         return await self._step("payment")
 
-    async def poll(self):
+    async def poll(self, where=None):
+        self.poll_where = where
         if self.polls:
             return self.polls.pop(0)
         return {"waiting": True}
@@ -570,6 +571,28 @@ class CotoRealPostTest(unittest.IsolatedAsyncioTestCase):
         jobs.pop(created["job_id"], None)
         jobs.pop(created2["job_id"], None)
 
+    async def test_a_catalog_url_is_kept_and_a_missing_one_is_left_out(self):
+        from server import JobIn, create, jobs
+
+        body = JobIn(
+            order_id="order-catalog-url-146",
+            items=[
+                {"name": "Leche", "quantity": 1, "sku": "1", "url": "https://www.coto.com.ar/product/leche"},
+                {"name": "Manteca TONADITA 100 g", "quantity": 1, "sku": "2"},
+            ],
+            mode="coto_real",
+            fulfillment="pickup",
+            city="CABA",
+        )
+        created = await create(body)
+        try:
+            stored = jobs[created["job_id"]]
+            self.assertEqual(stored["items"][0]["url"], "https://www.coto.com.ar/product/leche")
+            self.assertNotIn("url", stored["items"][1])
+            self.assertNotIn("/producto/", json.dumps(stored["items"]))
+        finally:
+            jobs.pop(created["job_id"], None)
+
 
 @unittest.skipUnless(_sandbox_deps(), "sandbox dependencies are not installed; uv run python -m unittest")
 class CotoViewerRouteTest(unittest.IsolatedAsyncioTestCase):
@@ -651,6 +674,218 @@ class LivePickupScreenTest(unittest.TestCase):
         self.assertNotIn("needs_shopper", empty)
         self.assertNotIn("Villa Crespo", str(empty))
         self.assertNotIn("Abasto", str(empty))
+
+
+class _Role:
+    def __init__(self, names, clicks):
+        self.names = names
+        self.clicks = clicks
+        self.first = self
+
+    async def count(self):
+        return 1 if self.names else 0
+
+    async def click(self):
+        if self.names:
+            self.clicks.append(self.names[0])
+
+
+class _ShopPage:
+    def __init__(self, buttons):
+        # One screen reused, or one list of labels per product page.
+        if buttons and isinstance(buttons[0], (list, tuple)):
+            self.screens = [list(screen) for screen in buttons]
+        else:
+            self.screens = [list(buttons)]
+        self.gotos = []
+        self.clicks = []
+
+    async def goto(self, url, wait_until=None):
+        self.gotos.append(url)
+
+    def _labels(self):
+        if len(self.screens) == 1:
+            return self.screens[0]
+        index = len(self.gotos) - 1
+        if index < 0 or index >= len(self.screens):
+            return []
+        return self.screens[index]
+
+    def get_by_role(self, role, name=None):
+        if role != "button":
+            return _Role([], self.clicks)
+        matched = [label for label in self._labels() if name is None or name.search(label)]
+        return _Role(matched, self.clicks)
+
+
+class _FlowDriver(LiveCotoDriver):
+    """Real shop and delivery poll, with the other phases scripted."""
+
+    def __init__(self, page, rows=None):
+        super().__init__(page, "ops-user", "ops-secret")
+        self.calls = []
+        self.rows = rows
+
+    async def login(self):
+        self.calls.append("login")
+        return {"ok": True}
+
+    async def delivery(self, address):
+        self.calls.append("delivery")
+        if self.rows is not None:
+            return await LiveCotoDriver.delivery(self, address)
+        return {"ok": True}
+
+    async def _branch_rows(self):
+        if self.rows is not None:
+            return self.rows
+        return await super()._branch_rows()
+
+    async def empty_cart(self):
+        self.calls.append("empty_cart")
+        return {"ok": True}
+
+    async def shop(self, items):
+        self.calls.append("shop")
+        return await LiveCotoDriver.shop(self, items)
+
+    async def checkout(self):
+        self.calls.append("checkout")
+        return {"ok": True}
+
+    async def payment(self):
+        self.calls.append("payment")
+        return {"placed": "C-100"}
+
+
+def _run_job(driver, job, sleep):
+    clock = {"t": 0}
+
+    async def tick(seconds):
+        clock["t"] = await sleep(clock["t"], seconds)
+
+    return asyncio.run(run_coto_real(
+        job, driver, now_ms=lambda: clock["t"], sleep=tick, log=lambda _line: None,
+        token="", origin="https://sandbox.example",
+    ))
+
+
+MANTECA = "Manteca TONADITA 100 g"
+
+
+class LiveShopTest(unittest.TestCase):
+    def test_shop_opens_a_catalog_url_and_searches_by_name_otherwise(self):
+        page = _ShopPage(["Agregar"])
+        driver = LiveCotoDriver(page, "ops-user", "ops-secret")
+        opened = asyncio.run(driver.shop([
+            {"name": "Leche", "sku": "111", "url": "https://www.coto.com.ar/product/leche"},
+        ]))
+        self.assertEqual(opened, {"ok": True})
+        self.assertEqual(page.gotos, ["https://www.coto.com.ar/product/leche"])
+        self.assertEqual(page.clicks, ["Agregar"])
+
+        missing = _ShopPage(["Agregar"])
+        asyncio.run(LiveCotoDriver(missing, "ops-user", "ops-secret").shop([
+            {"name": MANTECA, "sku": "222"},
+        ]))
+        self.assertEqual(missing.gotos, ["https://www.coto.com.ar/search?Ntt=Manteca%20TONADITA%20100%20g"])
+        self.assertNotIn("222", missing.gotos[0])
+        self.assertNotIn("/producto/", missing.gotos[0])
+
+        foreign = _ShopPage(["Agregar al carrito"])
+        added = asyncio.run(LiveCotoDriver(foreign, "ops-user", "ops-secret").shop([
+            {"name": "Pan lactal", "sku": "333", "url": "https://evil.example/product/pan"},
+        ]))
+        self.assertEqual(added, {"ok": True})
+        self.assertTrue(foreign.gotos[0].startswith("https://www.coto.com.ar/search?Ntt="))
+        self.assertNotIn("333", foreign.gotos[0])
+        self.assertNotIn("evil.example", foreign.gotos[0])
+        self.assertEqual(foreign.clicks, ["Agregar al carrito"])
+
+    def test_one_failing_line_names_that_line_and_does_not_attempt_payment(self):
+        page = _ShopPage([["Agregar"], []])
+        driver = _FlowDriver(page)
+        job = {
+            "job_id": "job-fail-line",
+            "fulfillment": "pickup",
+            "city": "CABA",
+            "items": [
+                {"name": "Leche", "sku": "1", "url": "https://www.coto.com.ar/product/leche"},
+                {"name": MANTECA, "sku": "2", "url": "https://www.coto.com.ar/product/manteca"},
+            ],
+        }
+
+        async def step(now, _seconds):
+            return now + 1_000
+
+        out = _run_job(driver, job, step)
+        self.assertEqual(out["result"]["code"], "sku_rejected")
+        self.assertEqual(out["result"]["failed_line"], MANTECA)
+        self.assertEqual(out["result"]["payment"], "not_attempted")
+        self.assertNotIn("payment", out["result"]["phases"])
+        self.assertNotIn("checkout", driver.calls)
+        self.assertNotIn("/producto/", " ".join(page.gotos))
+
+    def test_an_empty_branch_list_times_out_as_needs_human_and_never_shops(self):
+        driver = _FlowDriver(_GotoPage(), rows=[])
+        job = {
+            "job_id": "job-empty-branches",
+            "fulfillment": "pickup",
+            "city": "Villa Crespo",
+            "items": [{"name": MANTECA, "sku": "2", "url": "https://www.coto.com.ar/product/manteca"}],
+        }
+
+        async def jump(now, _seconds):
+            return now + NEEDS_HUMAN_MS + 1
+
+        out = _run_job(driver, job, jump)
+        self.assertEqual(out["result"]["code"], "needs_human_timeout")
+        self.assertNotEqual(out["result"]["code"], "sku_rejected")
+        self.assertNotIn("shop", driver.calls)
+        self.assertNotIn("shop", out["result"]["phases"])
+
+    def test_delivery_poll_clears_only_when_the_screen_is_done(self):
+        class Still(_GotoPage):
+            url = "https://www.coto.com.ar/agregar-domicilio"
+
+        class Left(_GotoPage):
+            url = "https://www.coto.com.ar/carrito"
+
+        class Chosen(Still):
+            async def evaluate(self, _script):
+                return True
+
+        waiting = asyncio.run(LiveCotoDriver(Still(), "ops-user", "ops-secret").poll("delivery"))
+        self.assertEqual(waiting, {"waiting": True})
+        cleared = asyncio.run(LiveCotoDriver(Left(), "ops-user", "ops-secret").poll("delivery"))
+        self.assertEqual(cleared, {"cleared": True})
+        chosen = asyncio.run(LiveCotoDriver(Chosen(), "ops-user", "ops-secret").poll("delivery"))
+        self.assertEqual(chosen, {"cleared": True})
+
+    def test_all_lines_added_goes_on_to_checkout_and_does_not_refund(self):
+        page = _ShopPage(["Agregar"])
+        driver = _FlowDriver(page)
+        job = {
+            "job_id": "job-all-lines",
+            "fulfillment": "pickup",
+            "city": "CABA",
+            "items": [
+                {"name": "Leche", "sku": "1", "url": "https://www.coto.com.ar/product/leche"},
+                {"name": "Pan lactal", "sku": "3", "url": "https://www.coto.com.ar/product/pan"},
+                {"name": MANTECA, "sku": "2"},
+            ],
+        }
+
+        async def step(now, _seconds):
+            return now + 1_000
+
+        out = _run_job(driver, job, step)
+        self.assertEqual(out["status"], "done")
+        self.assertEqual(out["result"]["payment"], "placed")
+        self.assertIsNone(out["result"]["code"])
+        self.assertIn("checkout", driver.calls)
+        self.assertEqual(page.gotos[2], "https://www.coto.com.ar/search?Ntt=Manteca%20TONADITA%20100%20g")
+        self.assertNotIn("/producto/", " ".join(page.gotos))
 
 
 if __name__ == "__main__":

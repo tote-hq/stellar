@@ -241,6 +241,16 @@ describe('coto real quote', () => {
     assert.equal(refundAmount(494840, 'needs_human_timeout'), 494840);
     assert.equal(refundAmount(494840, 'needs_shopper_timeout'), 494840);
     assert.equal(shopperCopy('needs_shopper_timeout'), 'No llegamos a completar un dato del pedido. Te devolvemos el saldo.');
+    assert.equal(
+      shopperCopy('sku_rejected', null, 'Manteca TONADITA 100 g'),
+      'No pudimos cargar «Manteca TONADITA 100 g». Te devolvemos el saldo.',
+    );
+    assert.equal(shopperCopy('sku_rejected'), 'No pudimos cargar un producto. Te devolvemos el saldo.');
+    assert.equal(shopperCopy('sku_rejected', null, '   '), 'No pudimos cargar un producto. Te devolvemos el saldo.');
+    assert.equal(
+      shopperCopy('sku_rejected', 'declined', 'Manteca TONADITA 100 g'),
+      'No se pudo cobrar en Coto. Te devolvemos el saldo.',
+    );
     assert.equal(refundAmount(494840, 'placed'), undefined);
     const logged: string[] = [];
     const status = shopperStatus({

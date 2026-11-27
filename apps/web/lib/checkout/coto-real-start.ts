@@ -2,6 +2,8 @@
  * Starts the Railway Coto job after the shopper locked testnet USDC.
  * No Día login, no card, no demo job. Payment uses the card saved on the Coto account.
  */
+import { cotoPricer } from '@changuito/mcp/compare';
+
 import { readOrder } from './escrow-server.ts';
 import { MISSING_CITY_COPY, cotoShopperBody } from './coto-real.ts';
 import { startCotoRealJob, type CotoRealDelivery, type SandboxItem } from './sandbox.ts';
@@ -14,16 +16,42 @@ type JobStart = (
   items: SandboxItem[],
   input: { fulfillment: 'home' | 'pickup'; city: string; delivery?: CotoRealDelivery },
 ) => Promise<string>;
+type CatalogHit = { url?: string } | null;
+type CatalogLookup = (skuId: string) => Promise<CatalogHit>;
 
 let readEscrow: EscrowRead = (orderId) => readOrder(orderId);
 let startReal: JobStart = (orderId, items, input) => startCotoRealJob(orderId, items, input);
+let lookupProduct: CatalogLookup = (skuId) => cotoPricer().getProduct(skuId);
 
-/** Tests stub the chain read and the sandbox start. Null restores both. */
+/** Tests stub the chain read, the catalog lookup, and the sandbox start. Null restores all three. */
 export function __setCotoRealStartForTests(
-  next: { readOrder?: EscrowRead | null; starter?: JobStart | null } | null,
+  next: { readOrder?: EscrowRead | null; starter?: JobStart | null; catalog?: CatalogLookup | null } | null,
 ): void {
   readEscrow = next?.readOrder ?? ((orderId) => readOrder(orderId));
   startReal = next?.starter ?? ((orderId, items, input) => startCotoRealJob(orderId, items, input));
+  lookupProduct = next?.catalog ?? ((skuId) => cotoPricer().getProduct(skuId));
+}
+
+/** Exact catalog match only. A miss, a blank url, or a lookup error leaves the field out. */
+async function catalogUrl(skuId: string): Promise<string | undefined> {
+  const id = skuId.trim();
+  if (!id) return undefined;
+  try {
+    const found = await lookupProduct(id);
+    const url = found?.url?.trim();
+    return url || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function sandboxItems(lines: CheckoutRecord['lines']): Promise<SandboxItem[]> {
+  return Promise.all(lines.map(async (line) => {
+    const item: SandboxItem = { name: line.name, quantity: line.quantity, sku: line.skuId };
+    const url = await catalogUrl(line.skuId);
+    if (url) item.url = url;
+    return item;
+  }));
 }
 
 export async function startCotoRealCheckout(rec: CheckoutRecord, openSig: string | undefined): Promise<Response> {
@@ -47,7 +75,7 @@ export async function startCotoRealCheckout(rec: CheckoutRecord, openSig: string
     }
     rec.openSig = openSig ?? rec.openSig;
     rec.mode = 'live';
-    const items = rec.lines.map((line) => ({ name: line.name, quantity: line.quantity, sku: line.skuId }));
+    const items = await sandboxItems(rec.lines);
     try {
       rec.jobId = await startReal(rec.orderId, items, {
         fulfillment: rec.fulfillment ?? 'home',

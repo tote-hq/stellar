@@ -1,6 +1,6 @@
 """changuito's sandbox job API around agent.run_job.
 
-    POST /jobs        {order_id, items: [{name, quantity, sku?}], shopper, card?}  -> {job_id}
+    POST /jobs        {order_id, items: [{name, quantity, sku?, url?}], shopper, card?}  -> {job_id}
     GET  /jobs/{id}   -> {job_id, status, phase, result?, error?}
     GET  /health      -> {ok, busy, queued}
 
@@ -63,6 +63,15 @@ class Item(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     quantity: int = Field(default=1, ge=1, le=50)
     sku: str | None = None
+    url: str | None = Field(default=None, max_length=2048)
+
+
+def item_payload(item: Item) -> dict:
+    """Item as stored on the job. A missing catalog url is left out."""
+    data = item.model_dump()
+    if not data.get("url"):
+        data.pop("url", None)
+    return data
 
 
 class Shopper(BaseModel):
@@ -137,7 +146,7 @@ _FIELD_CODE = {
     "phone": "invalid_shopper", "complement": "invalid_shopper",
     "pan": "invalid_card", "cvv": "invalid_card", "exp_month": "invalid_card",
     "exp_year": "invalid_card", "holder": "invalid_card", "kind": "invalid_card",
-    "name": "invalid_item", "quantity": "invalid_item", "sku": "invalid_item", "items": "invalid_item",
+    "name": "invalid_item", "quantity": "invalid_item", "sku": "invalid_item", "url": "invalid_item", "items": "invalid_item",
     "flow": "invalid_flow", "mode": "invalid_flow",
     "order_id": "invalid_order", "buyer": "invalid_order", "escrow_deadline": "invalid_order",
 }
@@ -245,7 +254,7 @@ async def create(body: JobIn) -> dict:
         job_id = uuid.uuid4().hex
         jobs[job_id] = {
             "job_id": job_id, "order_id": body.order_id, "status": "queued", "phase": "queued",
-            "mode": "coto_real", "items": [i.model_dump() for i in body.items], "created": time.time(),
+            "mode": "coto_real", "items": [item_payload(i) for i in body.items], "created": time.time(),
             "fulfillment": body.fulfillment,
             "city": city,
             "delivery": body.delivery.model_dump() if body.delivery else None,
@@ -264,7 +273,7 @@ async def create(body: JobIn) -> dict:
             raise HTTPException(422, 'invalid manual order')
         record, created = sessions.store.create(body.order_id, body.buyer)
         if created:
-            jobs[record['job_id']] = {'mode': 'manual', 'items': [i.model_dump() for i in body.items],
+            jobs[record['job_id']] = {'mode': 'manual', 'items': [item_payload(i) for i in body.items],
                                       'escrow_deadline': body.escrow_deadline, 'flow': body.flow,
                                       'shopper': body.shopper.model_dump(exclude_none=True)}
             await queue.put(record['job_id'])
@@ -276,7 +285,7 @@ async def create(body: JobIn) -> dict:
             return {"job_id": j["job_id"]}
     job_id = uuid.uuid4().hex
     jobs[job_id] = {"job_id": job_id, "order_id": body.order_id, "status": "queued", "phase": "queued",
-                    "items": [i.model_dump() for i in body.items], "created": time.time(),
+                    "items": [item_payload(i) for i in body.items], "created": time.time(),
                     "shopper": body.shopper.model_dump(exclude_none=True),
                     "card": body.card.model_dump() if body.card else None}
     await queue.put(job_id)

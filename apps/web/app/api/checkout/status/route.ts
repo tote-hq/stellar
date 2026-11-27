@@ -164,7 +164,12 @@ export async function GET(req: Request): Promise<Response> {
         } else if (decision === 'refund') {
           finished = 'refund';
           rec.payment = job.result?.payment ?? 'not_attempted';
-          rec.error = shopperCopy(job.result?.code, job.result?.payment);
+          const failedLine = job.result?.failed_line;
+          rec.error = shopperCopy(
+            job.result?.code,
+            job.result?.payment,
+            typeof failedLine === 'string' ? failedLine : undefined,
+          );
         } else {
           // The pending row is the question this shopper answers, including one an operator asked in another phase.
           try {

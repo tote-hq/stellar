@@ -10,9 +10,34 @@ import asyncio
 import os
 import re
 import time
+from urllib.parse import quote
 
 from coto_fields import pickup_branches, plan_delivery
 from coto_real import run_coto_real
+
+_COTO_PREFIX = "https://www.coto.com.ar/"
+_ADD_BUTTON = re.compile(r"^(Agregar|Agregar al carrito)$", re.I)
+
+
+def _sku_rejected(line: str) -> dict:
+    failed = {"fail": "sku_rejected"}
+    if line:
+        failed["line"] = line
+    return failed
+
+
+def _product_target(item: dict) -> str | None:
+    """Catalog page when it is on the Coto storefront. Otherwise a name search.
+
+    A slug is never built from the sku. An off-domain url is not opened.
+    """
+    url = item.get("url")
+    if isinstance(url, str) and url.strip().startswith(_COTO_PREFIX):
+        return url.strip()
+    name = item.get("name")
+    if isinstance(name, str) and name.strip():
+        return "https://www.coto.com.ar/search?Ntt=" + quote(name.strip(), safe="")
+    return None
 
 
 def browser_env() -> dict[str, str]:
@@ -184,13 +209,17 @@ class LiveCotoDriver:
 
     async def shop(self, items: list) -> dict:
         for item in items:
-            sku = item.get("sku") or item.get("name")
-            if not sku:
+            if not isinstance(item, dict):
                 return {"fail": "sku_rejected"}
-            await self.page.goto(f"https://www.coto.com.ar/producto/{sku}", wait_until="domcontentloaded")
-            add = self.page.get_by_role("button", name=re.compile(r"^Agregar$", re.I))
+            name = item.get("name")
+            line = name.strip() if isinstance(name, str) else ""
+            target = _product_target(item)
+            if target is None:
+                return _sku_rejected(line)
+            await self.page.goto(target, wait_until="domcontentloaded")
+            add = self.page.get_by_role("button", name=_ADD_BUTTON)
             if await add.count() == 0:
-                return {"fail": "sku_rejected"}
+                return _sku_rejected(line)
             await add.first.click()
         return {"ok": True}
 
@@ -235,7 +264,13 @@ class LiveCotoDriver:
         except Exception:
             return False
 
-    async def poll(self) -> dict:
+    async def poll(self, where: str | None = None) -> dict:
+        # Delivery stays open until the pickup or address screen is actually done.
+        # Payment signals (an order id, a decline, a one-time code) must not clear it.
+        if where == "delivery":
+            if await self._delivery_done():
+                return {"cleared": True}
+            return {"waiting": True}
         placed = await self._order_id()
         if placed:
             return {"placed": placed}
@@ -244,6 +279,54 @@ class LiveCotoDriver:
         if await self._otp() or await self._challenge():
             return {"waiting": True}
         return {"cleared": True}
+
+    def _left_delivery_page(self) -> bool:
+        try:
+            url = self.page.url
+        except Exception:
+            return False
+        if not isinstance(url, str) or not url.startswith("http"):
+            return False
+        return "agregar-domicilio" not in url
+
+    async def _branch_chosen(self) -> bool:
+        try:
+            raw = await self.page.evaluate(
+                """() => {
+                  const mode = /^(retiro|retirar)( en sucursal| por sucursal)?$|^(env[ií]o|entrega)( a domicilio)?$|^domicilio$/;
+                  const linesOf = (el) => {
+                    const wrap = el.closest('label');
+                    const text = wrap ? (wrap.innerText || '') : '';
+                    return text.split(/\\n/).map((line) => line.trim()).filter(Boolean);
+                  };
+                  const radios = [...document.querySelectorAll('input[type="radio"], [role="radio"]')];
+                  const toggleNames = new Set();
+                  for (const el of radios) {
+                    const lines = linesOf(el);
+                    if (!lines.length || !mode.test(lines[0].toLowerCase())) continue;
+                    const group = el.getAttribute('name');
+                    if (group) toggleNames.add(group);
+                  }
+                  for (const el of radios) {
+                    const group = el.getAttribute('name');
+                    if (group && toggleNames.has(group)) continue;
+                    const checked = el.checked === true || el.getAttribute('aria-checked') === 'true';
+                    if (!checked) continue;
+                    const lines = linesOf(el);
+                    if (!lines.length || mode.test(lines[0].toLowerCase())) continue;
+                    return true;
+                  }
+                  return false;
+                }"""
+            )
+        except Exception:
+            return False
+        return raw is True
+
+    async def _delivery_done(self) -> bool:
+        if self._left_delivery_page():
+            return True
+        return await self._branch_chosen()
 
     async def _order_id(self) -> str | None:
         try:
