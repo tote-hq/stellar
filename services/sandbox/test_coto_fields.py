@@ -82,6 +82,29 @@ class CotoFieldsTest(unittest.TestCase):
         self.assertNotIn("Villa Crespo", str(plan))
         self.assertNotIn("Abasto", str(plan))
 
+    def test_pickup_branches_drops_fulfillment_toggles_and_keeps_branches(self):
+        rows = pickup_branches([
+            {"name": "Retiro en sucursal", "address": ""},
+            {"name": "Envío a domicilio", "address": ""},
+            {"name": "Sucursal Villa Crespo", "address": "Thames 100, Villa Crespo"},
+            {"name": "Abasto", "address": "Av. Corrientes 3200"},
+        ])
+        self.assertEqual(rows, [
+            {"name": "Sucursal Villa Crespo", "address": "Thames 100, Villa Crespo"},
+            {"name": "Abasto", "address": "Av. Corrientes 3200"},
+        ])
+
+    def test_pickup_with_only_fulfillment_toggles_asks_a_person(self):
+        plan = plan_delivery(
+            {"kind": "pickup", "branches": [
+                {"name": "Retiro en sucursal", "address": ""},
+                {"name": "Envío a domicilio", "address": ""},
+            ]},
+            {"fulfillment": "pickup", "city": "Villa Crespo"},
+        )
+        self.assertTrue(plan.get("needs_human"))
+        self.assertNotIn("needs_shopper", plan)
+
     def test_pickup_branches_drops_blanks_and_keeps_the_first_name(self):
         rows = pickup_branches([
             {"name": "  Villa Crespo ", "address": " Thames 100 "},

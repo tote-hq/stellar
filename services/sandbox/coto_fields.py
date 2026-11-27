@@ -6,16 +6,27 @@ addresses are never a choice. An empty required field becomes a question.
 
 from __future__ import annotations
 
+import re
+
 MEAT_STOCK = "Quiero recibir un producto similar"
 JEV_MODEL = "jev-1.13.0"
 PICKUP_LABEL = "¿En qué sucursal retirás?"
+
+# Full match only, after strip and casefold. A branch such as
+# "Sucursal Villa Crespo" does not match.
+_FULFILLMENT_MODE = re.compile(
+    r"^(retiro|retirar)( en sucursal| por sucursal)?$"
+    r"|^(env[ií]o|entrega)( a domicilio)?$"
+    r"|^domicilio$"
+)
 
 
 def pickup_branches(rows: list) -> list[dict]:
     """Rows scraped off the pickup screen. No invented names.
 
-    A row with no name and no address is dropped. The first row for a
-    name wins, and the page order of the rest is kept.
+    A row with no name and no address is dropped. A fulfillment-mode
+    label is dropped, so the pickup toggle is not a branch. The first
+    row for a name wins, and the page order of the rest is kept.
     """
     out: list[dict] = []
     seen: set[str] = set()
@@ -25,6 +36,8 @@ def pickup_branches(rows: list) -> list[dict]:
         name = str(row.get("name") or "").strip()
         address = str(row.get("address") or "").strip()
         if not name and not address:
+            continue
+        if _FULFILLMENT_MODE.fullmatch(name.casefold()):
             continue
         if name and name in seen:
             continue

@@ -119,16 +119,30 @@ class LiveCotoDriver:
         """Plain rows from the pickup radios. Overridable without a browser.
 
         The label is the wrapping <label> text, never the input name: radios
-        that share a name would otherwise collapse into one option.
+        that share a name would otherwise collapse into one option. Radios
+        that share a name with a fulfillment toggle never reach Python.
         """
         raw = await self.page.evaluate(
             """() => {
-              const radios = [...document.querySelectorAll('input[type="radio"], [role="radio"]')];
-              const rows = [];
-              for (const el of radios) {
+              const mode = /^(retiro|retirar)( en sucursal| por sucursal)?$|^(env[ií]o|entrega)( a domicilio)?$|^domicilio$/;
+              const linesOf = (el) => {
                 const wrap = el.closest('label');
                 const text = wrap ? (wrap.innerText || '') : '';
-                const lines = text.split(/\n/).map((line) => line.trim()).filter(Boolean);
+                return text.split(/\\n/).map((line) => line.trim()).filter(Boolean);
+              };
+              const radios = [...document.querySelectorAll('input[type="radio"], [role="radio"]')];
+              const toggleNames = new Set();
+              for (const el of radios) {
+                const lines = linesOf(el);
+                if (!lines.length || !mode.test(lines[0].toLowerCase())) continue;
+                const group = el.getAttribute('name');
+                if (group) toggleNames.add(group);
+              }
+              const rows = [];
+              for (const el of radios) {
+                const group = el.getAttribute('name');
+                if (group && toggleNames.has(group)) continue;
+                const lines = linesOf(el);
                 if (!lines.length) continue;
                 rows.push({ name: lines[0], address: lines.slice(1).join(' ') });
               }
