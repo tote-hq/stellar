@@ -114,6 +114,33 @@ describe('snapshot and restore', () => {
     assert.match(s.snapshot().carts.coto ?? '', /^coto-/);
   });
 
+  it('remembers that the city question went out, and drops that flag once a city is stored', () => {
+    const before = createSessionState();
+    before.markCityAsked();
+    assert.equal(before.snapshot().cityAsked, true);
+    assert.equal(before.getCityAsked(), true);
+
+    const after = createSessionState();
+    after.restore(JSON.parse(JSON.stringify(before.snapshot())));
+    assert.equal(after.getCityAsked(), true);
+
+    const old = createSessionState();
+    old.restore({ carts: {} });
+    assert.equal(old.getCityAsked(), false);
+    assert.equal(Object.hasOwn(old.snapshot(), 'cityAsked'), false);
+
+    const located = createSessionState();
+    located.markCityAsked();
+    located.setLocation(ctx('dia'));
+    assert.equal(located.getCityAsked(), false);
+    assert.equal(Object.hasOwn(located.snapshot(), 'cityAsked'), false);
+
+    before.setCity('Villa Crespo');
+    assert.equal(before.getCityAsked(), false);
+    assert.equal(before.getCity(), 'Villa Crespo');
+    assert.equal(Object.hasOwn(before.snapshot(), 'cityAsked'), false);
+  });
+
   it('hands out a copy, so mutating a snapshot cannot reach back into the session', () => {
     const s = createSessionState();
     s.setLocation(ctx('dia'));

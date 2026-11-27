@@ -135,18 +135,22 @@ export function assistantAskedCity(text: string | null | undefined): boolean {
 
 /**
  * Stores the city when the previous message was the fixed question, or when
- * the whole reply is the CABA alias, or when a postal code is already known
- * and the reply answers a city question the model worded itself.
- * The alias needs nothing else: `pendingPostal` is not in the snapshot and
- * the turn store can come back empty, so the first `caba` was dropped and the
- * chat asked again. `prior` is the browser's earlier lines, which still hold
- * the postal code. `cityFromAnswer` still rejects a shopping list.
+ * the snapshot says `CITY_ASK` already went out, or when the whole reply is
+ * the CABA alias, or when a postal code is already known and the reply
+ * answers a city question the model worded itself.
+ * `getCityAsked` is the snapshot's record that `CITY_ASK` went out. It
+ * survives an empty turn store, which is what dropped the first locality
+ * and made the chat ask again. The alias needs nothing else: `pendingPostal`
+ * is not in the snapshot either. `prior` is the browser's earlier lines,
+ * which still hold the postal code. `cityFromAnswer` still rejects a
+ * shopping list. No flag means the same behavior as before the flag existed.
  */
 export function rememberCity(
   state: {
     getCity?: () => string | undefined;
     setCity?: (city: string) => void;
     getPendingPostal?: () => string | undefined;
+    getCityAsked?: () => boolean;
   },
   messages: readonly { role?: string; content?: unknown }[],
   text: string,
@@ -155,7 +159,11 @@ export function rememberCity(
   if (state.getCity?.()) return;
   const city = cityFromAnswer(text);
   if (!city) return;
-  if (city === 'Ciudad de Buenos Aires' || isCityQuestion(lastAssistantText(messages))) {
+  if (
+    city === 'Ciudad de Buenos Aires' ||
+    state.getCityAsked?.() ||
+    isCityQuestion(lastAssistantText(messages))
+  ) {
     state.setCity?.(city);
     return;
   }
