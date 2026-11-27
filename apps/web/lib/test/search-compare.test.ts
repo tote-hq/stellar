@@ -565,3 +565,51 @@ describe('ranked search', () => {
     assert.match(shownNote, /pickCoto=paper/);
   });
 });
+
+describe('quiet build-cart search', () => {
+  it('emits nothing for a quiet Coto search and still records the pick', async () => {
+    const hit = coto(1500);
+    const events: UiEvent[] = [];
+    const cache = emptyCache();
+    const search = beginChainSearch({
+      chain: 'coto',
+      id: 'quiet-coto',
+      query: 'leche',
+      cache,
+      emit: (event) => events.push(event),
+      quiet: true,
+      searcher: {
+        async search() {
+          return [hit];
+        },
+      },
+    });
+    const note = await search.finish();
+    assert.equal(events.length, 0);
+    assert.match(note, /pickCoto=c1/);
+    assert.equal(cache.searches?.find((row) => row.retailer === 'coto' && row.query === 'leche')?.available, 1);
+    assert.equal(cache.coto?.c1?.name, 'Leche Protein 1 L');
+  });
+
+  it('emits nothing for a quiet dual search and still records the pick', async () => {
+    const events: UiEvent[] = [];
+    const cache = emptyCache();
+    const search = beginDualSearch({
+      id: 'quiet-dual',
+      query: 'leche',
+      cache,
+      emit: (event) => events.push(event),
+      quiet: true,
+      searcher: {
+        async search() {
+          return [coto(1500)];
+        },
+      },
+    });
+    const note = await search.finish({ products: [dia(2000)], failed: false });
+    assert.equal(events.length, 0);
+    assert.match(note, /pickCoto=c1/);
+    assert.equal(cache.searches?.some((row) => row.query === 'leche'), true);
+    assert.deepEqual(cache.compared, ['d1']);
+  });
+});

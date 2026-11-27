@@ -27,6 +27,22 @@ export function buildCartMessage(chain: Chain): string {
   return `Armá el carrito de ${store} con lo que charlamos y mostrame el pedido listo para pagar.`;
 }
 
+/**
+ * The shopper asked to build the cart from what was already discussed.
+ * Matches `buildCartMessage` for both chains and the es/en Armar ask, after trim.
+ * Those ask strings are also `buildCartAsk` in `ui-copy.ts`. This file stays
+ * import-free so the chat tests can load it by stripping types.
+ */
+export function isBuildCartMessage(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    trimmed === buildCartMessage('dia') ||
+    trimmed === buildCartMessage('coto') ||
+    trimmed === 'Armá el carrito con lo que charlamos y mostrame el pedido listo para pagar.' ||
+    trimmed === 'Build the cart from what we discussed and show me the order ready to pay.'
+  );
+}
+
 export function confirmSwitchMessage(from: Chain, to: Chain): string {
   const name = (chain: Chain) => (chain === 'dia' ? 'Día' : 'Coto');
   return `Sí, confirmá el cambio: reemplazá el changuito de ${name(from)} por uno de ${name(to)}.`;

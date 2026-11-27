@@ -135,15 +135,29 @@ export class VtexAdapter implements RetailerAdapter {
   async resolveLocation(postalCode: string): Promise<LocationContext> {
     const sc = await this.salesChannel();
     const common = { retailer: this.id, country: 'ARG', postalCode, salesChannel: sc };
+    // Día's regions API resolves the bare four-digit code. A CPA such as
+    // C1414ABC returns a region id whose sellers list is empty, and search
+    // then filters every product as unavailable.
+    const regionCode = postalCode.match(/\d{4}/)?.[0] ?? postalCode;
 
     try {
       const regions = await request<VtexRegion[]>(
-        this.base(`/api/checkout/pub/regions?country=ARG&postalCode=${encodeURIComponent(postalCode)}`),
+        this.base(`/api/checkout/pub/regions?country=ARG&postalCode=${encodeURIComponent(regionCode)}`),
         { retries: 1 },
       );
       const r = regions?.[0];
       if (r?.id) {
         const sellers: Seller[] = (r.sellers ?? []).map((s) => ({ id: s.id, name: s.name || s.id }));
+        // An id with no sellers is not a delivery region. Storing it would
+        // show a national catalog the store cannot deliver.
+        if (sellers.length === 0) {
+          return {
+            ...common,
+            sellers: [],
+            degraded: true,
+            note: `${this.displayName} has no store that delivers to ${postalCode}.`,
+          };
+        }
         return { ...common, regionId: r.id, sellers, degraded: false };
       }
       return {

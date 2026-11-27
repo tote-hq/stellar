@@ -289,7 +289,10 @@ export const RENDER_TOOLS: Anthropic.Tool[] = [
       'one they cannot see, and they should never have to ask for the pictures. Prices and ' +
       'names come from the last search; you do not supply them. Do not call this for a search ' +
       'that already has a search_compare row: the server refuses those SKUs. Write one short ' +
-      'line instead. Never write "Encontré lo siguiente" under that row.',
+      'line instead. Never write "Encontré lo siguiente" under that row. On a build-cart ' +
+      'turn, do not call this: use the pickDia or pickCoto ids already in the conversation, ' +
+      'do not search for alternatives, and search only a type that has no pick yet. The ' +
+      'server refuses this call on that turn and draws no product grid.',
     input_schema: {
       type: 'object',
       properties: {

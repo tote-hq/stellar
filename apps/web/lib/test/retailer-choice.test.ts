@@ -5,6 +5,7 @@ import {
   buildCartMessage,
   choiceMessage,
   confirmSwitchMessage,
+  isBuildCartMessage,
   needsSwitchConfirm,
 } from '../retailer-choice.ts';
 
@@ -32,5 +33,20 @@ describe('retailer choice', () => {
     const confirm = confirmSwitchMessage('dia', 'coto');
     assert.match(confirm, /Coto/);
     assert.match(confirm, /Día/);
+  });
+
+  it('recognises a build-cart sentence and not a chain choice or a later search', () => {
+    assert.equal(isBuildCartMessage(buildCartMessage('dia')), true);
+    assert.equal(isBuildCartMessage(`  ${buildCartMessage('coto')}  `), true);
+    assert.equal(
+      isBuildCartMessage('Armá el carrito con lo que charlamos y mostrame el pedido listo para pagar.'),
+      true,
+    );
+    assert.equal(
+      isBuildCartMessage('Build the cart from what we discussed and show me the order ready to pay.'),
+      true,
+    );
+    assert.equal(isBuildCartMessage('Quiero seguir en Coto.'), false);
+    assert.equal(isBuildCartMessage('mostrame más arroz'), false);
   });
 });
