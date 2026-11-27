@@ -102,19 +102,25 @@ def viewer_url(job_id: str, token: str, origin: str, exp: int, part: str = "") -
     return url
 
 
-def _fail(phase: str, code: str, phases: list[str], payment: str = "not_attempted") -> dict:
-    return {
-        "status": "failed",
-        "phase": phase,
-        "result": {
-            "payment": payment,
-            "store_order_id": None,
-            "code": code,
-            "phases": list(phases),
-            "reached_payment": phase == "payment",
-            "items_added": 0,
-        },
+def _fail(
+    phase: str,
+    code: str,
+    phases: list[str],
+    payment: str = "not_attempted",
+    *,
+    failed_line: str | None = None,
+) -> dict:
+    result = {
+        "payment": payment,
+        "store_order_id": None,
+        "code": code,
+        "phases": list(phases),
+        "reached_payment": phase == "payment",
+        "items_added": 0,
     }
+    if isinstance(failed_line, str) and failed_line.strip():
+        result["failed_line"] = failed_line.strip()
+    return {"status": "failed", "phase": phase, "result": result}
 
 
 def _placed(order_id: str, phases: list[str]) -> dict:
@@ -153,7 +159,7 @@ async def _human(job, driver, where: str, phases, now_ms, sleep, log, token, ori
     while now_ms() < deadline():
         job["viewer_exp"] = deadline()
         await sleep(POLL_S)
-        polled = await driver.poll()
+        polled = await driver.poll(where)
         if polled.get("placed"):
             return _placed(str(polled["placed"]), phases)
         if polled.get("declined"):
@@ -213,7 +219,13 @@ async def run_coto_real(job, driver, *, now_ms: Now, sleep: Sleep, log: Log,
         phases.append(name)
         job["phase"] = name
         if result.get("fail"):
-            return _fail(name, str(result["fail"]), phases)
+            line = result.get("line") if name == "shop" else None
+            return _fail(
+                name,
+                str(result["fail"]),
+                phases,
+                failed_line=line if isinstance(line, str) else None,
+            )
         if result.get("needs_human"):
             resumed = await _human(job, driver, name, phases, now_ms, sleep, log, token, origin)
             if resumed.get("cleared"):

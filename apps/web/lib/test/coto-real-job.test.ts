@@ -37,6 +37,13 @@ describe('coto real sandbox body', () => {
       assert.equal(json.includes('pan'), false);
       assert.equal(json.includes(sentinel), false);
     }
+    const withUrl = cotoRealJobBody('c'.repeat(64), [
+      { name: 'Leche', quantity: 1, sku: 'sku-1', url: 'https://www.coto.com.ar/product/leche' },
+      { name: 'Manteca TONADITA 100 g', quantity: 1, sku: 'sku-2' },
+    ], { fulfillment: 'pickup', city: 'CABA' });
+    assert.equal(withUrl.items[0]?.url, 'https://www.coto.com.ar/product/leche');
+    assert.equal('url' in withUrl.items[1]!, false);
+    assert.equal(JSON.stringify(withUrl.items).includes('/producto/'), false);
     assert.equal(pickup.city, 'CABA');
     assert.equal(pickup.delivery, undefined);
     assert.equal(JSON.stringify(pickup).includes('street'), false);

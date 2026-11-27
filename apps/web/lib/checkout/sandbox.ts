@@ -58,6 +58,8 @@ export interface SandboxJob {
     store_order_id?: string | null;
     /** Sandbox failure code. The shopper response maps it to Spanish and does not forward it. */
     code?: string | null;
+    /** Product name of the line that could not be added. Shopper copy only; not a status field. */
+    failed_line?: string;
     items_added: number;
     cart?: {
       orderFormId?: string;
@@ -81,6 +83,8 @@ export interface SandboxItem {
   name: string;
   quantity: number;
   sku: string;
+  /** Catalog page on www.coto.com.ar. Omitted when the catalog has none. */
+  url?: string;
 }
 
 /** The card to pay with, as the sandbox's `Card` model takes it. Never logged; see the header. */
@@ -176,7 +180,7 @@ export function cotoRealJobBody(
   order_id: string;
   fulfillment: 'home' | 'pickup';
   city: string;
-  items: { name: string; quantity: number; sku: string }[];
+  items: { name: string; quantity: number; sku: string; url?: string }[];
   delivery?: CotoRealDelivery;
 } {
   return {
@@ -184,7 +188,15 @@ export function cotoRealJobBody(
     order_id: orderId,
     fulfillment: input.fulfillment,
     city: input.city,
-    items: items.map((item) => ({ name: item.name, quantity: item.quantity, sku: item.sku })),
+    items: items.map((item) => {
+      const row: { name: string; quantity: number; sku: string; url?: string } = {
+        name: item.name,
+        quantity: item.quantity,
+        sku: item.sku,
+      };
+      if (item.url) row.url = item.url;
+      return row;
+    }),
     ...(input.delivery ? { delivery: input.delivery } : {}),
   };
 }

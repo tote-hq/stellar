@@ -329,9 +329,15 @@ const SHOPPER_COPY: Record<string, string> = {
   sku_rejected: 'No pudimos cargar un producto. Te devolvemos el saldo.',
 };
 
-/** Human Spanish. Never a phase, a code, or a URL. */
-export function shopperCopy(code: string | null | undefined, payment?: string | null): string {
+/** Human Spanish. Never a phase, a code, or a URL. A named line is the product that could not be added. */
+export function shopperCopy(
+  code: string | null | undefined,
+  payment?: string | null,
+  failedLine?: string | null,
+): string {
   if (payment === 'declined') return SHOPPER_COPY.payment_declined;
+  const line = typeof failedLine === 'string' ? failedLine.trim() : '';
+  if (code === 'sku_rejected' && line) return `No pudimos cargar «${line}». Te devolvemos el saldo.`;
   if (code && SHOPPER_COPY[code]) return SHOPPER_COPY[code];
   return 'No pudimos completar el pedido. Te devolvemos el saldo.';
 }

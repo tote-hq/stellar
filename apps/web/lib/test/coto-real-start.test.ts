@@ -46,6 +46,7 @@ describe('coto real start', () => {
         amount: 10_000_000n,
         basketHash: BASKET,
       }),
+      catalog: async () => null,
       starter: async (orderId, items, input) => {
         calls.push({ orderId, items, input });
         return 'job-real-1';
@@ -70,6 +71,47 @@ describe('coto real start', () => {
     assert.equal(body.stage, 'shopping');
   });
 
+  it('sends the catalog url when the exact product has one and leaves it out when it does not', async () => {
+    const { startCotoRealCheckout, __setCotoRealStartForTests } = await import('../checkout/coto-real-start.ts');
+    const calls: { items: { name: string; sku: string; url?: string }[] }[] = [];
+    __setCotoRealStartForTests({
+      readOrder: async () => ({
+        buyer: BUYER,
+        status: 'open',
+        amount: 10_000_000n,
+        basketHash: BASKET,
+      }),
+      catalog: async (skuId) => {
+        if (skuId === 'sku-1') return { url: 'https://www.coto.com.ar/product/leche' };
+        if (skuId === 'sku-blank') return { url: '   ' };
+        if (skuId === 'sku-down') throw new Error('catalog down');
+        return null;
+      },
+      starter: async (_orderId, items) => {
+        calls.push({ items });
+        return 'job-urls';
+      },
+    });
+    const rec = record();
+    rec.orderId = '12'.repeat(32);
+    rec.lines = [
+      { name: 'Leche', skuId: 'sku-1', quantity: 1, lineTotal: '100' },
+      { name: 'Manteca TONADITA 100 g', skuId: 'sku-2', quantity: 1, lineTotal: '100' },
+      { name: 'Pan', skuId: 'sku-blank', quantity: 1, lineTotal: '100' },
+      { name: 'Huevos', skuId: 'sku-down', quantity: 1, lineTotal: '100' },
+    ];
+    const res = await startCotoRealCheckout(rec, 'sig');
+    assert.equal(res.status, 200);
+    assert.equal(calls.length, 1);
+    const items = calls[0]!.items;
+    assert.equal(items[0]?.url, 'https://www.coto.com.ar/product/leche');
+    assert.equal('url' in items[1]!, false);
+    assert.equal('url' in items[2]!, false);
+    assert.equal('url' in items[3]!, false);
+    assert.equal(JSON.stringify(items).includes('/producto/'), false);
+    assert.equal(JSON.stringify(items).includes('sku-2'), true);
+  });
+
   it('still records jobId none when the sandbox start throws', async () => {
     const { startCotoRealCheckout, __setCotoRealStartForTests } = await import('../checkout/coto-real-start.ts');
     __setCotoRealStartForTests({
@@ -79,6 +121,7 @@ describe('coto real start', () => {
         amount: 10_000_000n,
         basketHash: BASKET,
       }),
+      catalog: async () => null,
       starter: async () => {
         throw new Error('sandbox answered 422');
       },
