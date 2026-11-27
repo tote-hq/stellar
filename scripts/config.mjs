@@ -9,6 +9,7 @@
  *   npm run config -- set chat_dual_compare true
  *   npm run config -- set chat_dual_checkout_demo true
  *   npm run config -- set manual_checkout_flow guided
+ *   npm run config -- set usdc_source_guest circle
  *
  * Connects like scripts/db.mjs: the web app's env file loaded the way Next
  * does, DIRECT_URL or DATABASE_URL, and never prints either. The app caches
@@ -61,7 +62,17 @@ const STRING_KEYS = {
     if (value === 'headless') return 'members see progress and a card form; the worker pays with no remote browser';
     return 'members see the remote browser checkout (also the reading when the value is missing or unknown)';
   },
+  usdc_source_guest: (value) =>
+    value === 'circle'
+      ? 'guest balance line shows Circle testnet USDC; checkout still spends the mock token'
+      : 'guest balance line shows the mock token (also the reading when the value is missing or unknown)',
+  usdc_source_signed_in: (value) =>
+    value === 'circle'
+      ? 'signed-in balance line shows Circle testnet USDC; checkout still spends the mock token'
+      : 'signed-in balance line shows the mock token (also the reading when the value is missing or unknown)',
 };
+
+const USDC_SOURCE_KEYS = new Set(['usdc_source_guest', 'usdc_source_signed_in']);
 
 /** JSON object keys with a custom validator. */
 const OBJECT_KEYS = {
@@ -132,13 +143,22 @@ try {
     }
   } else if (cmd === 'get' && key) {
     const [r] = await sql`select value from config where key = ${key}`;
-    const missing = key === 'manual_checkout_flow' ? 'reads as viewer' : key === 'retailer_search' ? 'reads as Día→Coto, both on' : 'reads as off';
+    const missing = key === 'manual_checkout_flow'
+      ? 'reads as viewer'
+      : key === 'retailer_search'
+        ? 'reads as Día→Coto, both on'
+        : USDC_SOURCE_KEYS.has(key)
+          ? 'reads as mock'
+          : 'reads as off';
     console.log(r ? `${key} = ${JSON.stringify(r.value)}${describe(key, r.value)}` : `${key} is not set (${missing})`);
   } else if (cmd === 'set' && key && raw !== undefined) {
     if (!known(key)) console.warn(`note: ${key} is not a key the app reads (known: ${[...Object.keys(KNOWN), ...Object.keys(STRING_KEYS), ...Object.keys(OBJECT_KEYS)].join(', ')})`);
     const value = parse(raw);
     if (key === 'manual_checkout_flow' && !['viewer', 'guided', 'headless'].includes(value)) {
       console.error('manual_checkout_flow must be viewer, guided or headless');
+      process.exitCode = 2;
+    } else if (USDC_SOURCE_KEYS.has(key) && value !== 'mock' && value !== 'circle') {
+      console.error(`${key} must be mock or circle`);
       process.exitCode = 2;
     } else if (OBJECT_KEYS[key]) {
       const check = OBJECT_KEYS[key](value);

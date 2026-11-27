@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { track, trackLoginStart } from '../lib/analytics';
 import { CHUNK_UNITS } from '../lib/faucet-policy.ts';
 import { usdcAmount } from '../lib/faucet-copy.ts';
-import { modeCopyFor, previewMasthead } from '../lib/mode-copy.ts';
+import { balanceLineView, modeCopyFor, previewMasthead } from '../lib/mode-copy.ts';
 import { OPEN_FAUCET_EVENT } from '../lib/onboarding.ts';
 import { initials, profileCopy } from '../lib/profile-copy.ts';
 import { resetPostHog } from '../lib/posthog.ts';
@@ -41,6 +41,7 @@ export function WalletWidget() {
   const masthead = previewMasthead(lang);
   const address = wallet.address;
   const { data, loading, error, refresh } = useBalances(address);
+  const line = balanceLineView(data, mode.balanceUnit, lang);
 
   const [funding, setFunding] = useState(false);
   const [phoneBusy, setPhoneBusy] = useState(false);
@@ -279,9 +280,14 @@ export function WalletWidget() {
         {funding ? copy.funding : copy.fundCta}
       </button>
 
-      <span className="topbar-balance" data-testid="wallet-balance">
-        <strong>{data ? data.usdcDisplay : '-'}</strong>
-        <span className="topbar-unit">{mode.balanceUnit}</span>
+      <span className={line.hint ? 'topbar-balance is-circle' : 'topbar-balance'} data-testid="wallet-balance">
+        <strong>{line.amount}</strong>
+        <span className={line.hint ? 'topbar-unit topbar-circle-unit' : 'topbar-unit'}>{line.unit}</span>
+        {line.hint ? (
+          <span className="topbar-source-hint" data-testid="wallet-balance-hint">
+            {line.hint}
+          </span>
+        ) : null}
         {loading ? <span className="sr-only">{copy.refreshing}</span> : null}
       </span>
 

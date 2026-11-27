@@ -1,6 +1,7 @@
 import type { AppMode } from './app-mode.ts';
 import { DEFAULT_NETWORK, type NetworkId } from './deployments.ts';
 import { DEFAULT_LANG, type Lang } from './lang.ts';
+import type { TrustlineState } from './trustline.ts';
 
 /**
  * What the app calls each mode, everywhere a number or a button appears.
@@ -396,4 +397,61 @@ export function trustlineCopy(lang: Lang): TrustlineCopy {
 
 export function receiveCopy(lang: Lang): ReceiveCopy {
   return lang === 'en' ? RECEIVE_EN : RECEIVE;
+}
+
+/**
+ * The balance line when the operator has chosen Circle's testnet USDC.
+ *
+ * It names Circle and says the money is not real. It never says "USDC" alone
+ * or "modo real". The faucet button stays; this copy does not mention it.
+ */
+export interface CircleBalanceCopy {
+  unit: string;
+  hint: string;
+}
+
+const CIRCLE_ES: CircleBalanceCopy = {
+  unit: 'USDC de testnet (Circle)',
+  hint: 'Es USDC de Circle en la red de prueba. No es plata real.',
+};
+
+const CIRCLE_EN: CircleBalanceCopy = {
+  unit: 'testnet USDC (Circle)',
+  hint: "This is Circle's USDC on the test network. It isn't real money.",
+};
+
+export function circleBalanceCopy(lang: Lang): CircleBalanceCopy {
+  return lang === 'en' ? CIRCLE_EN : CIRCLE_ES;
+}
+
+export interface BalanceLineView {
+  amount: string;
+  unit: string;
+  /** Null keeps today's mock line: no extra sentence under the number. */
+  hint: string | null;
+}
+
+/**
+ * What the wallet paints. `line` is Circle; without it the amount and unit
+ * are the mock ones the response already had, and there is no hint.
+ * A Circle trustline that is still closed shows that line's display (zero)
+ * and the existing trustline sentence, not the Circle hint.
+ */
+export function balanceLineView(
+  data: {
+    usdcDisplay: string;
+    line?: { source: 'circle'; usdcDisplay: string; trustline: TrustlineState };
+  } | null,
+  fallbackUnit: string,
+  lang: Lang,
+): BalanceLineView {
+  if (!data) return { amount: '-', unit: fallbackUnit, hint: null };
+  const line = data.line?.source === 'circle' ? data.line : undefined;
+  if (!line) return { amount: data.usdcDisplay, unit: fallbackUnit, hint: null };
+  const copy = circleBalanceCopy(lang);
+  return {
+    amount: line.usdcDisplay,
+    unit: copy.unit,
+    hint: line.trustline === 'needed' ? trustlineCopy(lang).body : copy.hint,
+  };
 }

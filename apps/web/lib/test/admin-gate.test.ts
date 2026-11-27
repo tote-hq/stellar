@@ -84,6 +84,9 @@ describe('admin gate', () => {
       }
       const viewer = await decideAdmin({ url: 'https://admin.changuito.me/orders/abc123', method: 'GET', headers });
       assert.equal(viewer?.rewrite, '/admin-portal/orders/abc123');
+      const usdc = await decideAdmin({ url: 'https://admin.changuito.me/usdc', method: 'GET', headers });
+      assert.equal(usdc?.status, 200);
+      assert.equal(usdc?.rewrite, '/admin-portal/usdc');
       const portal = await decideAdmin({ url: 'https://app.changuito.me/admin-portal/orders/abc123', method: 'GET', headers });
       assert.equal(portal?.status, 404);
     } finally {

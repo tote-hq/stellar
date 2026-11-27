@@ -210,6 +210,17 @@ body:not(:has(.topbar)) .shell {
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
 }
+.topbar-balance.is-circle {
+  flex-wrap: wrap;
+  white-space: normal;
+  max-width: 18rem;
+}
+.topbar-source-hint {
+  flex-basis: 100%;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
 .topbar-unit,
 .topbar-muted { font-size: 12px; font-weight: 600; }
 /* On the bar the avatar inverts: off-white with espresso initials and ring. */
@@ -254,6 +265,8 @@ body:not(:has(.topbar)) .shell {
   /* The amount stays; "USDC de prueba" is in the faucet and the profile. */
   .topbar-unit,
   .topbar-hint { display: none; }
+  /* Circle's unit is the honesty label. It stays when the mock unit hides. */
+  .topbar-unit.topbar-circle-unit { display: inline; }
   .topbar .avatar { width: 36px; height: 36px; }
 }
 @media (max-width: 374px) {
