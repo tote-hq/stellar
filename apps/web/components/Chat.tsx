@@ -5,9 +5,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Cart } from '@changuito/mcp/types';
 
 import { starters } from '../lib/agent/prompt';
-import { cotoPayTarget } from '../lib/checkout/coto-real.ts';
+import { cotoPayGate } from '../lib/checkout/coto-pay-gate.ts';
+import { cotoPayOpen, cotoResumeProbe, cotoSessionFor, restoreActiveChat } from '../lib/checkout/coto-pay-open.ts';
+import { fetchAs } from '../lib/fetch-as.ts';
 import { composerControls } from '../lib/composer.ts';
 import {
+  buildCartMessage,
   choiceMessage,
   confirmSwitchMessage,
   dropMessage,
@@ -18,10 +21,10 @@ import {
 import { RETAILER_NAMES } from '../lib/retailers.ts';
 import { errorCode, track, trackLoginStart } from '../lib/analytics';
 import type { ChatImage } from '../lib/chat-image.ts';
-import { canRetry, type Block, type ChatState } from '../lib/chat-state';
+import { canRetry, searchRowAt, type Block, type CardAddOutcome, type ChatState } from '../lib/chat-state';
 import { prepareImage } from '../lib/prepare-image';
 import { useDictation, type DictationError } from '../lib/use-dictation';
-import type { Receipt } from '../lib/chat-store.ts';
+import { isResumable, loadChat, type Receipt } from '../lib/chat-store.ts';
 import { INTL_LOCALE, type Lang } from '../lib/lang.ts';
 import {
   FREE_TURNS,
@@ -37,9 +40,8 @@ import { uiCopy } from '../lib/ui-copy.ts';
 import { useChat } from '../lib/use-chat';
 import { useWallet } from '../lib/use-wallet.ts';
 import { CartCard } from './CartCard';
-import { ComparisonCard } from './ComparisonCard';
 import { Modal } from './Modal';
-import { MissingCard, SearchCompareCard } from './SearchCompareCard';
+import { CompareCloseTable, MissingCard, SearchCompareCard } from './SearchCompareCard';
 import { useLang } from './LangProvider';
 import { useNetwork } from './NetworkProvider';
 import { CameraIcon, ImageIcon, MicIcon, RetryIcon } from './icons';
@@ -71,17 +73,85 @@ const VOICE_NOTE: Record<DictationError, 'voiceUnsupported' | 'voiceDenied' | 'v
  * once a cart is already the newest thing on screen — pointing at an order
  * that is already there is the card's job.
  */
-function offerBuildCart(blocks: Block[], streaming: boolean, readOnly: boolean): boolean {
-  if (streaming || readOnly) return false;
+function lastSearchCompare(blocks: Block[]): Extract<Block, { kind: 'search_compare' }> | undefined {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i];
+    if (block?.kind === 'search_compare') return block;
+  }
+  return undefined;
+}
+
+function cartNewerThan(blocks: Block[], index: number): boolean {
+  for (let i = index + 1; i < blocks.length; i++) {
+    if (blocks[i]?.kind === 'cart') return true;
+  }
+  return false;
+}
+
+/** Coto, then Día. The newest row narrows to the chain the shopper already picked. */
+function sectionChains(
+  blocks: Extract<Block, { kind: 'search_compare' }>[],
+  newest: boolean,
+  order: string | undefined,
+): Chain[] {
+  const listed = new Set<Chain>();
+  let both = false;
+  for (const block of blocks) {
+    if (!block.chains || block.chains.length === 0) both = true;
+    else for (const chain of block.chains) listed.add(chain);
+  }
+  const rank: Chain[] = ['coto', 'dia'];
+  const open = both ? rank : rank.filter((chain) => listed.has(chain));
+  if (newest && (order === 'dia' || order === 'coto')) return open.filter((chain) => chain === order);
+  return open;
+}
+
+function queryBeforeCart(blocks: Block[], cartId: string): string | undefined {
+  let cartAt = -1;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i];
+    if (block?.kind === 'cart' && block.cart.cartId === cartId) {
+      cartAt = i;
+      break;
+    }
+  }
+  const end = cartAt === -1 ? blocks.length : cartAt;
+  for (let i = end - 1; i >= 0; i--) {
+    const block = blocks[i];
+    if (block?.kind === 'search_compare' && block.query) return block.query;
+  }
+  return undefined;
+}
+
+function newestCotoCart(blocks: Block[]): number {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i];
+    if (block?.kind === 'cart' && block.cart.retailer === 'coto') return i;
+  }
+  return -1;
+}
+
+/** `search` is Armar after a chain choice. `products` is the older products-only path. */
+function offerBuildCart(
+  blocks: Block[],
+  streaming: boolean,
+  readOnly: boolean,
+  order: string | undefined,
+): 'search' | 'products' | null {
+  if (streaming || readOnly) return null;
   let products = -1;
+  let search = -1;
   let cart = -1;
   for (let i = 0; i < blocks.length; i++) {
     const block = blocks[i];
     if (!block) continue;
     if (block.kind === 'products') products = i;
+    else if (block.kind === 'search_compare' && block.status !== 'pending') search = i;
     else if (block.kind === 'cart') cart = i;
   }
-  return products > cart;
+  if ((order === 'dia' || order === 'coto') && search > cart) return 'search';
+  if (products > cart) return 'products';
+  return null;
 }
 
 /**
@@ -141,10 +211,13 @@ function ChatCore({
   const copy = uiCopy(lang).chat;
   // `lang` rides along so the agent answers in the language the footer is set
   // to. Nothing else about the request changes with it.
-  const { state, send, retry, stop, loginRequired, clearLoginRequired, resume, reset, currentSessionId } =
+  const { state, send, retry, stop, loginRequired, clearLoginRequired, resume, reset, currentSessionId, addCard } =
     useChat({ isAuthenticated, address, sign, network, lang });
   const [draft, setDraft] = useState('');
   const [switchAsk, setSwitchAsk] = useState<{ from: Chain; to: Chain } | null>(null);
+  /** A card click waiting for the shopper to confirm a chain switch. */
+  const pendingAdd = useRef<{ chain: Chain; id: string } | null>(null);
+  const wasStreaming = useRef(false);
   const [photo, setPhoto] = useState<ChatImage | null>(null);
   const [readingPhoto, setReadingPhoto] = useState(false);
   const [photoNote, setPhotoNote] = useState<string | null>(null);
@@ -166,7 +239,9 @@ function ChatCore({
     checkoutPath?: 'solo_dia' | 'solo_coto' | 'dual';
     receiptLines?: { name: string; quantity: number; lineTotal: string }[];
   } | null>(null);
-  const [cotoModal, setCotoModal] = useState<Cart | null>(null);
+  // Cart plus the session captured at the click. After a pane remount the live
+  // id is empty until resume, and the mount must not read it again later.
+  const [cotoModal, setCotoModal] = useState<{ cart: Cart; sessionId: string; resumeOnly: boolean } | null>(null);
   /** Which pay started. Cleared if the modal closes before escrow open. */
   const [payLock, setPayLock] = useState<null | 'dia' | 'coto'>(null);
   const payOpened = useRef(false);
@@ -181,6 +256,30 @@ function ChatCore({
   // storage. Published after each turn rather than on every delta: a save per
   // token would be one JSON.stringify of the whole transcript per character.
   const shop = useShop();
+  const openCoto = useCallback(
+    (cart: Cart | null | undefined) => {
+      const activeId = shop?.activeChatId ?? null;
+      const stored = activeId ? loadChat(activeId) : null;
+      const resumeOrderId = shop?.cotoResumeOrderId ?? null;
+      const storedSessionId = cotoSessionFor({
+        resumable: stored ? isResumable(stored) : false,
+        resumeOrderId,
+        storedSessionId: stored?.sessionId ?? null,
+      });
+      const opened = cotoPayOpen({
+        cart,
+        sessionId: currentSessionId(),
+        storedSessionId,
+      });
+      if (opened) {
+        setCotoModal({
+          ...opened,
+          resumeOnly: Boolean(shop?.readOnly) && Boolean(resumeOrderId),
+        });
+      }
+    },
+    [shop?.activeChatId, shop?.cotoResumeOrderId, shop?.readOnly, currentSessionId],
+  );
   const publish = shop?.publish;
   useEffect(() => {
     if (!publish || state.streaming) return;
@@ -191,34 +290,76 @@ function ChatCore({
   // basket as it is now. Keyed on the counter so a re-render does not reopen it.
   const payRequest = shop?.payRequest ?? 0;
   const seenPay = useRef(payRequest);
-  const setCotoReal = shop?.setCotoReal;
+  const setCotoAdmission = shop?.setCotoAdmission;
+  const setCotoResumeOrderId = shop?.setCotoResumeOrderId;
   useEffect(() => {
-    if (!setCotoReal) return;
+    if (!setCotoResumeOrderId) return;
+    const readOnlyChat = Boolean(shop?.readOnly);
+    const retailer = shop?.cart?.retailer;
+    const orderState = shop?.orderState;
+    if (!cotoResumeProbe({ readOnly: readOnlyChat, retailer, orderState, address }) || !address || !sign) {
+      setCotoResumeOrderId(null);
+      return;
+    }
     let gone = false;
-    fetch('/api/checkout/coto-real')
-      .then((res) => res.json())
-      .then((body: { allowed?: boolean }) => {
-        if (!gone) setCotoReal(body.allowed === true);
+    fetchAs({ address, sign }, '/api/checkout/coto-real/resume')
+      .then(async (res) => {
+        if (gone) return;
+        if (!res.ok) {
+          setCotoResumeOrderId(null);
+          return;
+        }
+        const body = (await res.json()) as { orderId?: string | null };
+        setCotoResumeOrderId(body.orderId ? body.orderId : null);
       })
       .catch(() => {
-        if (!gone) setCotoReal(false);
+        if (!gone) setCotoResumeOrderId(null);
       });
     return () => {
       gone = true;
     };
-  }, [address, setCotoReal]);
+  }, [address, shop?.readOnly, shop?.activeChatId, shop?.cart?.retailer, shop?.orderState, setCotoResumeOrderId, sign]);
+  useEffect(() => {
+    if (!setCotoAdmission) return;
+    setCotoAdmission('pending');
+    let gone = false;
+    fetch('/api/checkout/coto-real')
+      .then(async (res) => {
+        if (!res.ok) {
+          if (!gone) setCotoAdmission('failed');
+          return;
+        }
+        const body = (await res.json()) as { allowed?: boolean };
+        if (!gone) setCotoAdmission(body.allowed === true ? 'allowed' : 'denied');
+      })
+      .catch(() => {
+        if (!gone) setCotoAdmission('failed');
+      });
+    return () => {
+      gone = true;
+    };
+  }, [address, setCotoAdmission]);
   useEffect(() => {
     if (payRequest === seenPay.current) return;
     seenPay.current = payRequest;
-    if (!shop?.canOrder || !shop.cart || shop.dualCheckout) return;
+    if (!shop?.cart) return;
     if (shop.cart.retailer === 'coto') {
-      if (!shop.cotoReal) return;
-      setCotoModal(shop.cart);
+      const gate = cotoPayGate({
+        admission: shop.cotoAdmission,
+        orderState: shop.orderState,
+        readOnly: shop.readOnly,
+        resumeOpen: Boolean(shop.cotoResumeOrderId),
+        dualCheckout: shop.dualCheckout,
+        cart: shop.cart,
+      });
+      if (gate !== 'pay') return;
+      openCoto(shop.cart);
       return;
     }
+    if (!shop.canOrder || shop.dualCheckout) return;
     track('payment_start', { flow: 'rail' });
     setPaying({ cart: shop.cart, handoffUrl: shop.handoffUrl ?? undefined });
-  }, [payRequest, shop]);
+  }, [payRequest, shop, openCoto]);
 
   // The provider asks, this answers. Both halves of a restore land together —
   // transcript and session id — which is the whole point of CLAUDE.md §4.
@@ -232,8 +373,31 @@ function ChatCore({
     setPhoto(null);
     setPhotoNote(null);
     setPaying(null);
+    setCotoModal(null);
     ack();
   }, [request, ack, resume, reset]);
+
+  // HumanGate can unmount this pane while ShopProvider still holds the chat.
+  // One empty mount reopens it. A reload still starts fresh: activeChatId is
+  // null until the shopper picks a title.
+  const paneRestored = useRef(false);
+  useEffect(() => {
+    if (paneRestored.current) return;
+    paneRestored.current = true;
+    if (!shop) return;
+    const activeChatId = shop.activeChatId;
+    if (
+      !restoreActiveChat({
+        activeChatId,
+        blockCount: state.blocks.length,
+        pending: Boolean(shop.request),
+      }) ||
+      !activeChatId
+    ) {
+      return;
+    }
+    shop.openChat(activeChatId);
+  }, [shop, state.blocks.length]);
 
   // One chat is one order. Re-checked at /api/deposit, because a rule about
   // money does not get to live in a browser — but refusing here is what stops
@@ -300,6 +464,49 @@ function ChatCore({
   // still true for this render or the free-turn count is already spent.
   const gateText = loginGateBannerText({ isAuthenticated, loginRequired }, lang);
   const gated = gateText !== null;
+
+  useEffect(() => {
+    const was = wasStreaming.current;
+    wasStreaming.current = state.streaming;
+    if (!was || state.streaming) return;
+    const pending = pendingAdd.current;
+    if (!pending) return;
+    pendingAdd.current = null;
+    const cart = state.cart?.cart;
+    const lines = cart?.lines.length ?? 0;
+    const ready = !cart || lines === 0 || cart.retailer === pending.chain;
+    if (!ready) return;
+    void addCard(pending.chain, pending.id);
+  }, [state.streaming, state.cart, addCard]);
+
+  const requestAdd = async (chain: Chain, id: string): Promise<CardAddOutcome> => {
+    if (state.streaming) return { result: 'failed', reason: 'busy' };
+    if (gated || readOnly) return { result: 'failed', reason: 'add_failed' };
+    const current = state.cart?.cart;
+    const lines = current?.lines.length ?? 0;
+    if (
+      current &&
+      (current.retailer === 'dia' || current.retailer === 'coto') &&
+      needsSwitchConfirm({ retailer: current.retailer, lines }, chain)
+    ) {
+      pendingAdd.current = { chain, id };
+      setSwitchAsk({ from: current.retailer, to: chain });
+      return { result: 'confirm' };
+    }
+    const outcome = await addCard(chain, id);
+    if (
+      outcome.result === 'failed' &&
+      outcome.reason === 'switch_required' &&
+      current &&
+      (current.retailer === 'dia' || current.retailer === 'coto')
+    ) {
+      pendingAdd.current = { chain, id };
+      setSwitchAsk({ from: current.retailer, to: chain });
+      return { result: 'confirm' };
+    }
+    return outcome;
+  };
+
   const loginCopyVisible =
     loginGateBannerText({ isAuthenticated, loginRequired: true, turnsUsed: FREE_TURNS }) !== null;
 
@@ -490,7 +697,9 @@ function ChatCore({
     track('error_shown', { code: errorCode(lastError.message) });
   }, [state.blocks]);
 
-  const showBuildCart = offerBuildCart(state.blocks, state.streaming, readOnly);
+  const order = state.snapshot?.order;
+  const buildOffer = offerBuildCart(state.blocks, state.streaming, readOnly, order);
+  const buildChain = order === 'dia' || order === 'coto' ? order : undefined;
 
   return (
     // `is-empty` is the hook for the mobile first-screen layout. The class is
@@ -507,7 +716,7 @@ function ChatCore({
       >
         {state.blocks.length === 0 ? <Greeting onPick={submit} /> : null}
 
-        {state.blocks.map((b) => {
+        {state.blocks.map((b, index) => {
           switch (b.kind) {
             case 'user':
               return (
@@ -526,28 +735,39 @@ function ChatCore({
                   data-testid={(b.text ?? '').trim() === CITY_ASK ? 'chat-ask-city' : undefined}
                 >
                   <ToolTrail tools={b.tools} />
-                  {b.thinking && !b.text ? <p className="thinking">{b.thinking}</p> : null}
                   {b.text ? <MarkdownText text={b.text} /> : null}
                 </div>
               );
             case 'products':
-              return <ProductGrid key={b.id} items={b.items} note={b.note} />;
-            case 'cart': {
-              const cotoTarget = cotoPayTarget(
-                state.blocks.map((block) => ({
-                  id: block.id,
-                  kind: block.kind,
-                  retailer: block.kind === 'cart' ? block.cart.retailer : undefined,
-                })),
-                shop?.cotoReal === true,
+              return (
+                <ProductGrid
+                  key={b.id}
+                  items={b.items}
+                  note={b.note}
+                  disabled={state.streaming || gated || readOnly}
+                  onAdd={readOnly ? undefined : (id) => requestAdd('dia', id)}
+                />
               );
-              const thisCoto = b.cart.retailer === 'coto' && b.id === cotoTarget;
+            case 'cart': {
+              const newestCoto = b.cart.retailer === 'coto' && index === newestCotoCart(state.blocks);
+              const liveBasket = newestCoto && shop?.cart?.retailer === 'coto' ? shop.cart : b.cart;
+              const gate =
+                b.cart.retailer === 'coto'
+                  ? cotoPayGate({
+                      admission: shop?.cotoAdmission ?? 'pending',
+                      orderState: shop?.orderState ?? 'none',
+                      readOnly,
+                      resumeOpen: Boolean(shop?.cotoResumeOrderId),
+                      dualCheckout: Boolean(shop?.dualCheckout),
+                      cart: liveBasket,
+                    })
+                  : undefined;
               return (
                 <CartCard
                   key={b.id}
-                  cart={b.cart}
+                  cart={liveBasket}
                   handoffUrl={b.handoffUrl}
-                  cotoPay={thisCoto}
+                  cotoGate={gate}
                   // No longer gated on a wallet. The frame-checkout flow asks
                   // for an importe and a code, and the shopper pays the súper
                   // themselves — there is nothing here to sign, so requiring a
@@ -558,14 +778,13 @@ function ChatCore({
                     // what was bought, and a Pagar on it invites paying twice.
                     // A dual-checkout basket pays from the cards under the compare.
                     // Solo Día (demo on, Coto search off): one PayCard, still fees.
-                    // A Coto cart pays only when this block is the current one
-                    // and the wallet is allowlisted. That is not the demo PayCard.
-                    canOrder && !b.dualCheckout && b.orderable !== false && (b.cart.retailer !== 'coto' || thisCoto)
+                    // A Coto card pays the live basket when the gate says pay.
+                    b.cart.retailer === 'coto'
+                      ? gate === 'pay'
+                        ? () => openCoto(liveBasket)
+                        : undefined
+                      : canOrder && !b.dualCheckout && b.orderable !== false
                       ? (cart) => {
-                          if (cart.retailer === 'coto') {
-                            setCotoModal(cart);
-                            return;
-                          }
                           track('payment_start', { flow: 'frame' });
                           setPaying(
                             b.soloDia
@@ -583,26 +802,42 @@ function ChatCore({
                 />
               );
             }
-            case 'search_compare':
+            case 'search_compare': {
+              const row = searchRowAt(state.blocks, index);
+              if (row.length === 0) return null;
+              const order = state.snapshot?.order;
+              const newest = lastSearchCompare(state.blocks);
+              const rowIsNewest = newest !== undefined && row.some((block) => block.id === newest.id);
+              const onChain = (next: Chain, kind: 'choose' | 'build') => {
+                const current = state.cart?.cart;
+                const lines = current?.lines.length ?? 0;
+                if (
+                  current &&
+                  needsSwitchConfirm({ retailer: current.retailer, lines }, next) &&
+                  (current.retailer === 'dia' || current.retailer === 'coto')
+                ) {
+                  setSwitchAsk({ from: current.retailer, to: next });
+                  return;
+                }
+                submit(kind === 'choose' ? choiceMessage(next) : buildCartMessage(next));
+              };
               return (
                 <SearchCompareCard
-                  key={b.id}
-                  block={b}
-                  onChoose={(next) => {
-                    const current = state.cart?.cart;
-                    const lines = current?.lines.length ?? 0;
-                    if (
-                      current &&
-                      needsSwitchConfirm({ retailer: current.retailer, lines }, next) &&
-                      (current.retailer === 'dia' || current.retailer === 'coto')
-                    ) {
-                      setSwitchAsk({ from: current.retailer, to: next });
-                      return;
-                    }
-                    submit(choiceMessage(next));
-                  }}
+                  key={row[0].id}
+                  blocks={row}
+                  chains={sectionChains(row, rowIsNewest, order)}
+                  showChoose={order !== 'dia' && order !== 'coto'}
+                  showBuild={
+                    rowIsNewest && !state.streaming && !readOnly && !cartNewerThan(state.blocks, index)
+                  }
+                  buildDisabled={gated}
+                  onChoose={(next) => onChain(next, 'choose')}
+                  onBuild={(next) => onChain(next, 'build')}
+                  addDisabled={state.streaming || gated || readOnly}
+                  onAdd={readOnly ? undefined : requestAdd}
                 />
               );
+            }
             case 'missing':
               return (
                 <MissingCard
@@ -623,6 +858,21 @@ function ChatCore({
                   paying={paying !== null}
                   address={address}
                   location={state.snapshot?.location}
+                  query={queryBeforeCart(state.blocks, b.cartId)}
+                  postalCode={state.snapshot?.location?.postalCode}
+                  onChoose={(next) => {
+                    const current = state.cart?.cart;
+                    const lines = current?.lines.length ?? 0;
+                    if (
+                      current &&
+                      needsSwitchConfirm({ retailer: current.retailer, lines }, next) &&
+                      (current.retailer === 'dia' || current.retailer === 'coto')
+                    ) {
+                      setSwitchAsk({ from: current.retailer, to: next });
+                      return;
+                    }
+                    submit(choiceMessage(next));
+                  }}
                   onPay={(which, cart, handoffUrl, receiptLines, acceptedAlternatives) => {
                     setPayLock(which);
                     payOpened.current = false;
@@ -684,17 +934,25 @@ function ChatCore({
             />
           </p>
         ) : null}
-        {showBuildCart ? (
+        {buildOffer ? (
           <div className="chat-build">
             <button
               type="button"
               className="btn"
               data-testid="chat-build-cart"
               disabled={gated}
-              onClick={() => submit(copy.buildCartAsk)}
+              aria-label={
+                buildOffer === 'search' && buildChain
+                  ? `${copy.buildCart}, ${RETAILER_NAMES[buildChain]}`
+                  : undefined
+              }
+              onClick={() =>
+                submit(buildOffer === 'search' && buildChain ? buildCartMessage(buildChain) : copy.buildCartAsk)
+              }
             >
               {copy.buildCart}
             </button>
+            {buildOffer === 'search' ? <p data-testid="chat-keep-typing">{copy.keepTyping}</p> : null}
           </div>
         ) : null}
         {receipt ? <ReceiptCard receipt={receipt} /> : null}
@@ -887,7 +1145,10 @@ function ChatCore({
       {switchAsk ? (
         <Modal
           title={uiCopy(lang).switch.confirmTitle}
-          onClose={() => setSwitchAsk(null)}
+          onClose={() => {
+            pendingAdd.current = null;
+            setSwitchAsk(null);
+          }}
           testId="switch-confirm"
         >
           <p>{uiCopy(lang).switch.confirmBody(RETAILER_NAMES[switchAsk.from], RETAILER_NAMES[switchAsk.to])}</p>
@@ -908,7 +1169,10 @@ function ChatCore({
               type="button"
               className="btn btn-ghost"
               data-testid="switch-cancel"
-              onClick={() => setSwitchAsk(null)}
+              onClick={() => {
+                pendingAdd.current = null;
+                setSwitchAsk(null);
+              }}
             >
               {uiCopy(lang).switch.cancel(RETAILER_NAMES[switchAsk.from])}
             </button>
@@ -916,10 +1180,11 @@ function ChatCore({
         </Modal>
       ) : null}
 
-      {cotoModal && currentSessionId() ? (
+      {cotoModal ? (
         <CotoRealModal
-          cart={cotoModal}
-          sessionId={currentSessionId() as string}
+          cart={cotoModal.cart}
+          sessionId={cotoModal.sessionId}
+          resumeOnly={cotoModal.resumeOnly}
           postalCode={state.snapshot?.location?.postalCode}
           city={state.snapshot?.city}
           onClose={() => setCotoModal(null)}
@@ -977,6 +1242,9 @@ function DualCheckout({
   paying,
   address,
   location,
+  query,
+  postalCode,
+  onChoose,
   onPay,
 }: {
   block: Extract<Block, { kind: 'compare' }>;
@@ -986,6 +1254,9 @@ function DualCheckout({
   paying: boolean;
   address: string | null | undefined;
   location: unknown;
+  query?: string;
+  postalCode?: string;
+  onChoose: (retailer: Chain) => void;
   onPay: (
     which: 'dia' | 'coto',
     cart: Cart,
@@ -1019,7 +1290,7 @@ function DualCheckout({
   };
   return (
     <div className="compare-pay">
-      <ComparisonCard block={block} />
+      <CompareCloseTable block={block} query={query} postalCode={postalCode} onChoose={onChoose} />
       <DualPay
         block={block}
         blocks={blocks}

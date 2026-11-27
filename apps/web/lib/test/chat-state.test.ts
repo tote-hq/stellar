@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 
 import {
+  applyCartAddReply,
   applyEvent,
+  cartAdded,
   canRetry,
   dualCheckoutOn,
   endTurn,
@@ -11,6 +13,7 @@ import {
   omitErrorMessage,
   resetIds,
   retryUser,
+  searchRowAt,
   sendUser,
   type ChatState,
 } from '../chat-state.ts';
@@ -123,6 +126,78 @@ describe('applyEvent', () => {
     assert.deepEqual(s.blocks.map((b) => b.kind), ['user', 'cart', 'user', 'cart']);
     assert.equal(s.blocks[1].kind === 'cart' && s.blocks[1].handoffUrl, undefined);
     assert.equal(s.blocks[3].kind === 'cart' && s.blocks[3].handoffUrl, 'https://dia/checkout');
+  });
+
+  it('replaces the same cart when a card click adds a line', () => {
+    resetIds();
+    const shown = run([{ t: 'cart', cart: cart('c1'), handoffUrl: 'https://dia/checkout' }]);
+    const id = shown.blocks[0].id;
+    const next = {
+      ...cart('c1'),
+      lines: [
+        {
+          index: 0,
+          skuId: 'd1',
+          name: 'Leche',
+          quantity: 1,
+          sellerId: '1',
+          unitPrice: money(1000),
+          lineTotal: money(1000),
+          available: true,
+        },
+      ],
+      total: money(1000),
+    };
+    const added = cartAdded(shown, { t: 'cart', cart: next }, { carts: {} });
+    assert.equal(added.blocks.length, 1);
+    assert.equal(added.blocks[0].id, id);
+    assert.equal(added.blocks[0].kind === 'cart' && added.blocks[0].handoffUrl, 'https://dia/checkout');
+    assert.equal(added.cart?.cart.lines.length, 1);
+    assert.deepEqual(added.snapshot, { carts: {} });
+
+    resetIds();
+    const fresh = cartAdded(initialState, { t: 'cart', cart: cart('c2'), handoffUrl: 'https://dia/new' }, undefined);
+    assert.equal(fresh.blocks.length, 1);
+    assert.equal(fresh.blocks[0].kind === 'cart' && fresh.blocks[0].cart.cartId, 'c2');
+    assert.equal(fresh.cart?.cart.cartId, 'c2');
+  });
+
+  it('keeps a successful card add when the server drew no cart', () => {
+    // A Día add whose link call failed returns 200 { ok: true, event: null }
+    // after the line is already in the basket. Treating that as a failure
+    // shows "could not add" and drops the new cart id, so a retry adds twice
+    // and the next chat turn rebuilds an empty session.
+    const held = { carts: { dia: 'old' } };
+    const next = { carts: { dia: 'new' }, order: 'dia' as const };
+    const event = { t: 'cart' as const, cart: cart('new'), handoffUrl: 'https://dia/checkout' };
+
+    const drawn = applyCartAddReply(held, true, { ok: true, event, snapshot: next });
+    assert.equal(drawn.result, 'added');
+    assert.deepEqual(drawn.snapshot, next);
+    const withCard = drawn.apply(initialState);
+    assert.equal(withCard.blocks.length, 1);
+    assert.equal(withCard.blocks[0].kind === 'cart' && withCard.blocks[0].cart.cartId, 'new');
+    assert.deepEqual(withCard.snapshot, next);
+
+    resetIds();
+    const shown = run([{ t: 'text', delta: 'Listo.' }]);
+    const quiet = applyCartAddReply(held, true, { ok: true, event: null, snapshot: next });
+    assert.equal(quiet.result, 'added');
+    assert.deepEqual(quiet.snapshot, next);
+    const kept = quiet.apply(shown);
+    assert.deepEqual(kept.blocks, shown.blocks);
+    assert.equal(kept.cart, undefined);
+    assert.deepEqual(kept.snapshot, next);
+
+    const refused = applyCartAddReply(held, true, { ok: false, event, snapshot: next });
+    assert.equal(refused.result, 'failed');
+    assert.deepEqual(refused.snapshot, held);
+    assert.equal(refused.apply(shown), shown);
+
+    const http = applyCartAddReply(held, false, { ok: true, event: null, snapshot: next });
+    assert.equal(http.result, 'failed');
+    assert.deepEqual(http.snapshot, held);
+    assert.equal(http.apply(shown), shown);
   });
 
   it('drops the get_cart_link trail row once this turn draws the cart', () => {
@@ -374,6 +449,15 @@ describe('dual checkout flags on the transcript', () => {
     assert.equal(card?.kind === 'cart' && card.dualCheckout, true);
     assert.equal(compare?.kind === 'compare' && compare.checkoutDemo, true);
     assert.equal(dualCheckoutOn(s), true);
+    const cotoCart = { ...cart('coto-1'), retailer: 'coto' };
+    const afterCoto = run([
+      cartEvent,
+      settled,
+      { t: 'cart', cart: cotoCart, dualCheckout: true },
+    ]);
+    const cotoCard = afterCoto.blocks.filter((b) => b.kind === 'cart').at(-1);
+    assert.equal(cotoCard?.kind === 'cart' && cotoCard.dualCheckout, undefined);
+    assert.equal(dualCheckoutOn(afterCoto), false);
     const waiting = run([cartEvent, pending]);
     const row = waiting.blocks.find((b) => b.kind === 'compare');
     assert.equal(row?.kind === 'compare' && row.checkoutDemo, undefined);
@@ -407,6 +491,34 @@ describe('search compare and missing blocks', () => {
     assert.equal(cards[0]?.kind === 'search_compare' && cards[0].gapCentavos, 200);
   });
 
+  it('keeps card fields and the chains that were queried', () => {
+    resetIds();
+    const done = {
+      t: 'search_compare' as const,
+      id: 'sc2',
+      status: 'ok' as const,
+      query: 'huevos',
+      chains: ['coto'] as ('dia' | 'coto')[],
+      dia: [],
+      coto: [
+        {
+          id: 'c1',
+          name: 'Huevos',
+          shelfCentavos: 800,
+          available: true,
+          brand: 'Coto',
+          imageUrl: 'https://img.test/huevos.jpg',
+        },
+      ],
+    };
+    const s = run([done], sendUser(initialState, 'huevos'));
+    const card = s.blocks.find((b) => b.kind === 'search_compare');
+    assert.equal(card?.kind === 'search_compare' && card.chains?.[0], 'coto');
+    assert.equal(card?.kind === 'search_compare' && card.coto[0]?.brand, 'Coto');
+    assert.equal(card?.kind === 'search_compare' && card.coto[0]?.imageUrl, 'https://img.test/huevos.jpg');
+    assert.equal(card?.kind === 'search_compare' && card.coto[0]?.unitMultiplier, undefined);
+  });
+
   it('appends a missing block after the search card', () => {
     resetIds();
     const s = run(
@@ -418,5 +530,48 @@ describe('search compare and missing blocks', () => {
     );
     const kinds = s.blocks.map((b) => b.kind);
     assert.deepEqual(kinds, ['user', 'search_compare', 'missing']);
+  });
+});
+
+describe('searchRowAt', () => {
+  it('returns the turn in order at the first index and nothing at the later ones', () => {
+    resetIds();
+    const s = run(
+      [
+        { t: 'search_compare', id: 'a', status: 'ok', query: 'arroz', dia: [], coto: [] },
+        { t: 'search_compare', id: 'b', status: 'ok', query: 'huevos', dia: [], coto: [] },
+      ],
+      sendUser(initialState, 'lista'),
+    );
+    const first = s.blocks.findIndex((b) => b.kind === 'search_compare');
+    const later = s.blocks.findIndex((b, i) => i > first && b.kind === 'search_compare');
+    const row = searchRowAt(s.blocks, first);
+    assert.deepEqual(
+      row.map((b) => b.query),
+      ['arroz', 'huevos'],
+    );
+    assert.deepEqual(searchRowAt(s.blocks, later), []);
+  });
+
+  it('does not reach into the previous turn', () => {
+    resetIds();
+    const firstTurn = run(
+      [{ t: 'search_compare', id: 'a', status: 'ok', query: 'arroz', dia: [], coto: [] }],
+      sendUser(initialState, 'uno'),
+    );
+    const second = run(
+      [{ t: 'search_compare', id: 'b', status: 'ok', query: 'huevos', dia: [], coto: [] }],
+      sendUser(firstTurn, 'dos'),
+    );
+    const earlier = second.blocks.findIndex((b) => b.kind === 'search_compare' && b.query === 'arroz');
+    const current = second.blocks.findIndex((b) => b.kind === 'search_compare' && b.query === 'huevos');
+    assert.deepEqual(
+      searchRowAt(second.blocks, earlier).map((b) => b.query),
+      ['arroz'],
+    );
+    assert.deepEqual(
+      searchRowAt(second.blocks, current).map((b) => b.query),
+      ['huevos'],
+    );
   });
 });

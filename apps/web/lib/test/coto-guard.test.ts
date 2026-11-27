@@ -80,6 +80,8 @@ describe('cotoCheckoutBlocked', () => {
     assert.equal(realStart.includes('startJob'), false);
     assert.equal(realStart.includes('getProfile'), false);
     assert.equal(realStart.includes('password'), false);
+    assert.equal(realStart.includes('loadSharedCard'), false);
+    assert.equal(realStart.includes('shared_card'), false);
     const open = read('app/api/checkout/open/route.ts');
     const channels = read('app/api/checkout/channels/route.ts');
     const earlier = (source: string, left: string, right: string) => {
@@ -88,6 +90,8 @@ describe('cotoCheckoutBlocked', () => {
     earlier(start, 'cotoRealRecord(rec)', 'startJob(');
     earlier(open, 'cotoRealRecord(got.rec)', 'recoverOpenAttempt(');
     earlier(channels, 'cotoRealRecord(rec)', 'prepareOpen(');
+    assert.match(channels, /\} else if \(rec && cotoCheckoutBlocked\(rec\.retailer\)/);
+    assert.match(open, /\} else if \(cotoCheckoutBlocked\(got\.rec\.retailer\)/);
     assert.equal(settleBasis({ retailer: 'dia', mode: 'mock' }), 'basis|sandbox-order-placed');
     assert.equal(settleBasis({ retailer: 'dia', mode: 'demo' }), 'basis|demo-reached-payment');
     assert.equal(settleBasis({ retailer: 'dia' }), 'basis|sandbox-order-placed');

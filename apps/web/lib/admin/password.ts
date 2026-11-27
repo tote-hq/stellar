@@ -1,65 +1,94 @@
-import { argon2id } from '@noble/hashes/argon2';
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 
 /**
- * hash-wasm compiles its argon2 module from a base64 blob on the first call.
- * Workers reject that compile, so every login threw CompileError before the
- * password was compared. noble is plain JavaScript and checks the stored PHC
- * as written, including the node-argon2 defaults (m=65536, t=3, p=4). That
- * pass takes about a second.
+ * Temporary admin check. A password_hash that starts with pbkdf2-sha256$ is
+ * WebCrypto PBKDF2-HMAC-SHA256. Anything else is the password itself, compared
+ * in constant time, so a row can be filled in by hand. The password is never
+ * logged. The plaintext form is temporary.
  */
 
+const ITERATIONS = 100_000;
+const SALT_BYTES = 16;
+const DK_BYTES = 32;
+
 /**
- * Public dummy. Unknown users still run a verify, at the same cost as a
- * stored hash (argon2id, m=65536, t=3, p=4). A cheaper dummy would say which
- * usernames exist.
+ * Public dummy, same cost as a real hash. Unknown users still run a verify
+ * so the branch is not a fast reject.
  */
 export const DUMMY_PASSWORD_HASH =
-  '$argon2id$v=19$m=65536,t=3,p=4$/QAKzAkRf+6lkfyq4PCaSg$waxKyVAsGotfwWXm6uJzRv2bUk+P80F1qWWvii1oCdk';
+  'pbkdf2-sha256$100000$ZHVtbXktc2FsdC0xNmJ5dA$eRP0nlw0AxbUGEThH0v-VfPXaNjQcJ2oHU8fyxkZcpc';
 
 export type PasswordMatch =
   | { ok: true }
   | { ok: false; reason: 'mismatch' }
   | { ok: false; reason: 'threw'; errorName: string };
 
-const PHC =
-  /^\$argon2id\$v=(\d+)\$m=(\d+),t=(\d+),p=(\d+)\$([A-Za-z0-9+/]+)\$([A-Za-z0-9+/]+)$/;
+const PHC = /^pbkdf2-sha256\$(\d+)\$([A-Za-z0-9_-]+)\$([A-Za-z0-9_-]+)$/;
 
-function phcBytes(encoded: string): Buffer {
-  const pad = encoded.length % 4 === 0 ? '' : '='.repeat(4 - (encoded.length % 4));
-  return Buffer.from(encoded + pad, 'base64');
+function b64(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString('base64url');
 }
 
-/** PHC writes 19 and 16. noble wants the raw version byte. */
-function argonVersion(v: number): number {
-  if (v === 19) return 0x13;
-  if (v === 16) return 0x10;
-  throw new Error('bad phc');
+function b64decode(encoded: string): Uint8Array {
+  return new Uint8Array(Buffer.from(encoded, 'base64url'));
+}
+
+/** Equal-length digests, so a shorter row is not a faster reject. */
+function sameText(a: string, b: string): boolean {
+  const left = createHash('sha256').update(a, 'utf8').digest();
+  const right = createHash('sha256').update(b, 'utf8').digest();
+  return timingSafeEqual(left, right);
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  const subtleEq = (crypto.subtle as { timingSafeEqual?: (left: Uint8Array, right: Uint8Array) => boolean })
+    .timingSafeEqual;
+  if (typeof subtleEq === 'function') return subtleEq(a, b);
+  return timingSafeEqual(a, b);
+}
+
+async function derive(password: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
+  const saltBytes = new Uint8Array(salt.byteLength);
+  saltBytes.set(salt);
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt: saltBytes, iterations },
+    key,
+    DK_BYTES * 8,
+  );
+  return new Uint8Array(bits);
+}
+
+/** A new password_hash line. The salt is random. The password is not stored. */
+export async function hashPassword(password: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
+  const dk = await derive(password, salt, ITERATIONS);
+  return `pbkdf2-sha256$${ITERATIONS}$${b64(salt)}$${b64(dk)}`;
 }
 
 /** The name only. A verifier message can echo the hash string. */
 export async function passwordMatches(password: string, hash: string): Promise<PasswordMatch> {
+  if (!hash.startsWith('pbkdf2-sha256$')) {
+    return sameText(password, hash) ? { ok: true } : { ok: false, reason: 'mismatch' };
+  }
   try {
     const match = PHC.exec(hash);
-    const saltEnc = match?.[5];
-    const hashEnc = match?.[6];
-    if (!match || !saltEnc || !hashEnc) throw new Error('bad phc');
-    const memory = Number(match[2]);
-    const time = Number(match[3]);
-    const parallelism = Number(match[4]);
-    if (memory < 1 || time < 1 || parallelism < 1) throw new Error('bad phc');
-    const salt = phcBytes(saltEnc);
-    const expected = phcBytes(hashEnc);
-    if (salt.length < 8 || expected.length < 1) throw new Error('bad phc');
-    const digest = argon2id(new TextEncoder().encode(password), salt, {
-      t: time,
-      m: memory,
-      p: parallelism,
-      dkLen: expected.length,
-      version: argonVersion(Number(match[1])),
-    });
-    const same = digest.length === expected.length && timingSafeEqual(digest, expected);
-    return same ? { ok: true } : { ok: false, reason: 'mismatch' };
+    const iterations = match ? Number(match[1]) : 0;
+    const saltEnc = match?.[2];
+    const hashEnc = match?.[3];
+    if (!match || !saltEnc || !hashEnc || iterations !== ITERATIONS) throw new Error('bad phc');
+    const salt = b64decode(saltEnc);
+    const expected = b64decode(hashEnc);
+    if (salt.length < 8 || expected.length !== DK_BYTES) throw new Error('bad phc');
+    const digest = await derive(password, salt, iterations);
+    return sameBytes(digest, expected) ? { ok: true } : { ok: false, reason: 'mismatch' };
   } catch (err) {
     const errorName = err instanceof Error && err.name ? err.name : 'Error';
     return { ok: false, reason: 'threw', errorName };

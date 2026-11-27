@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { mock, describe, it } from 'node:test';
 
-import { cotoRealJobBody } from '../checkout/sandbox.ts';
+import { cotoRealJobBody, readCotoViewer, sandboxOrigin } from '../checkout/sandbox.ts';
 
 describe('coto real sandbox body', () => {
   it('sends the delivery address and no Día login or card', () => {
@@ -19,15 +19,73 @@ describe('coto real sandbox body', () => {
     assert.equal(json.includes('card'), false);
   });
 
-  it('includes the ops card when the server has one', () => {
-    const body = cotoRealJobBody('a'.repeat(64), [{ name: 'Leche', quantity: 1, sku: 'sku-1' }], {
+  it('never carries a card in either fulfillment', () => {
+    const sentinel = 'SENTINEL-CARD-VALUE';
+    const home = cotoRealJobBody('a'.repeat(64), [{ name: 'Leche', quantity: 1, sku: 'sku-1' }], {
+      fulfillment: 'home',
+      city: 'CABA',
+      delivery: { postalCode: '1425', street: 'Calle', number: '10', city: 'CABA' },
+    });
+    const pickup = cotoRealJobBody('b'.repeat(64), [{ name: 'Leche', quantity: 1, sku: 'sku-1' }], {
       fulfillment: 'pickup',
       city: 'CABA',
-      card: { pan: '0000000000000000', cvv: '123', exp_month: '01', exp_year: '30', holder: 'OPS', kind: 'debit' },
     });
-    assert.equal(body.city, 'CABA');
-    assert.equal(body.card?.pan, '0000000000000000');
-    assert.equal(body.delivery, undefined);
-    assert.equal(JSON.stringify(body).includes('street'), false);
+    for (const body of [home, pickup]) {
+      assert.equal('card' in body, false);
+      const json = JSON.stringify(body);
+      assert.equal(json.includes('card'), false);
+      assert.equal(json.includes('pan'), false);
+      assert.equal(json.includes(sentinel), false);
+    }
+    const withUrl = cotoRealJobBody('c'.repeat(64), [
+      { name: 'Leche', quantity: 1, sku: 'sku-1', url: 'https://www.coto.com.ar/product/leche' },
+      { name: 'Manteca TONADITA 100 g', quantity: 1, sku: 'sku-2' },
+    ], { fulfillment: 'pickup', city: 'CABA' });
+    assert.equal(withUrl.items[0]?.url, 'https://www.coto.com.ar/product/leche');
+    assert.equal('url' in withUrl.items[1]!, false);
+    assert.equal(JSON.stringify(withUrl.items).includes('/producto/'), false);
+    assert.equal(pickup.city, 'CABA');
+    assert.equal(pickup.delivery, undefined);
+    assert.equal(JSON.stringify(pickup).includes('street'), false);
+  });
+});
+
+describe('readCotoViewer', () => {
+  const env = { NODE_ENV: 'test' as const, SANDBOX_URL: 'https://sandbox.example/sandbox', SANDBOX_TOKEN: 'tok' };
+
+  it('reads the url, the ticket and the job id from the sandbox origin', async () => {
+    assert.equal(sandboxOrigin(env), 'https://sandbox.example');
+    const fetchMock = mock.method(globalThis, 'fetch', async () =>
+      Response.json({
+        url: 'https://sandbox.example/viewer/?job=job1&part=screen',
+        ticket: 'a'.repeat(43),
+        job_id: 'job1',
+      }),
+    );
+    try {
+      const viewer = await readCotoViewer('job1', env);
+      assert.deepEqual(viewer, {
+        url: 'https://sandbox.example/viewer/?job=job1&part=screen',
+        ticket: 'a'.repeat(43),
+        jobId: 'job1',
+      });
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it('rejects a viewer URL on a foreign origin', async () => {
+    const fetchMock = mock.method(globalThis, 'fetch', async () =>
+      Response.json({
+        url: 'https://evil.example/viewer/?job=job1',
+        ticket: 'a'.repeat(43),
+        job_id: 'job1',
+      }),
+    );
+    try {
+      assert.equal(await readCotoViewer('job1', env), null);
+    } finally {
+      fetchMock.mock.restore();
+    }
   });
 });

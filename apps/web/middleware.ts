@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
-import { decideAdmin } from './lib/admin/gate';
+import { adminDocumentCsp, decideAdmin } from './lib/admin/gate';
 import {
   AI_BOT_UA,
   hasBrowserFetchHints,
@@ -18,16 +18,22 @@ function humansOnly(message: string) {
   return NextResponse.json({ error: 'solo_humanos', message }, { status: 403, headers: PRIVATE_NO_STORE });
 }
 
+/** One CSP on the admin document. next.config skips its own CSP for this host. */
+function withAdminCsp(res: NextResponse): NextResponse {
+  res.headers.set('Content-Security-Policy', adminDocumentCsp());
+  return res;
+}
+
 export async function middleware(req: NextRequest) {
   const admin = await decideAdmin(req);
   if (admin?.handled) {
     if (admin.rewrite) {
       const url = req.nextUrl.clone();
       url.pathname = admin.rewrite;
-      return NextResponse.rewrite(url);
+      return withAdminCsp(NextResponse.rewrite(url));
     }
     if (admin.status === 200 && admin.body === undefined) return NextResponse.next();
-    return new NextResponse(admin.body ?? null, { status: admin.status, headers: admin.headers });
+    return withAdminCsp(new NextResponse(admin.body ?? null, { status: admin.status, headers: admin.headers }));
   }
 
   const path = req.nextUrl.pathname;

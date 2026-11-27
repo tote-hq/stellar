@@ -47,6 +47,15 @@ put it in. That matters most directly above a button that spends money.
 If you add a render tool, keep the property. The moment an input carries a
 value rather than a reference, the grid can be wrong.
 
+A search grid under dual compare is a server pick, not a model call. While
+both chains are open, the card shows one available product per type per chain:
+the cheapest hit in the best-matching tier. After the shopper chooses a chain,
+that chain's card lists several, ranked, best match first. The model does not
+choose which row to show. In compare mode
+`render_products` is refused by the server for SKUs already on that row
+(`RenderCache.compared`). The prompt asks the model not to call it; the
+refusal is what keeps the extra grid off.
+
 ### 2. The cart draws itself, and §1 does not apply to it
 
 *First the bug: two cart cards in one reply, the first without a link. Then the
@@ -91,11 +100,25 @@ fingerprint has changed since the last card. Four parts hold it up:
   moment the pairing is known. A card whose only actionable control is missing
   is the first bug again; a link carried onto a different basket opens somebody
   else's. A Coto basket is the exception, and it does not reopen that bug. It
-  has no store link and no pay control — Coto payment is not implemented — so
-  the card draws from the lines alone and says the order cannot be paid yet.
-  A Día cart without a link still does not draw. The link rule exists because
-  a Día card's action is that link. A card that is not allowed to spend
-  anything is not missing its only control.
+  has no store link. Pay is the gate on the card: `orderable` is true only
+  when `RenderCache.cotoPay` is true, a line is available, and the total is
+  above zero. That bit is this request's `admitCotoRequest` result, stored as
+  an optional `cotoPay` on the turn (not a `v` bump). The client still applies
+  its own admission state, so `orderable: true` does not show Pay to an
+  account that is not admitted. Pay on any Coto card charges the live basket.
+  A read-only chat (past the hour) still offers Pay on a Coto card only when the resume route returns an open order, and that modal resumes the order and never quotes or locks; the agent session is not resumed.
+  The gate phrase replaces the generic "cannot be paid yet" line. A Día cart
+  without a link still does not draw. The link rule exists because a Día
+  card's action is that link. `dualCheckout` is stamped only while no chain
+  is chosen, and it is never put on a Coto cart. The newest Coto card shows
+  the live basket, so its lines and total match the rail. Older Coto cards
+  stay the record of what the basket was then.
+
+  Before the banner and before hop 0, if the cache has no cart and the session
+  still has Coto lines or a Día cart id, the loop calls `view_cart` in-process.
+  That retrieval emits no trail row. `drawn` is set to the card print so an
+  unchanged basket is not drawn again. If `view_cart` fails, the banner says
+  `cart unknown` and the model must not claim the cart is empty.
 - **`drawn` and `handoffFor` ride in `turn-store.ts` as optional fields**, not a
   `v: 2`. A version bump resets every conversation in flight at deploy time,
   which is a worse trade than one redundant card.
@@ -191,6 +214,10 @@ lists them, and `use-chat.ts`'s `resume` puts one back with `seedIds` so the
 restored blocks do not collide with new ones. A chat the server can no longer
 continue comes back **read-only** rather than pretending, which is what
 `isResumable` is for. Do not re-add the id to storage on its own.
+
+`HumanGate` can unmount the chat pane under a live `ShopProvider`. A pane that
+mounts empty while `activeChatId` is set reopens that chat through `openChat`,
+never `resume` on its own.
 
 **Three stores hold a conversation, and they are not redundant.** Redis
 (`turn-store.ts`) is the working store the hop loop reads up to twelve times a
@@ -311,7 +338,9 @@ Now there is a `status` event, and it never creates a block:
   responder"), not `network` ("No se envió"). The retry control is the same
   — history is still only written on a clean return — but the copy is true.
 - **`thinking`** at the top of every hop, with its index. Hop 0 is reading
-  the user; later hops are reading tool results.
+  the user; later hops are reading tool results. The model's reasoning
+  stream is not shown in the thread. `onThinking` is a no-op. The `thinking`
+  event stays in the protocol so an old bundle still parses.
 - **`fallback`** is in the protocol and emitted by nothing, since §5. Left
   there deliberately: an old bundle meeting a new server is the reason wire
   protocols shrink slowly.
@@ -352,28 +381,58 @@ the message, which is what used to happen to every message.
 
 When `chat_dual_compare` is on, `retailer_search.enabled.coto` is true, and the
 session retailer is Día, `search_products` also queries the Coto catalog
-in-process, in parallel with the Día call, with a 10s cap. The Coto lookup is
-not an MCP call and gets no trail row (§3). The shopper picks the chain with
-`choose_retailer`. The model cannot `add_to_cart` before that choice, and it
-cannot pick the cheaper chain: the chosen store has to be named in the
-shopper's message or in the assistant question just before it.
+in-process, in parallel with the Día call, with a 10s cap, until the shopper
+picks a chain. After that, a search queries only the chosen chain. A Coto
+search does not call Día and gets no trail row (§3). The Coto lookup on a
+dual search is not an MCP call and gets no trail row either. The shopper
+picks the chain with `choose_retailer`. The model cannot `add_to_cart` before
+that choice, and it cannot pick the cheaper chain: the chosen store has to be
+named in the shopper's message or in the assistant question just before it.
 
 `choose_retailer` only records the chain. It does not put lines in the basket,
 and `autoRenderCart` draws nothing until there are lines (a Día card also
-needs `get_cart_link`). The click "Pedir en Día" is the sentence "Quiero pedir
-en Día." The prompt, the tool description and the tool result all tell the
-model to `add_to_cart` and `get_cart_link` in that same turn. Stopping after
-`choose_retailer` is how a turn ended with the compare card still on screen
-and no cart. The compared item is `pairDia` / `pairCoto` on the
-`search_compare` line, not every row on the card.
+needs `get_cart_link`). The click "Seguir en Día" is the sentence "Quiero
+seguir en Día." It calls `choose_retailer` and does not `add_to_cart`. Later
+searches query that chain only. "Armar carrito" in a section is "Armá el
+carrito de Día …" (or Coto). That sentence calls `choose_retailer` if the
+order is not already that chain, then `add_to_cart` and `get_cart_link` in
+the same turn. The prompt, the tool description and the tool result say the
+same thing. Stopping after `choose_retailer` on an Armar turn leaves the
+compare card on screen and no cart. While both chains are open, the search
+card shows one product per type per chain, the cheapest in the best-matching
+tier, picked on the server (`pickDia` / `pickCoto`). After a chain is chosen,
+that chain's card lists up to six, ranked by type score. Within one score,
+ids not yet in `RenderCache.shown` come before ones already shown, then
+price. A precise ask still leads with the best match after it has been drawn.
+A typed set that is empty tries a short wider pass, in-process under the row
+already open, before the card says the type is missing. Hits remembered on
+the turn that score for the query join that pass; the note marks them `seen`. A type that matches a cart line is
+`inCart` and is not "no está". After "Quiero seguir en {store}.", the composer
+offers Armar and says she can keep typing. Armar adds the pick, one per type.
+`pairDia` / `pairCoto` stay the item the fee gap
+was computed on. They are not what Armar adds when they differ from the pick.
+The gap and the 20% fee are drawn on the close table, after a cart exists.
+
+A build-cart turn is `buildCartMessage` or the Spanish or English Armar ask. On that turn `search_products` still runs, and the cache writes and the note stay, but the search is quiet: no `search_compare` card is emitted, and `render_products` is refused. Día regions are asked with the four-digit core of the postal code. A region whose sellers list is empty is not a delivery region: `resolveLocation` stores no `regionId`, sets `undeliverable`, and search returns no products. A missing region id, or a failed regions call, still uses national defaults.
 
 A Coto basket is lines held on the session snapshot (`order`, `coto`) and
 priced from `CotoCatalog.getProduct` on every read. The id is a stable
-`coto-<uuid>`. Oracle ATG, the store link and payment are not implemented.
-`getAdapter('coto')` still throws. `autoCompare` stays Día-only.
+`coto-<uuid>`. Oracle ATG and the store link are not implemented. An admitted
+account pays from the rail and from every Coto card; the card pays the live
+basket, and the gate phrase is what shows when it cannot. `orderable` follows
+`RenderCache.cotoPay`. `getAdapter('coto')` still throws. `autoCompare` stays
+Día-only.
 
 `render_missing` takes a query and a retailer, and only when that query was
 searched this turn on that store and came back with no available hit.
+
+A card click is a server cart write (`POST /api/cart/add`). The body carries
+`chain` and `id`. The server prices the line from the turn cache and ignores
+any price, name, or quantity. The click names the chain: when the order is
+unset and dual compare is on, the route calls `choose_retailer` before
+`add_to_cart`. A basket with lines on the other chain is refused until the
+shopper confirms the existing switch dialog. The cart card then draws through
+`autoRenderCart`, under the same fingerprint rules as a model add.
 
 ---
 
@@ -403,7 +462,7 @@ searched this turn on that store and came back with no available hit.
 ## Before you commit
 
 ```
-npm test                        # 720: mcp 209 · trust 1 · web 510
+npm test                        # 869: mcp 221 · trust 1 · web 647
 npm run typecheck -w @changuito/web
 npm run build
 ```

@@ -3,6 +3,8 @@
  * human gate, and does not query Postgres from here.
  */
 
+import { sandboxOrigin } from '../checkout/sandbox.ts';
+import { appContentSecurityPolicy } from '../security-headers.ts';
 import { adminSessionSecret } from './secret.ts';
 import { readAdminCookie, verifyAdminCookie, type AdminPayload } from './cookie.ts';
 import { LOGIN_HEADERS, loginDocument } from './login-html.ts';
@@ -87,13 +89,22 @@ export async function decideAdmin(req: {
     return { status: 200, handled: true };
   }
 
+  // `/orders` and `/orders/` are the desk: a note without an order id used to
+  // link there, and an empty 404 is what Chrome showed the operator.
   const order = path.match(/^\/orders\/([^/]+)$/);
-  const document = (req.method === 'GET' || req.method === 'HEAD') && (path === '/' || order);
+  const desk = path === '/' || path === '/orders' || path === '/orders/';
+  const document = (req.method === 'GET' || req.method === 'HEAD') && (desk || order);
   if (document) {
     if (!session) return login(url.searchParams.get('login') === 'failed');
-    const rewrite = path === '/' ? '/admin-portal' : `/admin-portal/orders/${order?.[1]}`;
+    const rewrite = desk ? '/admin-portal' : `/admin-portal/orders/${order?.[1]}`;
     return { status: 200, rewrite, handled: true };
   }
 
   return { status: 404, body: '', headers: { 'cache-control': 'private, no-store' }, handled: true };
+}
+
+/** CSP for an admin document. frame-src adds the sandbox origin at runtime. */
+export function adminDocumentCsp(env: NodeJS.ProcessEnv = process.env): string {
+  const origin = sandboxOrigin(env);
+  return appContentSecurityPolicy(env.NODE_ENV, undefined, origin ? [origin] : []);
 }

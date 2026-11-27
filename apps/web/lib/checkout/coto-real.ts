@@ -192,8 +192,9 @@ export function freezeCotoReal(
   return { ok: true, snapshot };
 }
 
+/** No snapshot means no Día match yet, which quotes as an empty comparison. */
 export function quoteBuyerError(snapshot: CotoRealDia | undefined, address: string): string | undefined {
-  if (!snapshot) return 'Volvé a comparar antes de pagar.';
+  if (!snapshot) return undefined;
   if (!snapshot.buyer) return 'Confirmá Coto de nuevo con la sesión iniciada.';
   if (snapshot.buyer !== address) return 'Este changuito está asociado a otra cuenta.';
   return undefined;
@@ -328,9 +329,15 @@ const SHOPPER_COPY: Record<string, string> = {
   sku_rejected: 'No pudimos cargar un producto. Te devolvemos el saldo.',
 };
 
-/** Human Spanish. Never a phase, a code, or a URL. */
-export function shopperCopy(code: string | null | undefined, payment?: string | null): string {
+/** Human Spanish. Never a phase, a code, or a URL. A named line is the product that could not be added. */
+export function shopperCopy(
+  code: string | null | undefined,
+  payment?: string | null,
+  failedLine?: string | null,
+): string {
   if (payment === 'declined') return SHOPPER_COPY.payment_declined;
+  const line = typeof failedLine === 'string' ? failedLine.trim() : '';
+  if (code === 'sku_rejected' && line) return `No pudimos cargar «${line}». Te devolvemos el saldo.`;
   if (code && SHOPPER_COPY[code]) return SHOPPER_COPY[code];
   return 'No pudimos completar el pedido. Te devolvemos el saldo.';
 }
@@ -339,6 +346,13 @@ export interface ShopperPrompt {
   label: string;
   fieldRef: string | null;
   options: { label: string; value: string; suggested?: boolean }[] | null;
+}
+
+/** An empty pickup question is not a question. Every other prompt is unchanged. */
+export function shopperPrompt(prompt: ShopperPrompt | null | undefined): ShopperPrompt | null {
+  if (!prompt) return null;
+  if (prompt.fieldRef === 'pickup_branch' && !(prompt.options && prompt.options.length > 0)) return null;
+  return prompt;
 }
 
 export function cotoShopperBody(
@@ -393,27 +407,6 @@ export function deliveryBeforeShop(phases: readonly string[]): boolean {
   const delivery = phases.indexOf('delivery');
   const shop = phases.indexOf('shop');
   return delivery !== -1 && shop !== -1 && delivery < shop;
-}
-
-export interface PayBlock {
-  id: string;
-  kind: string;
-  retailer?: string;
-}
-
-/** The latest Coto cart after the latest user message, and only when admitted. */
-export function cotoPayTarget(blocks: readonly PayBlock[], allowed: boolean): string | undefined {
-  if (!allowed) return undefined;
-  let start = 0;
-  for (let i = 0; i < blocks.length; i += 1) {
-    if (blocks[i]?.kind === 'user') start = i + 1;
-  }
-  let id: string | undefined;
-  for (let i = start; i < blocks.length; i += 1) {
-    const block = blocks[i];
-    if (block?.kind === 'cart' && block.retailer === 'coto') id = block.id;
-  }
-  return id;
 }
 
 export function decodeDiaPairs(value: unknown): DiaPair[] | undefined {

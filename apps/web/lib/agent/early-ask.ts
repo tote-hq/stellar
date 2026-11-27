@@ -66,6 +66,24 @@ export function isCityQuestion(text: string | null | undefined): boolean {
 
 const LIST_WORD = /\b(leche|pan|yerba|arroz|fideos|carne|queso|huevos|aceite|azúcar|azucar)\b/i;
 
+/**
+ * The name stored for the city.
+ * Lowercase, strip accents, drop dots, collapse spaces. `caba`, `c.a.b.a.`
+ * and `ciudad de buenos aires` become `Ciudad de Buenos Aires`. Anything else
+ * comes back trimmed, with its original casing.
+ */
+export function canonicalCity(text: string): string {
+  const folded = text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\./g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (folded === 'caba' || folded === 'ciudad de buenos aires') return 'Ciudad de Buenos Aires';
+  return text.trim().replace(/\s+/g, ' ');
+}
+
 /** The whole trimmed reply, or null when it reads as a shopping list. */
 export function cityFromAnswer(text: string): string | null {
   const city = text.trim().replace(/\s+/g, ' ');
@@ -74,7 +92,7 @@ export function cityFromAnswer(text: string): string | null {
   if (city.split(' ').length > 6) return null;
   if (LIST_WORD.test(city)) return null;
   if (/https?:/i.test(city)) return null;
-  return city;
+  return canonicalCity(city);
 }
 
 export function earlyCityAsk(args: {
@@ -107,14 +125,51 @@ export function transcriptHasPostal(messages: readonly { role?: string; content?
   return messages.some((message) => message.role === 'user' && mentionsPostalCode(messageText(message.content)));
 }
 
-/** Stores the city only when the previous assistant message was the question. */
+const CITY_WORD = /ciudad|localidad|city|locality/i;
+
+/** The last assistant text asked for a city, in the fixed question or in its own words. */
+export function assistantAskedCity(text: string | null | undefined): boolean {
+  if (isCityQuestion(text)) return true;
+  return CITY_WORD.test(text ?? '');
+}
+
+/**
+ * Stores the city when the previous message was the fixed question, or when
+ * the snapshot says `CITY_ASK` already went out, or when the whole reply is
+ * the CABA alias, or when a postal code is already known and the reply
+ * answers a city question the model worded itself.
+ * `getCityAsked` is the snapshot's record that `CITY_ASK` went out. It
+ * survives an empty turn store, which is what dropped the first locality
+ * and made the chat ask again. The alias needs nothing else: `pendingPostal`
+ * is not in the snapshot either. `prior` is the browser's earlier lines,
+ * which still hold the postal code. `cityFromAnswer` still rejects a
+ * shopping list. No flag means the same behavior as before the flag existed.
+ */
 export function rememberCity(
-  state: { getCity?: () => string | undefined; setCity?: (city: string) => void },
+  state: {
+    getCity?: () => string | undefined;
+    setCity?: (city: string) => void;
+    getPendingPostal?: () => string | undefined;
+    getCityAsked?: () => boolean;
+  },
   messages: readonly { role?: string; content?: unknown }[],
   text: string,
+  prior: readonly string[] = [],
 ): void {
   if (state.getCity?.()) return;
-  if (!isCityQuestion(lastAssistantText(messages))) return;
   const city = cityFromAnswer(text);
-  if (city) state.setCity?.(city);
+  if (!city) return;
+  if (
+    city === 'Ciudad de Buenos Aires' ||
+    state.getCityAsked?.() ||
+    isCityQuestion(lastAssistantText(messages))
+  ) {
+    state.setCity?.(city);
+    return;
+  }
+  const postalKnown =
+    Boolean(state.getPendingPostal?.()) ||
+    transcriptHasPostal(messages, text) ||
+    prior.some((line) => mentionsPostalCode(line));
+  if (postalKnown && assistantAskedCity(lastAssistantText(messages))) state.setCity?.(city);
 }

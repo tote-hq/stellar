@@ -11,6 +11,7 @@ import {
   normalizeEan,
   sizeFromName,
   sizesEqual,
+  type NameSize,
 } from './normalize.js';
 
 export type MatchConfidence = 'ean' | 'brand_size_unit' | 'none';
@@ -89,6 +90,61 @@ export function pickMatch(dia: DiaMatchInput, candidates: readonly CatalogItem[]
   });
   if (!same.length) return { match: null, confidence: 'none' };
   return { match: bestByScore(dia.name, same), confidence: 'brand_size_unit' };
+}
+
+export interface SameProductRef {
+  name: string;
+  brand?: string;
+  ean?: string;
+  size?: NameSize | null;
+}
+
+function sizeOf(item: SameProductRef): NameSize | null {
+  return item.size ?? sizeFromName(item.name);
+}
+
+function bestNamed<T extends { name: string }>(refName: string, items: readonly T[]): T {
+  let best = items[0] as T;
+  let bestScore = scoreCandidate(refName, best.name);
+  for (const item of items.slice(1)) {
+    const score = scoreCandidate(refName, item.name);
+    if (score > bestScore) {
+      best = item;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+/**
+ * The same rule as `pickMatch`, in either direction.
+ * EAN first, then brand plus the canonical pack size. A name on its own
+ * is not a match. `pickMatch` itself is unchanged.
+ */
+export function pickSameProduct<T extends SameProductRef>(
+  ref: SameProductRef,
+  candidates: readonly T[],
+): { match: T | null; confidence: MatchConfidence } {
+  const ean = normalizeEan(ref.ean);
+  if (ean) {
+    const exact = candidates.filter((item) => normalizeEan(item.ean) === ean);
+    if (exact.length === 1) return { match: exact[0] ?? null, confidence: 'ean' };
+    if (exact.length > 1) return { match: bestNamed(ref.name, exact), confidence: 'ean' };
+  }
+
+  const brand = normalizeBrand(ref.brand ?? '');
+  const refSize = sizeOf(ref);
+  if (!brand || !refSize) return { match: null, confidence: 'none' };
+
+  const same = candidates.filter((item) => {
+    const itemBrand = normalizeBrand(item.brand ?? '');
+    if (!itemBrand || itemBrand !== brand) return false;
+    const itemSize = sizeOf(item);
+    if (!itemSize || !sizesEqual(refSize, itemSize)) return false;
+    return true;
+  });
+  if (!same.length) return { match: null, confidence: 'none' };
+  return { match: bestNamed(ref.name, same), confidence: 'brand_size_unit' };
 }
 
 function brandQuery(dia: DiaMatchInput): string {

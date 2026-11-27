@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from coto_real import consume_screen_ticket, screen_open, watch_coto_viewer
 from manual_store import ManualStore
 
 
@@ -210,7 +211,59 @@ class ManualSessions:
             except (RuntimeError, WebSocketDisconnect):
                 pass
 
-    async def relay(self, ws: WebSocket, job_id: str):
+    async def _relay_coto(self, ws: WebSocket, job: dict):
+        """Coto's Chromium is the same x11vnc display. Does not touch the Día session."""
+        protocols = ws.scope.get('subprotocols', [])
+        origin = os.environ.get('SANDBOX_PUBLIC_URL', '').rstrip('/')
+        job_id = str(job.get('job_id') or '')
+        ticket = protocols[1] if len(protocols) == 2 and protocols[0] == 'changuito.viewer' else ''
+        now = int(time.time() * 1000)
+        if (ws.headers.get('origin') != origin or not ticket or not screen_open(job)
+                or not consume_screen_ticket(ticket, job_id, now)):
+            await ws.close(code=1008)
+            return
+        await ws.accept(subprotocol='changuito.viewer')
+        writer = None
+        tasks = []
+        try:
+            reader, writer = await asyncio.open_connection('127.0.0.1', 5901)
+
+            async def upstream():
+                while True:
+                    data = await ws.receive_bytes()
+                    if len(data) > 1_048_576:
+                        return
+                    writer.write(data)
+                    await writer.drain()
+
+            async def downstream():
+                while data := await reader.read(65536):
+                    await ws.send_bytes(data)
+
+            tasks = [
+                asyncio.create_task(upstream()),
+                asyncio.create_task(downstream()),
+                asyncio.create_task(watch_coto_viewer(job)),
+            ]
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        except (OSError, RuntimeError, WebSocketDisconnect):
+            pass
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            if writer:
+                writer.close()
+                await writer.wait_closed()
+            try:
+                await ws.close()
+            except (RuntimeError, WebSocketDisconnect):
+                pass
+
+    async def relay(self, ws: WebSocket, job_id: str, coto_job=None):
+        if isinstance(coto_job, dict) and coto_job.get('mode') == 'coto_real':
+            await self._relay_coto(ws, coto_job)
+            return
         protocols = ws.scope.get('subprotocols', [])
         if (not self.store or ws.headers.get('origin') != os.environ.get('SANDBOX_PUBLIC_URL', '').rstrip('/')
                 or len(protocols) != 2 or protocols[0] != 'changuito.viewer'

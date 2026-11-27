@@ -93,9 +93,12 @@ interface ShopValue {
   requestPay: () => void;
   /** The thread's pay cards are the way to pay. The rail does not offer another. */
   dualCheckout: boolean;
-  /** True when this wallet may pay the current Coto cart. The server decides. */
-  cotoReal: boolean;
-  setCotoReal: (allowed: boolean) => void;
+  /** Where the Coto admission fetch is. The server decides `allowed`. */
+  cotoAdmission: 'pending' | 'failed' | 'allowed' | 'denied';
+  setCotoAdmission: (next: 'pending' | 'failed' | 'allowed' | 'denied') => void;
+  /** Open Coto order the resume route confirmed for this read-only chat, or null. */
+  cotoResumeOrderId: string | null;
+  setCotoResumeOrderId: (next: string | null) => void;
 }
 
 const ShopContext = createContext<ShopValue | null>(null);
@@ -113,7 +116,8 @@ export function ShopProvider({ children }: { children: ReactNode }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [payRequest, setPayRequest] = useState(0);
   const [dualCheckout, setDualCheckout] = useState(false);
-  const [cotoReal, setCotoReal] = useState(false);
+  const [cotoAdmission, setCotoAdmission] = useState<'pending' | 'failed' | 'allowed' | 'denied'>('pending');
+  const [cotoResumeOrderId, setCotoResumeOrderId] = useState<string | null>(null);
   const requestPay = useCallback(() => setPayRequest((n) => n + 1), []);
 
   // After hydration, never during render: reading storage while rendering
@@ -201,6 +205,7 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     setOrderState('none');
     setReceipt(null);
     setReadOnly(false);
+    setCotoResumeOrderId(null);
     setHistoryOpen(false);
     setRequest({ kind: 'new', token: Date.now() });
   }, []);
@@ -220,10 +225,16 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     setCreatedAt(chat.createdAt);
     setCart(chat.cart);
     setHandoffUrl(chat.handoffUrl);
-    setDualCheckout(chat.dualCheckout === true || dualCheckoutOn({ blocks: chat.blocks, cart: undefined }));
+    setDualCheckout(
+      dualCheckoutOn({
+        blocks: chat.blocks,
+        cart: chat.cart ? { cart: chat.cart, dualCheckout: chat.dualCheckout } : undefined,
+      }),
+    );
     setOrderState(chat.orderState);
     setReceipt(chat.receipt);
     setReadOnly(!live);
+    setCotoResumeOrderId(null);
     setHistoryOpen(false);
     // `sessionId: null` when it is not resumable, so the chat component cannot
     // accidentally send into a session the server has forgotten. The store
@@ -270,13 +281,15 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       payRequest,
       requestPay,
       dualCheckout,
-      cotoReal,
-      setCotoReal,
+      cotoAdmission,
+      setCotoAdmission,
+      cotoResumeOrderId,
+      setCotoResumeOrderId,
     }),
     [
       chats, activeChatId, cart, handoffUrl, orderState, receipt, readOnly,
       publish, openChat, newChat, forgetChat, settle, request, ack, historyOpen,
-      payRequest, requestPay, dualCheckout, cotoReal,
+      payRequest, requestPay, dualCheckout, cotoAdmission, cotoResumeOrderId,
     ],
   );
 

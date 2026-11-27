@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
-import { verifyAdminCookie } from '../admin/cookie.ts';
+import { signAdminCookie, verifyAdminCookie } from '../admin/cookie.ts';
 import { decideAdmin } from '../admin/gate.ts';
 
 describe('admin gate', () => {
@@ -66,5 +66,35 @@ describe('admin gate', () => {
     });
     assert.equal(open?.status, 200);
     assert.equal(open?.handled, true);
+  });
+
+  it('opens the desk at /orders and /orders/, and the viewer page at /orders/:id', async () => {
+    const before = process.env.ADMIN_SESSION_SECRET;
+    process.env.ADMIN_SESSION_SECRET = 'test-only-admin-secret';
+    try {
+      const token = await signAdminCookie(
+        { exp: Date.now() + 60_000, csrf: 'c', jti: 'j' },
+        'test-only-admin-secret',
+      );
+      const headers = { get: (name: string) => (name === 'cookie' ? `chg_admin=${token}` : null) };
+      for (const path of ['/orders', '/orders/']) {
+        const desk = await decideAdmin({ url: `https://admin.changuito.me${path}`, method: 'GET', headers });
+        assert.equal(desk?.status, 200, path);
+        assert.equal(desk?.rewrite, '/admin-portal', path);
+      }
+      const viewer = await decideAdmin({ url: 'https://admin.changuito.me/orders/abc123', method: 'GET', headers });
+      assert.equal(viewer?.rewrite, '/admin-portal/orders/abc123');
+      const portal = await decideAdmin({ url: 'https://app.changuito.me/admin-portal/orders/abc123', method: 'GET', headers });
+      assert.equal(portal?.status, 404);
+    } finally {
+      if (before === undefined) delete process.env.ADMIN_SESSION_SECRET;
+      else process.env.ADMIN_SESSION_SECRET = before;
+    }
+  });
+
+  it('links a desk note to its order and does not invent an id', () => {
+    const src = readFileSync(new URL('../../app/admin-portal/page.tsx', import.meta.url), 'utf8');
+    assert.match(src, /<a href=\{`\/orders\/\$\{note\.orderId\}`\}>/);
+    assert.doesNotMatch(src, /orderId \?\? ''/);
   });
 });

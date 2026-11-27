@@ -58,6 +58,8 @@ export interface SandboxJob {
     store_order_id?: string | null;
     /** Sandbox failure code. The shopper response maps it to Spanish and does not forward it. */
     code?: string | null;
+    /** Product name of the line that could not be added. Shopper copy only; not a status field. */
+    failed_line?: string;
     items_added: number;
     cart?: {
       orderFormId?: string;
@@ -81,6 +83,8 @@ export interface SandboxItem {
   name: string;
   quantity: number;
   sku: string;
+  /** Catalog page on www.coto.com.ar. Omitted when the catalog has none. */
+  url?: string;
 }
 
 /** The card to pay with, as the sandbox's `Card` model takes it. Never logged; see the header. */
@@ -166,35 +170,41 @@ export interface CotoRealDelivery {
   complement?: string;
 }
 
-/** Sandbox body for a real Coto job. No Día login. The ops card rides the existing Card channel. */
+/** Sandbox body for a real Coto job. No Día login and no card. Payment uses the card saved on the Coto account. */
 export function cotoRealJobBody(
   orderId: string,
   items: SandboxItem[],
-  input: { fulfillment: 'home' | 'pickup'; city: string; delivery?: CotoRealDelivery; card?: SandboxCard },
+  input: { fulfillment: 'home' | 'pickup'; city: string; delivery?: CotoRealDelivery },
 ): {
   mode: 'coto_real';
   order_id: string;
   fulfillment: 'home' | 'pickup';
   city: string;
-  items: { name: string; quantity: number; sku: string }[];
+  items: { name: string; quantity: number; sku: string; url?: string }[];
   delivery?: CotoRealDelivery;
-  card?: SandboxCard;
 } {
   return {
     mode: 'coto_real',
     order_id: orderId,
     fulfillment: input.fulfillment,
     city: input.city,
-    items: items.map((item) => ({ name: item.name, quantity: item.quantity, sku: item.sku })),
+    items: items.map((item) => {
+      const row: { name: string; quantity: number; sku: string; url?: string } = {
+        name: item.name,
+        quantity: item.quantity,
+        sku: item.sku,
+      };
+      if (item.url) row.url = item.url;
+      return row;
+    }),
     ...(input.delivery ? { delivery: input.delivery } : {}),
-    ...(input.card ? { card: input.card } : {}),
   };
 }
 
 export async function startCotoRealJob(
   orderId: string,
   items: SandboxItem[],
-  input: { fulfillment: 'home' | 'pickup'; city: string; delivery?: CotoRealDelivery; card?: SandboxCard },
+  input: { fulfillment: 'home' | 'pickup'; city: string; delivery?: CotoRealDelivery },
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string> {
   if (!env.SANDBOX_URL) throw new Error('checkout is off: no SANDBOX_URL');
@@ -292,12 +302,81 @@ export async function postCotoShopperAnswer(
   return res.ok;
 }
 
-/** Recomputed by the sandbox while the signature is inside 60s. Not stored. */
-export async function readCotoViewer(jobId: string, env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
-  if (!env.SANDBOX_URL) return null;
+/** Origin of `SANDBOX_URL`, for the admin document's frame-src. Null when it is unset or not a URL. */
+export function sandboxOrigin(env: NodeJS.ProcessEnv = process.env): string | null {
+  const raw = env.SANDBOX_URL;
+  if (!raw) return null;
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return null;
+  }
+}
+
+export interface CotoViewer {
+  url: string;
+  ticket: string;
+  jobId: string;
+}
+
+/** How long the admin route waits for the sandbox screen before answering. */
+export const COTO_VIEWER_FETCH_MS = 5_000;
+
+export type CotoViewerFailure = 'closed' | 'unreachable';
+
+export type CotoViewerOutcome =
+  | { viewer: CotoViewer }
+  | { viewer: null; reason: CotoViewerFailure };
+
+/**
+ * Signed while the operator still needs the Coto screen. Not stored.
+ * A URL whose origin is not the sandbox is dropped.
+ * A timeout, an abort, or a network error is null.
+ */
+export async function readCotoViewer(
+  jobId: string,
+  env: NodeJS.ProcessEnv = process.env,
+  timeoutMs: number = COTO_VIEWER_FETCH_MS,
+): Promise<CotoViewer | null> {
+  const outcome = await readCotoViewerOutcome(jobId, env, timeoutMs);
+  return outcome.viewer;
+}
+
+/** Same read as `readCotoViewer`, plus why a screen is missing. */
+export async function readCotoViewerOutcome(
+  jobId: string,
+  env: NodeJS.ProcessEnv = process.env,
+  timeoutMs: number = COTO_VIEWER_FETCH_MS,
+): Promise<CotoViewerOutcome> {
+  const expected = sandboxOrigin(env);
+  if (!expected) return { viewer: null, reason: 'unreachable' };
   const { base, headers } = remote(env);
-  const res = await fetch(`${base}/jobs/${encodeURIComponent(jobId)}/viewer`, { headers, cache: 'no-store' });
-  if (!res.ok) return null;
-  const body = (await res.json()) as { url?: unknown };
-  return typeof body.url === 'string' ? body.url : null;
+  let res: Response;
+  try {
+    res = await fetch(`${base}/jobs/${encodeURIComponent(jobId)}/viewer`, {
+      headers,
+      cache: 'no-store',
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch {
+    return { viewer: null, reason: 'unreachable' };
+  }
+  // The sandbox answers 404 when the job is unknown to the sandbox.
+  if (res.status === 404) return { viewer: null, reason: 'closed' };
+  if (!res.ok) return { viewer: null, reason: 'unreachable' };
+  let body: { url?: unknown; ticket?: unknown; job_id?: unknown };
+  try {
+    body = (await res.json()) as { url?: unknown; ticket?: unknown; job_id?: unknown };
+  } catch {
+    return { viewer: null, reason: 'unreachable' };
+  }
+  if (typeof body.url !== 'string' || typeof body.ticket !== 'string' || typeof body.job_id !== 'string') {
+    return { viewer: null, reason: 'unreachable' };
+  }
+  try {
+    if (new URL(body.url).origin !== expected) return { viewer: null, reason: 'unreachable' };
+  } catch {
+    return { viewer: null, reason: 'unreachable' };
+  }
+  return { viewer: { url: body.url, ticket: body.ticket, jobId: body.job_id } };
 }

@@ -487,25 +487,111 @@ body:not(:has(.topbar)) .shell {
   gap: 12px;
 }
 .card {
-  border: 1px solid var(--border);
+  /* #6b564c on #fff is about 7:1. The 14% espresso token is under 3:1. */
+  border: 1px solid #6b564c;
   border-radius: var(--radius);
   background: var(--surface);
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  /* Keeps a focused card out from under the composer and the rail. */
+  scroll-margin: 24px;
+  scroll-margin-bottom: 120px;
 }
+.card-slot { list-style: none; margin: 0; padding: 0; min-width: 0; }
+button.card {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+  min-height: 44px;
+  min-width: 44px;
+}
+button.card:focus-visible {
+  /* Espresso on the light plate is well above 3:1 in both themes.
+     The shopper plate stays off-white when the OS is dark. */
+  outline: 3px solid var(--chg-espresso);
+  outline-offset: 3px;
+}
+button.card:disabled,
+button.card[aria-disabled='true'] { cursor: default; }
+.card-match,
+.card-add-state { font-size: 12px; font-weight: 650; color: var(--text); }
+.card-add-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px;
+  color: #7a2e12;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+.card-add-error-text { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.card-add-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #7a2e12;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.card-add-retry {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 8px 12px;
+  border: 1px solid #7a2e12;
+  border-radius: var(--radius);
+  background: #fff;
+  color: #7a2e12;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.card-add-retry:focus-visible {
+  outline: 3px solid var(--chg-espresso);
+  outline-offset: 2px;
+}
+@media (prefers-color-scheme: dark) {
+  /* The shop plate stays light. Pin the error ink so AA holds on that plate. */
+  .card-add-error,
+  .card-add-retry {
+    color: #7a2e12;
+    background: #fff;
+    border-color: #7a2e12;
+  }
+  .card-add-icon { background: #7a2e12; color: #fff; }
+}
+.card-empty { min-height: 44px; }
 .card-img {
   aspect-ratio: 1;
   display: grid;
   place-items: center;
   background: #fff;
   padding: 8px;
+  border-bottom: 1px solid #6b564c;
 }
 .card-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.card-img-empty { font-size: 28px; opacity: 0.35; }
+.card-img-empty { font-size: 28px; line-height: 1; }
 .card-body { padding: 10px; display: flex; flex-direction: column; gap: 4px; }
+.card-kind { font-size: 12px; font-weight: 650; line-height: 1.3; color: var(--text); }
 .card-brand { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
-.card-name { font-size: 13px; line-height: 1.35; }
+.card-name {
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
 .card-price { font-size: 16px; font-weight: 650; font-variant-numeric: tabular-nums; }
 .card-was { margin-left: 6px; font-size: 12px; font-weight: 400; color: var(--muted); }
 .card-unit { font-size: 12px; color: var(--muted); }
@@ -592,8 +678,8 @@ body:not(:has(.topbar)) .shell {
   }
 }
 
-/* Search-time Día and Coto. Two columns from 720px, stacked below that.
-   Tokens stay the brand plate in dark mode, same as .compare-card. */
+/* Search-time Día and Coto. One section per chain, product cards in a row.
+   The close table reuses the same plate. Tokens stay the brand plate in dark mode. */
 .search-compare,
 .missing-card {
   border: 1px solid var(--border);
@@ -607,27 +693,28 @@ body:not(:has(.topbar)) .shell {
 .search-compare-sub,
 .search-compare-note,
 .search-compare-fee { margin: 8px 0 0; font-size: 14px; color: var(--text); }
-.search-compare-cols { display: grid; gap: 12px; margin-top: 12px; }
+.search-compare-section { margin-top: 16px; }
+.search-compare-section:first-child { margin-top: 0; }
 .search-compare-store { margin: 0 0 8px; font-size: 15px; }
-.search-compare-list { list-style: none; margin: 0; padding: 0; }
-.search-compare-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 0;
-  font-size: 14px;
+.search-compare-section .grid {
+  margin-top: 8px;
+  grid-template-columns: repeat(auto-fill, 168px);
+  justify-content: start;
+  align-items: start;
 }
-.search-compare-name { flex: 1 1 8rem; }
-.search-compare-price { font-variant-numeric: tabular-nums; }
-.search-compare-col .btn,
+.search-compare-section .card {
+  width: 168px;
+  max-width: 100%;
+  align-self: start;
+  height: auto;
+}
+.search-compare-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.search-compare-actions .btn { min-height: 44px; min-width: 44px; }
 .missing-actions .btn { min-height: 44px; min-width: 44px; margin-top: 8px; }
 .missing-card p { margin: 0; }
 .missing-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .composer-actions { display: flex; gap: 8px; align-items: center; }
 .composer-actions .btn { min-height: 44px; }
-@media (min-width: 720px) {
-  .search-compare-cols { grid-template-columns: 1fr 1fr; }
-}
 @media (prefers-color-scheme: dark) {
   .search-compare,
   .missing-card {
@@ -670,6 +757,10 @@ body:not(:has(.topbar)) .shell {
 }
 .btn-ghost:hover { background: rgba(42, 26, 20, 0.06); }
 .btn-pay { flex: 1; min-width: 44px; min-height: 44px; }
+/* Logout is solid arcilla. Espresso on arcilla is 5.67:1; white would be 2.95:1. */
+.btn-logout { background: var(--chg-arcilla); color: var(--chg-espresso); }
+.btn-logout:hover { background: var(--chg-arcilla); filter: brightness(0.94); }
+.btn-logout:active { background: var(--chg-arcilla); filter: brightness(0.88); }
 
 .pay-cards {
   display: grid;

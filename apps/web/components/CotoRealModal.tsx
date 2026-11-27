@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { Cart } from '@changuito/mcp/types';
 
+import { canonicalCity } from '../lib/agent/early-ask.ts';
 import { COTO_REAL_KIND, HOME_MINIMUM_CENTAVOS, HOME_MINIMUM_COPY } from '../lib/checkout/coto-real.ts';
 import { OpenConfirmationPending, submitOpen } from '../lib/checkout/open-submission.ts';
 import { fetchAs } from '../lib/fetch-as.ts';
@@ -21,12 +22,15 @@ export function CotoRealModal({
   postalCode,
   city: cityProp,
   onClose,
+  resumeOnly = false,
 }: {
   cart: Cart;
   sessionId: string;
   postalCode?: string;
   city?: string;
   onClose: () => void;
+  /** Resume the open order only. Never quote, lock, or show the address form. */
+  resumeOnly?: boolean;
 }) {
   const lang = useLang();
   const wallet = useWallet();
@@ -50,6 +54,41 @@ export function CotoRealModal({
   const [orderId, setOrderId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<StatusView['prompt']>(null);
   const [promptAnswer, setPromptAnswer] = useState('');
+  // pending: header only. open: the locked order's question. fresh: a new checkout.
+  // closed: resume-only, and the order is no longer open.
+  const [resume, setResume] = useState<'pending' | 'open' | 'fresh' | 'closed'>('pending');
+
+  useEffect(() => {
+    const missed = resumeOnly ? 'closed' : 'fresh';
+    if (!wallet.address) {
+      setResume(missed);
+      return;
+    }
+    let stop = false;
+    const pull = async () => {
+      try {
+        const res = await fetchAs(
+          { address: wallet.address, sign: wallet.accessToken },
+          '/api/checkout/coto-real/resume',
+        );
+        const body = (await res.json()) as { orderId?: string | null; fulfillment?: string };
+        if (stop) return;
+        if (res.ok && body.orderId) {
+          setOrderId(body.orderId);
+          setFulfillment(body.fulfillment === 'pickup' ? 'pickup' : 'home');
+          setResume('open');
+          return;
+        }
+        setResume(missed);
+      } catch {
+        if (!stop) setResume(missed);
+      }
+    };
+    void pull();
+    return () => {
+      stop = true;
+    };
+  }, [resumeOnly, wallet.accessToken, wallet.address]);
 
   useEffect(() => {
     if (!orderId || !wallet.address) return;
@@ -63,7 +102,7 @@ export function CotoRealModal({
         const body = (await res.json()) as StatusView;
         if (stop || !res.ok) return;
         if (body.note) setNote(body.note);
-        if (body.prompt) setPrompt(body.prompt);
+        setPrompt(body.prompt ?? null);
         if (body.error) setError(body.error);
         if (body.stage === 'done') {
           const done = modalCopy(lang).done(body.storeOrderId ?? '');
@@ -96,7 +135,7 @@ export function CotoRealModal({
           cart,
           checkoutKind: COTO_REAL_KIND,
           postalCode: postal,
-          city,
+          city: canonicalCity(city),
           fulfillment,
           street,
           number,
@@ -160,7 +199,7 @@ export function CotoRealModal({
   }
 
   return (
-    <div className="modal-back" role="presentation" onClick={onClose}>
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div
         className="modal"
         role="dialog"
@@ -169,9 +208,16 @@ export function CotoRealModal({
         data-testid="coto-real-modal"
         onClick={(event) => event.stopPropagation()}
       >
-        <h2 id="coto-real-title">{copy.title}</h2>
+        <header className="modal-head">
+          <h2 id="coto-real-title">{copy.title}</h2>
+          <button type="button" className="modal-x" onClick={onClose} aria-label={copy.close}>
+            ×
+          </button>
+        </header>
         <p>{copy.disclosure}</p>
         <p>{copy.never}</p>
+        {resume === 'fresh' ? (
+          <>
         <fieldset data-testid="checkout-fulfillment">
           <legend>{copy.mode}</legend>
           <label>
@@ -237,59 +283,6 @@ export function CotoRealModal({
         >
           {copy.usePostal}
         </button>
-        {error === HOME_MINIMUM_COPY ? (
-          <p role="alert" data-testid="checkout-home-minimum">
-            {HOME_MINIMUM_COPY}
-          </p>
-        ) : error ? (
-          <p role="alert" data-testid="coto-real-error">
-            {error}
-          </p>
-        ) : null}
-        {prompt ? (
-          <form
-            data-testid="checkout-prompt"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!orderId || !promptAnswer.trim()) return;
-              void fetchAs({ address: wallet.address, sign: wallet.accessToken }, '/api/checkout/prompt', {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ orderId, answer: promptAnswer.trim() }),
-              }).then(() => setPrompt(null));
-            }}
-          >
-            <p>{prompt.label}</p>
-            {prompt.options && prompt.options.length > 0 ? (
-              prompt.options.map((option) => (
-                <label key={option.value}>
-                  <input
-                    type="radio"
-                    name="prompt"
-                    value={option.value}
-                    data-testid="checkout-prompt-input"
-                    onChange={() => setPromptAnswer(option.value)}
-                  />
-                  {option.label}
-                  {option.suggested ? ' · sugerida' : ''}
-                </label>
-              ))
-            ) : (
-              <input
-                data-testid="checkout-prompt-input"
-                value={promptAnswer}
-                onChange={(event) => setPromptAnswer(event.target.value)}
-                style={{ minHeight: 44 }}
-              />
-            )}
-            <button type="submit" data-testid="checkout-prompt-submit" style={{ minHeight: 44, minWidth: 44 }}>
-              Enviar
-            </button>
-          </form>
-        ) : null}
-        {note ? (
-          <p data-testid="coto-real-status">{note}</p>
-        ) : null}
         {quote ? (
           <ul data-testid="coto-real-lines">
             <li>
@@ -329,9 +322,71 @@ export function CotoRealModal({
         >
           {quote ? copy.lockCta(quote.amountDisplay) : copy.lockCta('')}
         </button>
-        <button type="button" className="btn btn-ghost" onClick={onClose}>
-          {copy.close}
-        </button>
+          </>
+        ) : null}
+        {resume === 'closed' ? (
+          <>
+            <p data-testid="coto-real-closed">{copy.resumeGone}</p>
+            <button type="button" className="btn" style={{ minHeight: 44 }} onClick={onClose}>
+              {copy.close}
+            </button>
+          </>
+        ) : null}
+        {error === HOME_MINIMUM_COPY ? (
+          <p role="alert" data-testid="checkout-home-minimum">
+            {HOME_MINIMUM_COPY}
+          </p>
+        ) : error ? (
+          <p role="alert" data-testid="coto-real-error">
+            {error}
+          </p>
+        ) : null}
+        {prompt ? (
+          prompt.fieldRef === 'pickup_branch' && !(prompt.options && prompt.options.length > 0) ? null : (
+          <form
+            data-testid="checkout-prompt"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!orderId || !promptAnswer.trim()) return;
+              void fetchAs({ address: wallet.address, sign: wallet.accessToken }, '/api/checkout/prompt', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ orderId, answer: promptAnswer.trim() }),
+              }).then(() => setPrompt(null));
+            }}
+          >
+            <p>{prompt.label}</p>
+            {prompt.options && prompt.options.length > 0 ? (
+              prompt.options.map((option) => (
+                <label key={option.value}>
+                  <input
+                    type="radio"
+                    name="prompt"
+                    value={option.value}
+                    data-testid="checkout-prompt-input"
+                    onChange={() => setPromptAnswer(option.value)}
+                  />
+                  {option.label}
+                  {option.suggested ? ' · sugerida' : ''}
+                </label>
+              ))
+            ) : prompt.fieldRef === 'pickup_branch' ? null : (
+              <input
+                data-testid="checkout-prompt-input"
+                value={promptAnswer}
+                onChange={(event) => setPromptAnswer(event.target.value)}
+                style={{ minHeight: 44 }}
+              />
+            )}
+            <button type="submit" data-testid="checkout-prompt-submit" style={{ minHeight: 44, minWidth: 44 }}>
+              Enviar
+            </button>
+          </form>
+          )
+        ) : null}
+        {note ? (
+          <p data-testid="coto-real-status">{note}</p>
+        ) : null}
       </div>
     </div>
   );
@@ -396,6 +451,7 @@ function modalCopy(lang: Lang) {
       pending: 'We received the wallet approval and we are still confirming the lock.',
       working: 'We are placing the Coto order.',
       done: (id: string) => (id ? `Coto order ${id} is placed.` : 'The Coto order is placed.'),
+      resumeGone: 'This order is no longer open. Start a new chat to order something else.',
     };
   }
   return {
@@ -413,7 +469,7 @@ function modalCopy(lang: Lang) {
     provision: 'Envío (promedio)',
     provisionHelp: 'Es un promedio para reservar el envío. No es la tarifa de esta corrida.',
     postal: 'Código postal',
-    usePostal: 'Usar este CP',
+    usePostal: 'Usar este código postal',
     cotoTotal: 'Total Coto',
     diaTotal: 'Total Día (líneas que matchean)',
     gap: 'Diferencia',
@@ -426,5 +482,6 @@ function modalCopy(lang: Lang) {
     pending: 'Recibimos la aprobación de tu billetera y todavía estamos confirmando el bloqueo.',
     working: 'Estamos haciendo el pedido en Coto.',
     done: (id: string) => (id ? `Pedido de Coto ${id} listo.` : 'El pedido de Coto quedó listo.'),
+    resumeGone: 'Este pedido ya no está abierto. Empezá un chat nuevo para pedir otra cosa.',
   };
 }

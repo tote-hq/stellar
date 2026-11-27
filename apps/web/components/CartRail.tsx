@@ -3,6 +3,7 @@
 import type { Cart } from '@changuito/mcp/types';
 
 import type { Receipt } from '../lib/chat-store.ts';
+import { cotoPayGate, type CotoPayGateName } from '../lib/checkout/coto-pay-gate.ts';
 import { INTL_LOCALE, type Lang } from '../lib/lang.ts';
 import { RETAILER_NAMES } from '../lib/retailers.ts';
 import { uiCopy } from '../lib/ui-copy.ts';
@@ -56,15 +57,7 @@ export function CartRail() {
         ) : cart && cart.lines.length > 0 ? (
           // Pagar under the basket too, not only on the card in the thread,
           // which has usually scrolled away by the time the basket is ready.
-          <RailLines
-            cart={cart}
-            cotoPay={Boolean(shop?.cotoReal && cart.retailer === 'coto')}
-            onPay={
-              shop?.canOrder && !shop.dualCheckout && (cart.retailer !== 'coto' || shop.cotoReal)
-                ? shop.requestPay
-                : undefined
-            }
-          />
+          <RailBasket cart={cart} />
         ) : (
           <EmptyRail />
         )}
@@ -128,7 +121,33 @@ function EmptyRail() {
   return <p className="rail-cart-empty">{uiCopy(useLang()).rail.empty}</p>;
 }
 
-function RailLines({ cart, onPay, cotoPay = false }: { cart: Cart; onPay?: () => void; cotoPay?: boolean }) {
+function RailBasket({ cart }: { cart: Cart }) {
+  const shop = useShop();
+  const gate =
+    cart.retailer === 'coto'
+      ? cotoPayGate({
+          admission: shop?.cotoAdmission ?? 'pending',
+          orderState: shop?.orderState ?? 'none',
+          readOnly: Boolean(shop?.readOnly),
+          resumeOpen: Boolean(shop?.cotoResumeOrderId),
+          dualCheckout: Boolean(shop?.dualCheckout),
+          cart,
+        })
+      : null;
+  const onPay =
+    gate === 'pay' || (gate === null && shop?.canOrder && !shop.dualCheckout) ? shop?.requestPay : undefined;
+  return <RailLines cart={cart} gate={gate} onPay={onPay} />;
+}
+
+function RailLines({
+  cart,
+  onPay,
+  gate,
+}: {
+  cart: Cart;
+  onPay?: () => void;
+  gate: CotoPayGateName | null;
+}) {
   const lang = useLang();
   const copy = uiCopy(lang).rail;
   const payable = cart.lines.some((l) => l.available && l.quantity > 0) && cart.total.centavos > 0;
@@ -153,21 +172,21 @@ function RailLines({ cart, onPay, cotoPay = false }: { cart: Cart; onPay?: () =>
             {unavailable === 1 ? copy.oosOne : copy.oosMany(unavailable)}
           </p>
         ) : null}
-        <div className="rail-cart-total">
+        <div className="rail-cart-total" aria-live="polite">
           <span>{copy.total}</span>
           <strong>{cart.total.display}</strong>
         </div>
-        {cart.retailer === 'coto' && !cotoPay ? (
-          <p className="rail-cart-warn" data-testid="rail-coto-unpayable">
-            {copy.notPayable}
+        {gate && gate !== 'pay' ? (
+          <p className="rail-cart-warn" data-testid="rail-coto-gate" data-gate={gate} role="status" aria-live="polite">
+            {uiCopy(lang).cotoGate[gate]}
           </p>
         ) : null}
-        {onPay && payable && cart.retailer !== 'coto' ? (
+        {onPay && payable && gate === null ? (
           <button type="button" className="btn btn-pay rail-cart-pay" data-testid="rail-pay" onClick={onPay}>
             {uiCopy(lang).cart.payCta}
           </button>
         ) : null}
-        {onPay && payable && cotoPay ? (
+        {onPay && payable && gate === 'pay' ? (
           <button
             type="button"
             className="btn btn-pay rail-cart-pay"

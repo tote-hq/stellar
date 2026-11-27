@@ -21,10 +21,11 @@ export async function POST(req: Request): Promise<Response> {
   if (!input) return Response.json({ error: 'bad request' }, { status: 400 });
   try {
     const rec = await checkoutStore().get(input.orderId);
-    if (rec && cotoRealRecord(rec) && !(await admitCotoRequest(session.address))) {
-      return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
-    }
-    if (rec && cotoCheckoutBlocked(rec.retailer) && !cotoDemoPayRecord(rec)) {
+    if (rec && cotoRealRecord(rec)) {
+      if (!(await admitCotoRequest(session.address))) {
+        return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
+      }
+    } else if (rec && cotoCheckoutBlocked(rec.retailer) && !cotoDemoPayRecord(rec)) {
       return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
     }
   } catch (err) {

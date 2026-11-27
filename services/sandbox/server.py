@@ -1,6 +1,6 @@
 """changuito's sandbox job API around agent.run_job.
 
-    POST /jobs        {order_id, items: [{name, quantity, sku?}], shopper, card?}  -> {job_id}
+    POST /jobs        {order_id, items: [{name, quantity, sku?, url?}], shopper, card?}  -> {job_id}
     GET  /jobs/{id}   -> {job_id, status, phase, result?, error?}
     GET  /health      -> {ok, busy, queued}
 
@@ -12,7 +12,9 @@ the escrow, polls it, and settles or refunds on the result.
 deliver if their account has no saved address ({postcode, street, number,
 phone, complement}), from their encrypted profile in the web app. `card` is
 the card to pay with ({pan, cvv, exp_month, exp_year, holder, kind}), from the
-web app's `shared_card` row; without it the run stops at the payment step.
+web app's `shared_card` row; without it a Día run stops at the payment step.
+A `coto_real` job does not store a card. Payment uses the card saved on the
+Coto account. A card sent by an older web build is accepted and discarded.
 Both live on the in-memory job until the run ends and are then deleted;
 `GET /jobs/{id}` never returns them and nothing logs them. Nothing here reads a
 login or a card from the environment. A manual session does not take a card on
@@ -61,6 +63,15 @@ class Item(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     quantity: int = Field(default=1, ge=1, le=50)
     sku: str | None = None
+    url: str | None = Field(default=None, max_length=2048)
+
+
+def item_payload(item: Item) -> dict:
+    """Item as stored on the job. A missing catalog url is left out."""
+    data = item.model_dump()
+    if not data.get("url"):
+        data.pop("url", None)
+    return data
 
 
 class Shopper(BaseModel):
@@ -135,7 +146,7 @@ _FIELD_CODE = {
     "phone": "invalid_shopper", "complement": "invalid_shopper",
     "pan": "invalid_card", "cvv": "invalid_card", "exp_month": "invalid_card",
     "exp_year": "invalid_card", "holder": "invalid_card", "kind": "invalid_card",
-    "name": "invalid_item", "quantity": "invalid_item", "sku": "invalid_item", "items": "invalid_item",
+    "name": "invalid_item", "quantity": "invalid_item", "sku": "invalid_item", "url": "invalid_item", "items": "invalid_item",
     "flow": "invalid_flow", "mode": "invalid_flow",
     "order_id": "invalid_order", "buyer": "invalid_order", "escrow_deadline": "invalid_order",
 }
@@ -234,7 +245,7 @@ async def create(body: JobIn) -> dict:
     if body.mode == 'coto_real':
         home = body.fulfillment != 'pickup'
         city = (body.city or '').strip() or (body.delivery.city.strip() if body.delivery else '')
-        if body.shopper is not None or body.card is None or (home and body.delivery is None) or not city:
+        if body.shopper is not None or (home and body.delivery is None) or not city:
             print("POST /jobs rejected coto_real field=delivery", flush=True)
             raise HTTPException(422, 'invalid coto job')
         for existing in jobs.values():
@@ -243,11 +254,10 @@ async def create(body: JobIn) -> dict:
         job_id = uuid.uuid4().hex
         jobs[job_id] = {
             "job_id": job_id, "order_id": body.order_id, "status": "queued", "phase": "queued",
-            "mode": "coto_real", "items": [i.model_dump() for i in body.items], "created": time.time(),
+            "mode": "coto_real", "items": [item_payload(i) for i in body.items], "created": time.time(),
             "fulfillment": body.fulfillment,
             "city": city,
             "delivery": body.delivery.model_dump() if body.delivery else None,
-            "card": body.card.model_dump(),
         }
         await queue.put(job_id)
         return {"job_id": job_id}
@@ -263,7 +273,7 @@ async def create(body: JobIn) -> dict:
             raise HTTPException(422, 'invalid manual order')
         record, created = sessions.store.create(body.order_id, body.buyer)
         if created:
-            jobs[record['job_id']] = {'mode': 'manual', 'items': [i.model_dump() for i in body.items],
+            jobs[record['job_id']] = {'mode': 'manual', 'items': [item_payload(i) for i in body.items],
                                       'escrow_deadline': body.escrow_deadline, 'flow': body.flow,
                                       'shopper': body.shopper.model_dump(exclude_none=True)}
             await queue.put(record['job_id'])
@@ -275,7 +285,7 @@ async def create(body: JobIn) -> dict:
             return {"job_id": j["job_id"]}
     job_id = uuid.uuid4().hex
     jobs[job_id] = {"job_id": job_id, "order_id": body.order_id, "status": "queued", "phase": "queued",
-                    "items": [i.model_dump() for i in body.items], "created": time.time(),
+                    "items": [item_payload(i) for i in body.items], "created": time.time(),
                     "shopper": body.shopper.model_dump(exclude_none=True),
                     "card": body.card.model_dump() if body.card else None}
     await queue.put(job_id)
@@ -300,15 +310,23 @@ async def answer(job_id: str, body: ShopperAnswer) -> dict:
 
 @app.get("/jobs/{job_id}/viewer", dependencies=[Depends(auth)])
 async def job_viewer(job_id: str) -> dict:
-    from coto_real import viewer_url
+    from coto_real import issue_screen_ticket, screen_open, screen_url, viewer_open
 
     job = jobs.get(job_id)
-    exp = job.get("viewer_exp") if isinstance(job, dict) else None
-    now = int(time.time() * 1000)
-    if not isinstance(exp, int) or not (now < exp <= now + 60_000):
+    if not screen_open(job):
         raise HTTPException(404, "viewer closed")
+    now = int(time.time() * 1000)
+    ticket = issue_screen_ticket(job, now)
+    if not ticket:
+        raise HTTPException(404, "viewer closed")
+    if viewer_open(job):
+        job["viewer_seen"] = now
     origin = os.environ.get("SANDBOX_PUBLIC_URL") or "https://sandbox.local"
-    return {"url": viewer_url(job_id, TOKEN, origin, exp)}
+    return {
+        "url": screen_url(job_id, origin),
+        "ticket": ticket,
+        "job_id": job_id,
+    }
 
 
 @app.get("/jobs/{job_id}", dependencies=[Depends(auth)])
@@ -413,7 +431,7 @@ async def cancel_order(order_id: str, body: CancelOrder):
 
 @app.websocket('/viewer/{job_id}/socket')
 async def viewer_socket(ws: WebSocket, job_id: str):
-    await sessions.relay(ws, job_id)
+    await sessions.relay(ws, job_id, jobs.get(job_id))
 
 
 @app.post('/viewer/{job_id}/card')

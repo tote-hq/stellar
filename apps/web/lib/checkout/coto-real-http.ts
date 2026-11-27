@@ -13,11 +13,9 @@ import { basketHash, DEFAULT_TIMEOUT_SECS, newOrderId, toHex } from '../order.ts
 import { centsToUnits } from '../stellar.ts';
 import { checkoutStore } from './store.ts';
 import { quoteRate } from './rate.ts';
-import { adminStore } from '../admin/store.ts';
-import { admitCotoRequest, sharedCardPresent } from './coto-admit.ts';
+import { admitCotoRequest } from './coto-admit.ts';
 import {
   COTO_REAL_KIND,
-  MISSING_CARD_COPY,
   MISSING_CITY_COPY,
   normalizePostal,
   quoteBuyerError,
@@ -63,10 +61,10 @@ export async function postCotoRealQuote(
 
   const sessionId = typeof body.sessionId === 'string' && UUID.test(body.sessionId) ? body.sessionId : '';
   const turn = sessionId ? await readTurn(sessionId) : undefined;
-  const buyerError = quoteBuyerError(turn?.cache.cotoRealDia, address);
-  if (buyerError) return Response.json({ error: buyerError }, { status: 400 });
+  // No Día snapshot is an empty comparison: no pairs, a 0 gap, a 0 fee.
   const snapshot = turn?.cache.cotoRealDia;
-  if (!snapshot) return Response.json({ error: 'Volvé a comparar antes de pagar.' }, { status: 400 });
+  const buyerError = quoteBuyerError(snapshot, address);
+  if (buyerError) return Response.json({ error: buyerError }, { status: 400 });
 
   const edited = typeof body.postalCode === 'string' ? body.postalCode : undefined;
   const chatPostal =
@@ -75,20 +73,28 @@ export async function postCotoRealQuote(
       : undefined;
   const rawPostal = edited ?? chatPostal;
   if (!rawPostal) {
+    console.warn('coto-pay gate=postal');
     return Response.json(
       { error: 'Falta tu código postal. Contale al chat dónde estás y volvé a intentar.' },
       { status: 400 },
     );
   }
   const postalCode = normalizePostal(rawPostal);
-  if (!postalCode) return Response.json({ error: 'Ese código postal no es válido.' }, { status: 400 });
+  if (!postalCode) {
+    console.warn('coto-pay gate=postal');
+    return Response.json({ error: 'Ese código postal no es válido.' }, { status: 400 });
+  }
   const city = typeof body.city === 'string' ? body.city.trim() : '';
-  if (!city) return Response.json({ error: MISSING_CITY_COPY }, { status: 400 });
+  if (!city) {
+    console.warn('coto-pay gate=city');
+    return Response.json({ error: MISSING_CITY_COPY }, { status: 400 });
+  }
   const fulfillment: Fulfillment = body.fulfillment === 'pickup' ? 'pickup' : 'home';
   const street = typeof body.street === 'string' ? body.street.trim() : '';
   const number = typeof body.number === 'string' ? body.number.trim() : '';
   const complement = typeof body.complement === 'string' ? body.complement.trim() : '';
   if (fulfillment === 'home' && (!street || !number)) {
+    console.warn('coto-pay gate=street');
     return Response.json({ error: 'Falta la calle o el número de esta compra.' }, { status: 400 });
   }
 
@@ -113,20 +119,12 @@ export async function postCotoRealQuote(
   const quoted = quoteFromPriced({
     lines,
     clientTotalCentavos: cart.total.centavos,
-    pairs: snapshot.pairs,
+    pairs: snapshot?.pairs ?? [],
     postalCode,
     coverage: 'shopper',
     fulfillment,
   });
   if (!quoted.ok) return Response.json({ error: quoted.error }, { status: 400 });
-  if (!(await sharedCardPresent())) {
-    try {
-      await adminStore().notifyOnce('missing_card', null, 'Falta la tarjeta de la cuenta.');
-    } catch (err) {
-      console.error('[checkout/coto] missing-card notice', err instanceof Error ? err.name : 'insert');
-    }
-    return Response.json({ error: MISSING_CARD_COPY }, { status: 409 });
-  }
 
   let rate;
   try {

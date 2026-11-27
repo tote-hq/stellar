@@ -223,6 +223,28 @@ describe('product cards', () => {
     assert.deepEqual(grid[0]?.items.map((p) => p.skuId), ['7']);
   });
 
+  it('refuses a grid of SKUs already on the search row', () => {
+    const cache = emptyCache();
+    rememberStructured(cache, { products: [product('1', 'Leche'), product('2', 'Arroz')] });
+    cache.compared = ['1', '2'];
+    const { events, emit } = recorder();
+    const res = runRenderTool(cache, { id: 'u1', name: 'render_products', input: { sku_ids: ['1', '2'] } }, emit);
+    assert.equal(res.is_error, true);
+    assert.equal(events.length, 0);
+    assert.match(String(res.content), /already on the search_compare row/);
+  });
+
+  it('draws only the SKUs that are not already compared', () => {
+    const cache = emptyCache();
+    rememberStructured(cache, { products: [product('1', 'Leche'), product('2', 'Arroz')] });
+    cache.compared = ['1'];
+    const { events, emit } = recorder();
+    const res = runRenderTool(cache, { id: 'u1', name: 'render_products', input: { sku_ids: ['1', '2'] } }, emit);
+    assert.equal(res.is_error, undefined);
+    const grid = events.filter((e) => e.t === 'products');
+    assert.deepEqual(grid[0]?.items.map((p) => p.skuId), ['2']);
+  });
+
   it('RULE: refuses a SKU that never came from a search', () => {
     // An invented SKU is an invented price, above a button that spends money.
     const cache = emptyCache();
@@ -242,6 +264,26 @@ describe('product cards', () => {
     assert.equal(drawn?.t === 'cart' && drawn.dualCheckout, true);
   });
 
+  it('never stamps dual checkout on a Coto cart', () => {
+    const cache = emptyCache();
+    cache.dualCheckout = true;
+    cache.cotoPay = true;
+    const basket = cart([line('c1', 1, 1000)]);
+    basket.retailer = 'coto';
+    basket.cartId = 'coto-1';
+    rememberStructured(cache, { cart: basket });
+    const { events, emit } = recorder();
+    assert.equal(autoRenderCart(cache, emit), true);
+    const drawn = events.find((e) => e.t === 'cart');
+    assert.equal(drawn?.t === 'cart' && drawn.dualCheckout, undefined);
+
+    cache.drawn = undefined;
+    const explicit = recorder();
+    runRenderTool(cache, { id: 'r1', name: 'render_cart', input: {} }, explicit.emit);
+    const shown = explicit.events.find((e) => e.t === 'cart');
+    assert.equal(shown?.t === 'cart' && shown.dualCheckout, undefined);
+  });
+
   it('draws a Coto basket with no link and not orderable, and still hides a Día basket without a link', () => {
     const cache = emptyCache();
     const { events, emit } = recorder();
@@ -253,6 +295,33 @@ describe('product cards', () => {
     const drawn = events.find((e) => e.t === 'cart');
     assert.equal(drawn?.t === 'cart' && drawn.handoffUrl, undefined);
     assert.equal(drawn?.t === 'cart' && drawn.orderable, false);
+
+    cache.cotoPay = true;
+    cache.drawn = undefined;
+    assert.equal(autoRenderCart(cache, emit), true);
+    const payable = events.filter((e) => e.t === 'cart').at(-1);
+    assert.equal(payable?.t === 'cart' && payable.orderable, true);
+
+    const zero = emptyCache();
+    zero.cotoPay = true;
+    const emptyTotal = cart([line('c1', 1, 0)]);
+    emptyTotal.retailer = 'coto';
+    emptyTotal.cartId = 'coto-0';
+    emptyTotal.total = { centavos: 0, display: '$0' };
+    rememberStructured(zero, { cart: emptyTotal });
+    const zeroEvents = recorder();
+    assert.equal(autoRenderCart(zero, zeroEvents.emit), true);
+    const blocked = zeroEvents.events.find((e) => e.t === 'cart');
+    assert.equal(blocked?.t === 'cart' && blocked.orderable, false);
+
+    const rendered = recorder();
+    const admitted = emptyCache();
+    admitted.cotoPay = true;
+    rememberStructured(admitted, { cart: coto });
+    const explicit = runRenderTool(admitted, { id: 'r1', name: 'render_cart', input: {} }, rendered.emit);
+    assert.equal(explicit.is_error, undefined);
+    const shown = rendered.events.find((e) => e.t === 'cart');
+    assert.equal(shown?.t === 'cart' && shown.orderable, true);
 
     const dia = emptyCache();
     const rec = recorder();
@@ -297,6 +366,20 @@ describe('product cards', () => {
     assert.equal(shopperNamedRetailer('coto', 'el más barato', 'Acá están los precios.'), false);
     assert.equal(shopperNamedRetailer('coto', 'Quiero pedir en Coto.', ''), true);
     assert.equal(shopperNamedRetailer('dia', 'Quiero pedir en Coto.', ''), false);
+    assert.equal(shopperNamedRetailer('coto', 'Quiero seguir en Coto.', ''), true);
+    assert.equal(shopperNamedRetailer('dia', 'Quiero seguir en Coto.', ''), false);
+    assert.equal(
+      shopperNamedRetailer('dia', 'Armá el carrito de Día con lo que charlamos y mostrame el pedido listo para pagar.', ''),
+      true,
+    );
+    assert.equal(
+      shopperNamedRetailer('coto', 'Armá el carrito de Coto con lo que charlamos y mostrame el pedido listo para pagar.', ''),
+      true,
+    );
+    assert.equal(
+      shopperNamedRetailer('coto', 'Armá el carrito de Día con lo que charlamos y mostrame el pedido listo para pagar.', ''),
+      false,
+    );
     assert.equal(shopperNamedRetailer('coto', 'sí', '¿Confirmás Coto?'), true);
   });
 

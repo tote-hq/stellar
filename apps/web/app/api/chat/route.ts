@@ -13,6 +13,7 @@ import { presetLocationFromProfile } from '@/lib/profile-location';
 import { networkNotServed, requestNetwork } from '@/lib/server-network';
 import { recallPair, shownProducts } from '@/lib/chat-recall';
 import { applyShopperPlace, priorLines } from '@/lib/shopper-location';
+import { admitCotoRequest } from '@/lib/checkout/coto-admit';
 
 /**
  * Node, not edge: the MCP server reads `node:url` and the Stellar SDK needs
@@ -145,9 +146,10 @@ export async function POST(req: Request): Promise<Response> {
           // banner reads, so the model does not ask for it again.
           const earlier = priorLines(body.prior);
           const shown = shownProducts(body.shown);
-          rememberCity(session.state, turn.messages, body.message);
+          rememberCity(session.state, turn.messages, body.message, earlier);
           if (owner) await presetLocationFromProfile(session, owner);
           await applyShopperPlace(session, [...earlier, body.message]);
+          turn.cache.cotoPay = owner ? await admitCotoRequest(owner) : false;
           // This isolate has no transcript. The browser still has the lines
           // and the grid, so the model reads them before it answers. They
           // are not emitted: the shopper is already looking at them.

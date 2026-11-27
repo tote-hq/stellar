@@ -66,6 +66,12 @@ export interface LocationContext {
   salesChannel: string;
   /** True when the store could not regionalize and prices are national defaults. */
   degraded: boolean;
+  /**
+   * The store named a region that delivers to nobody. Search returns no
+   * products. Absent on the national-default paths (no region id, or a
+   * regions call that failed).
+   */
+  undeliverable?: boolean;
   /** Human-readable explanation when degraded. */
   note?: string;
 }

@@ -71,6 +71,23 @@ export interface RenderCache {
   diaPairs?: DiaPair[];
   /** Frozen when the shopper confirms Coto. Authorization is the cookie, not this stamp. */
   cotoRealDia?: CotoRealDia;
+  /**
+   * Día sku ids already shown on a search_compare row. A plain array: a Map
+   * encodes as `{}`. `render_products` drops these. Optional, so a turn stored
+   * before the field existed still decodes.
+   */
+  compared?: string[];
+  /**
+   * Ids already drawn on a search_compare card. A later chosen-chain search
+   * puts the ones that are not here first. Optional, so an older turn still decodes.
+   */
+  shown?: string[];
+  /**
+   * This request's Coto admission. Set by the route from `admitCotoRequest`,
+   * not by the model. Optional so a turn stored before the field still decodes.
+   * A missing value draws a Coto cart as not orderable.
+   */
+  cotoPay?: boolean;
 }
 
 /** A Coto catalog row the render tools may cite. Prices stay off the model input. */
@@ -124,6 +141,24 @@ export function cartLink(cache: RenderCache): string | undefined {
   return cache.cart && cache.handoffFor === cache.cart.cartId ? cache.handoffUrl : undefined;
 }
 
+/** A Coto cart is orderable only for an admitted account with something to charge. */
+export function cotoOrderable(cache: RenderCache, cart: Cart): boolean {
+  const payable = cart.lines.some((line) => line.available && line.quantity > 0) && cart.total.centavos > 0;
+  return cache.cotoPay === true && payable;
+}
+
+/**
+ * Remember a basket the UI already shows, so the next automatic draw stays quiet.
+ * The retrieval before hop 0 uses this: the rail already has the lines.
+ */
+export function sealCartDraw(cache: RenderCache): void {
+  const cart = cache.cart;
+  if (!cart) return;
+  const cotoBasket = cart.retailer === 'coto';
+  const handoffUrl = cotoBasket ? undefined : cartLink(cache);
+  cache.drawn = cardPrint(cart, handoffUrl);
+}
+
 /**
  * Everything a cart card puts on screen, as one string.
  *
@@ -167,9 +202,9 @@ function cardPrint(cart: Cart, handoffUrl?: string): string {
 export function autoRenderCart(cache: RenderCache, emit: (e: UiEvent) => void): boolean {
   const cart = cache.cart;
   if (!cart || !cart.lines.length) return false;
-  // A Coto basket has no store link and no pay control. Drawing it without a
-  // link does not reopen the Día bug: that bug was a card whose only action
-  // was missing. This card is not allowed to spend anything.
+  // A Coto basket has no store link. Drawing it without a link does not reopen
+  // the Día bug: that bug was a card whose only action was missing. Pay on a
+  // Coto card is the gate, and it is on only when this account is admitted.
   const cotoBasket = cart.retailer === 'coto';
   const handoffUrl = cotoBasket ? undefined : cartLink(cache);
   if (!cotoBasket && !handoffUrl) return false;
@@ -182,8 +217,8 @@ export function autoRenderCart(cache: RenderCache, emit: (e: UiEvent) => void): 
     t: 'cart',
     cart,
     ...(handoffUrl ? { handoffUrl } : {}),
-    ...(cotoBasket ? { orderable: false } : {}),
-    ...(cache.dualCheckout ? { dualCheckout: true } : {}),
+    ...(cotoBasket ? { orderable: cotoOrderable(cache, cart) } : {}),
+    ...(cache.dualCheckout && !cotoBasket ? { dualCheckout: true } : {}),
     ...(cache.soloDia ? { soloDia: true } : {}),
   });
   return true;
@@ -252,7 +287,12 @@ export const RENDER_TOOLS: Anthropic.Tool[] = [
       'results you mention, with the SKUs from that search: a second page, another brand, a ' +
       'replacement for something out of stock. A product the user has only read the name of is ' +
       'one they cannot see, and they should never have to ask for the pictures. Prices and ' +
-      'names come from the last search; you do not supply them.',
+      'names come from the last search; you do not supply them. Do not call this for a search ' +
+      'that already has a search_compare row: the server refuses those SKUs. Write one short ' +
+      'line instead. Never write "Encontré lo siguiente" under that row. On a build-cart ' +
+      'turn, do not call this: use the pickDia or pickCoto ids already in the conversation, ' +
+      'do not search for alternatives, and search only a type that has no pick yet. The ' +
+      'server refuses this call on that turn and draws no product grid.',
     input_schema: {
       type: 'object',
       properties: {
@@ -277,7 +317,10 @@ export const RENDER_TOOLS: Anthropic.Tool[] = [
       "supermarket's own site. You rarely need this: once get_cart_link has run, the card is " +
       'drawn for you every time the cart changes, with the new lines, the new total and the ' +
       'link. Call this only to bring an unchanged basket back on screen — after a question ' +
-      'about it, say. Never answer a change by pointing at a card already on screen.',
+      'about it, say. Never answer a change by pointing at a card already on screen. ' +
+      'Once the banner says order coto, talk only about Coto. Payment is the Pay control ' +
+      'on the rail and the card, and you never decide it. get_cart_link on a Coto basket ' +
+      'has no URL. That is not a reason to switch to Día.',
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -317,8 +360,18 @@ export function runRenderTool(
     const ids = ((use.input as { sku_ids?: unknown })?.sku_ids ?? []) as string[];
     const note = (use.input as { note?: string })?.note;
 
-    const items = ids.map((id) => cache.products.get(id)).filter((p): p is Product => Boolean(p));
-    const missing = ids.filter((id) => !cache.products.has(id));
+    const compared = new Set(cache.compared ?? []);
+    const skippedCompared = ids.filter((id) => compared.has(id));
+    const drawable = ids.filter((id) => !compared.has(id));
+    const items = drawable.map((id) => cache.products.get(id)).filter((p): p is Product => Boolean(p));
+    const missing = drawable.filter((id) => !cache.products.has(id));
+
+    if (!items.length && skippedCompared.length > 0 && missing.length === 0) {
+      return result(
+        'These products are already on the search_compare row. Do not call render_products for a compared search; write one short line instead.',
+        true,
+      );
+    }
 
     if (!items.length) {
       // Refusing beats rendering a plausible guess: an invented SKU is an
@@ -331,9 +384,13 @@ export function runRenderTool(
     }
 
     emit({ t: 'products', items, note });
+    const comparedNote = skippedCompared.length
+      ? ` Skipped SKUs already on the search_compare row: ${skippedCompared.join(', ')}.`
+      : '';
     return result(
       `Rendered ${items.length} product card(s).` +
-        (missing.length ? ` Skipped unknown SKUs: ${missing.join(', ')}.` : ''),
+        (missing.length ? ` Skipped unknown SKUs: ${missing.join(', ')}.` : '') +
+        comparedNote,
     );
   }
 
@@ -350,8 +407,8 @@ export function runRenderTool(
       t: 'cart',
       cart: cache.cart,
       ...(handoffUrl ? { handoffUrl } : {}),
-      ...(cotoBasket ? { orderable: false } : {}),
-      ...(cache.dualCheckout ? { dualCheckout: true } : {}),
+      ...(cotoBasket ? { orderable: cotoOrderable(cache, cache.cart) } : {}),
+      ...(cache.dualCheckout && !cotoBasket ? { dualCheckout: true } : {}),
       ...(cache.soloDia ? { soloDia: true } : {}),
     });
     return result(`Rendered the cart: ${cache.cart.lines.length} line(s), ${cache.cart.total.display}.`);

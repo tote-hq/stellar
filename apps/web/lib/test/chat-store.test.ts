@@ -302,6 +302,7 @@ describe('chat store: the session snapshot', () => {
       degraded: false,
       sellers: [{ id: '1', name: 'Día' }],
       regionId: 'v2.ABC',
+      undeliverable: true,
     },
   };
 
@@ -390,5 +391,52 @@ describe('chat store: dual checkout flags', () => {
     assert.equal(storedSettled?.kind === 'compare' && storedSettled.checkoutDemo, true);
     assert.equal(storedPending?.kind === 'compare' && storedPending.checkoutDemo, undefined);
     assert.equal(back?.dualCheckout, true);
+  });
+
+  it('does not restore a Coto cart as the dual-checkout offer', () => {
+    const coto = cart({ retailer: 'coto', cartId: 'coto-1' });
+    const block: Block = { kind: 'cart', id: 'b4', cart: coto, dualCheckout: true };
+    save({ state: { blocks: [block], cart: { cart: coto, dualCheckout: true } } });
+    const back = loadChat('c1');
+    assert.equal(back?.cart?.retailer, 'coto');
+    assert.equal(back?.dualCheckout, undefined);
+  });
+
+  it('keeps search-compare card fields and chains', () => {
+    const block: Block = {
+      kind: 'search_compare',
+      id: 'b-search',
+      compareId: 'sc1',
+      status: 'ok',
+      query: 'leche',
+      chains: ['dia'],
+      typeLabel: 'leche',
+      noPair: ['coto'],
+      dia: [
+        {
+          id: 'd1',
+          name: 'Leche',
+          shelfCentavos: 1000,
+          available: true,
+          brand: 'Ser',
+          imageUrl: 'https://img.test/leche.jpg',
+          unitMultiplier: 1,
+          measurementUnit: 'lt',
+          match: 'same',
+        },
+      ],
+      coto: [],
+    };
+    save({ state: { blocks: [block] } });
+    const back = loadChat('c1');
+    const stored = back?.blocks.find((b) => b.kind === 'search_compare');
+    assert.equal(stored?.kind === 'search_compare' && stored.chains?.[0], 'dia');
+    assert.equal(stored?.kind === 'search_compare' && stored.dia[0]?.imageUrl, 'https://img.test/leche.jpg');
+    assert.equal(stored?.kind === 'search_compare' && stored.dia[0]?.brand, 'Ser');
+    assert.equal(stored?.kind === 'search_compare' && stored.dia[0]?.unitMultiplier, 1);
+    assert.equal(stored?.kind === 'search_compare' && stored.dia[0]?.measurementUnit, 'lt');
+    assert.equal(stored?.kind === 'search_compare' && stored.dia[0]?.match, 'same');
+    assert.equal(stored?.kind === 'search_compare' && stored.typeLabel, 'leche');
+    assert.equal(stored?.kind === 'search_compare' && stored.noPair?.[0], 'coto');
   });
 });

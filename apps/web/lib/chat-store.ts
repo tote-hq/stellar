@@ -257,12 +257,20 @@ function packCompare(b: Extract<Block, { kind: 'compare' }>): Extract<Block, { k
 }
 
 function packSearchItem(item: SearchCompareItem): SearchCompareItem {
-  return {
+  const packed: SearchCompareItem = {
     id: item.id,
     name: item.name,
     shelfCentavos: item.shelfCentavos,
     available: item.available,
   };
+  if (item.brand) packed.brand = item.brand;
+  if (item.imageUrl) packed.imageUrl = item.imageUrl;
+  if (typeof item.unitMultiplier === 'number' && item.unitMultiplier > 0 && item.measurementUnit) {
+    packed.unitMultiplier = item.unitMultiplier;
+    packed.measurementUnit = item.measurementUnit;
+  }
+  if (item.match === 'same' || item.match === 'similar') packed.match = item.match;
+  return packed;
 }
 
 function packSearchCompare(
@@ -280,15 +288,19 @@ function packSearchCompare(
   if (b.postalCode !== undefined) out.postalCode = b.postalCode;
   if (b.gapCentavos !== undefined) out.gapCentavos = b.gapCentavos;
   if (b.feeCentavos !== undefined) out.feeCentavos = b.feeCentavos;
+  if (b.chains && b.chains.length > 0) out.chains = b.chains;
+  if (b.typeLabel) out.typeLabel = b.typeLabel;
+  if (b.noPair && b.noPair.length > 0) out.noPair = b.noPair;
   return out;
 }
 
 /**
  * The snapshot is handed back to the agent verbatim on the next turn, so
  * unlike everything else here it is packed in full rather than trimmed:
- * `sellers`, `salesChannel` and `degraded` are what make prices match what
- * the shopper will actually pay, and a restored snapshot missing them would
- * be a lie the agent then acts on. Still field by field — it is a location,
+ * `sellers`, `salesChannel`, `degraded` and `undeliverable` are what make
+ * prices and availability match what the shopper will actually pay, and a
+ * restored snapshot missing them would be a lie the agent then acts on.
+ * Still field by field — it is a location,
  * a map of cart ids, and — when the shopper has picked — the order and the
  * Coto line ids. Prices are not stored on those lines.
  */
@@ -309,6 +321,7 @@ function packSnapshot(s: SessionSnapshot): SessionSnapshot {
       salesChannel: l.salesChannel,
       degraded: l.degraded,
       ...(l.regionId === undefined ? {} : { regionId: l.regionId }),
+      ...(l.undeliverable ? { undeliverable: true } : {}),
       ...(l.note === undefined ? {} : { note: l.note }),
     };
   }
@@ -491,7 +504,19 @@ function asSearchItem(v: unknown): SearchCompareItem | null {
   const name = str(v.name);
   const shelfCentavos = num(v.shelfCentavos);
   if (id === null || name === null || shelfCentavos === null || shelfCentavos <= 0) return null;
-  return { id, name, shelfCentavos, available: v.available === true };
+  const item: SearchCompareItem = { id, name, shelfCentavos, available: v.available === true };
+  const brand = str(v.brand);
+  if (brand !== null) item.brand = brand;
+  const imageUrl = str(v.imageUrl);
+  if (imageUrl !== null) item.imageUrl = imageUrl;
+  const measurementUnit = str(v.measurementUnit);
+  const unitMultiplier = num(v.unitMultiplier);
+  if (measurementUnit !== null && unitMultiplier !== null && unitMultiplier > 0) {
+    item.measurementUnit = measurementUnit;
+    item.unitMultiplier = unitMultiplier;
+  }
+  if (v.match === 'same' || v.match === 'similar') item.match = v.match;
+  return item;
 }
 
 function asSearchCompare(v: Record<string, unknown>, id: string): Extract<Block, { kind: 'search_compare' }> | null {
@@ -523,6 +548,16 @@ function asSearchCompare(v: Record<string, unknown>, id: string): Extract<Block,
   if (gapCentavos !== null && gapCentavos >= 0) block.gapCentavos = gapCentavos;
   const feeCentavos = num(v.feeCentavos);
   if (feeCentavos !== null && feeCentavos >= 0) block.feeCentavos = feeCentavos;
+  if (Array.isArray(v.chains)) {
+    const chains = v.chains.filter((chain): chain is 'dia' | 'coto' => chain === 'dia' || chain === 'coto');
+    if (chains.length > 0) block.chains = chains;
+  }
+  const typeLabel = str(v.typeLabel);
+  if (typeLabel !== null) block.typeLabel = typeLabel;
+  if (Array.isArray(v.noPair)) {
+    const noPair = v.noPair.filter((chain): chain is 'dia' | 'coto' => chain === 'dia' || chain === 'coto');
+    if (noPair.length > 0) block.noPair = noPair;
+  }
   return block;
 }
 
@@ -617,6 +652,7 @@ function asSnapshot(v: unknown): SessionSnapshot | null {
       };
       const regionId = str(loc.regionId);
       if (regionId !== null) location.regionId = regionId;
+      if (loc.undeliverable === true) location.undeliverable = true;
       const note = str(loc.note);
       if (note !== null) location.note = note;
       out.location = location;

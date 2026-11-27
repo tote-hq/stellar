@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it, beforeEach } from 'node:test';
 
+import { choiceMessage } from '../retailer-choice.ts';
 import {
   CounterUnavailable,
   FREE_TURNS,
@@ -127,10 +128,23 @@ describe('quotas fail closed', () => {
     __resetTurnCounterForTests(failing);
     const guest = await requireLoginOrFreeTurn(chat(), UUID, prodEnv);
     assert.equal(guest?.status, 503);
+    assert.deepEqual(await guest?.json(), {
+      error: 'limiter_unavailable',
+      message: 'No pudimos verificar tu cupo. Probá de nuevo en un momento.',
+    });
     const token = await mintUserToken('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', 'sess');
     const signedIn = await requireLoginOrFreeTurn(chat({ cookie: `chg_user=${encodeURIComponent(token)}` }), UUID, prodEnv);
     assert.equal(signedIn?.status, 503);
     assert.equal(await takeQuota('k', 1, 60, failing), 'unavailable');
+  });
+
+  it('lets Seguir en Coto through when the limiter can answer', async () => {
+    const req = new Request('https://app.changuito.me/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: choiceMessage('coto'), sessionId: UUID }),
+    });
+    assert.equal(await requireLoginOrFreeTurn(req, UUID, prodEnv), null);
   });
 
   it('caps a signed-in wallet per hour', async () => {

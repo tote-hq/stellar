@@ -12,7 +12,6 @@ import {
   admitCotoReal,
   av5LogLine,
   COTO_REAL_PHASES,
-  cotoPayTarget,
   cotoRealOutcome,
   cotoShopperBody,
   deliveryBeforeShop,
@@ -26,6 +25,7 @@ import {
   refundAmount,
   resolveCoverage,
   shopperCopy,
+  shopperPrompt,
   shopperStatus,
   type DiaPair,
   type PricedLine,
@@ -132,6 +132,20 @@ describe('coto real quote', () => {
       assert.equal(over.quote.lockCentavos, 3_000_000 + HOME_PROVISION_CENTAVOS);
     }
     assert.notEqual(quoted.quote.cotoTicketCentavos, 1);
+    const unmatched = quoteFromPriced({
+      lines: [line()],
+      clientTotalCentavos: 1,
+      pairs: [],
+      postalCode: '1951',
+      coverage: 'shopper',
+      fulfillment: 'pickup',
+    });
+    assert.equal(unmatched.ok, true);
+    if (unmatched.ok) {
+      assert.equal(unmatched.quote.gapCentavos, 0);
+      assert.equal(unmatched.quote.feeCentavos, 0);
+      assert.equal(unmatched.quote.lockCentavos, 494800);
+    }
   });
 
   it('uses fee 0 when no pair matches, and rejects an unsafe quantity', () => {
@@ -212,19 +226,14 @@ describe('coto real quote', () => {
     const other = freezeCotoReal(signed.snapshot, pairs, OTHER);
     assert.equal(other.ok, false);
     assert.equal(quoteBuyerError(signed.snapshot, OTHER), 'Este changuito está asociado a otra cuenta.');
-    assert.equal(quoteBuyerError(undefined, OWNER), 'Volvé a comparar antes de pagar.');
+    assert.equal(quoteBuyerError(undefined, OWNER), undefined);
   });
 
-  it('shows pay only on the current turn Coto cart', () => {
-    const blocks = [
-      { id: 'u1', kind: 'user' },
-      { id: 'dia', kind: 'cart', retailer: 'dia' },
-      { id: 'u2', kind: 'user' },
-      { id: 'coto', kind: 'cart', retailer: 'coto' },
-    ];
-    assert.equal(cotoPayTarget(blocks, true), 'coto');
-    assert.equal(cotoPayTarget(blocks, false), undefined);
-    assert.notEqual(cotoPayTarget(blocks, true), 'dia');
+  it('no longer limits Coto pay to the latest card in the turn', () => {
+    // cotoPayTarget was removed. Every Coto card uses cotoPayGate, covered in
+    // coto-pay-gate.test.ts. An older card pays the live basket.
+    const source = readFileSync(join(import.meta.dirname, '../checkout/coto-real.ts'), 'utf8');
+    assert.equal(source.includes('cotoPayTarget'), false);
   });
 
   it('refunds the full lock, hides viewer fields, and keeps delivery before shop', () => {
@@ -232,6 +241,16 @@ describe('coto real quote', () => {
     assert.equal(refundAmount(494840, 'needs_human_timeout'), 494840);
     assert.equal(refundAmount(494840, 'needs_shopper_timeout'), 494840);
     assert.equal(shopperCopy('needs_shopper_timeout'), 'No llegamos a completar un dato del pedido. Te devolvemos el saldo.');
+    assert.equal(
+      shopperCopy('sku_rejected', null, 'Manteca TONADITA 100 g'),
+      'No pudimos cargar «Manteca TONADITA 100 g». Te devolvemos el saldo.',
+    );
+    assert.equal(shopperCopy('sku_rejected'), 'No pudimos cargar un producto. Te devolvemos el saldo.');
+    assert.equal(shopperCopy('sku_rejected', null, '   '), 'No pudimos cargar un producto. Te devolvemos el saldo.');
+    assert.equal(
+      shopperCopy('sku_rejected', 'declined', 'Manteca TONADITA 100 g'),
+      'No se pudo cobrar en Coto. Te devolvemos el saldo.',
+    );
     assert.equal(refundAmount(494840, 'placed'), undefined);
     const logged: string[] = [];
     const status = shopperStatus({
@@ -283,5 +302,77 @@ describe('coto real quote', () => {
     assert.equal(modal.includes('openEscrow'), true);
     assert.equal(modal.includes('PayCard'), false);
     assert.equal(modal.includes('quoteCotoDemo'), false);
+  });
+
+  it('shows the checkout prompt only for the order the poll is watching', () => {
+    const modal = readFileSync(join(import.meta.dirname, '../../components/CotoRealModal.tsx'), 'utf8');
+    const pollGuard = modal.indexOf('if (!orderId || !wallet.address) return;');
+    const promptForm = modal.indexOf('data-testid="checkout-prompt"');
+    const promptGate = modal.lastIndexOf('{prompt ?', promptForm);
+    assert.ok(pollGuard > 0 && pollGuard < promptForm);
+    assert.ok(promptGate > pollGuard && promptGate < promptForm);
+    const effect = modal.slice(modal.lastIndexOf('useEffect', pollGuard), pollGuard + 600);
+    assert.match(effect, /\/api\/checkout\/status\?orderId=\$\{orderId\}/);
+  });
+
+  it('drops an empty pickup question and leaves every other prompt unchanged', () => {
+    const empty = { label: '¿En qué sucursal retirás?', fieldRef: 'pickup_branch', options: [] as const };
+    assert.equal(shopperPrompt({ ...empty, options: [] }), null);
+    assert.equal(shopperPrompt({ ...empty, options: null }), null);
+    const two = {
+      label: '¿En qué sucursal retirás?',
+      fieldRef: 'pickup_branch',
+      options: [
+        { label: 'Villa Crespo', value: 'Villa Crespo', suggested: true },
+        { label: 'Abasto', value: 'Abasto' },
+      ],
+    };
+    assert.equal(shopperPrompt(two), two);
+    const notes = { label: 'Notas', fieldRef: 'butcher_notes', options: null };
+    assert.equal(shopperPrompt(notes), notes);
+  });
+
+  it('resumes an open order before a new checkout and clears a prompt the server stops sending', () => {
+    const modal = readFileSync(join(import.meta.dirname, '../../components/CotoRealModal.tsx'), 'utf8');
+    const resumeAt = modal.indexOf('/api/checkout/coto-real/resume');
+    const fulfillmentAt = modal.indexOf('data-testid="checkout-fulfillment"');
+    assert.ok(resumeAt !== -1 && fulfillmentAt > resumeAt);
+    const lockAt = modal.indexOf('data-testid="coto-real-lock"');
+    const gateAt = modal.lastIndexOf("resume === 'fresh'", lockAt);
+    assert.ok(gateAt !== -1 && gateAt < lockAt);
+    assert.match(modal, /setPrompt\(body\.prompt \?\? null\)/);
+    assert.match(modal, /fieldRef === 'pickup_branch'/);
+  });
+
+  it('closes a resume-only modal when the order is gone and keeps Pay behind resumeOpen', () => {
+    const modal = readFileSync(join(import.meta.dirname, '../../components/CotoRealModal.tsx'), 'utf8');
+    assert.match(modal, /resumeOnly \? 'closed'/);
+    const freshAt = modal.indexOf("resume === 'fresh'");
+    const lockAt = modal.indexOf('data-testid="coto-real-lock"');
+    const closedAt = modal.indexOf('data-testid="coto-real-closed"');
+    assert.ok(freshAt !== -1 && lockAt > freshAt && closedAt > lockAt);
+    const chat = readFileSync(join(import.meta.dirname, '../../components/Chat.tsx'), 'utf8');
+    assert.match(chat, /cotoResumeProbe\(/);
+    let from = 0;
+    for (let n = 0; n < 2; n += 1) {
+      const at = chat.indexOf('cotoPayGate(', from);
+      assert.ok(at !== -1);
+      const slice = chat.slice(at, chat.indexOf('});', at));
+      assert.match(slice, /resumeOpen/);
+      from = at + 'cotoPayGate('.length;
+    }
+    assert.equal(chat.indexOf('cotoPayGate(', from), -1);
+    const rail = readFileSync(join(import.meta.dirname, '../../components/CartRail.tsx'), 'utf8');
+    const railAt = rail.indexOf('cotoPayGate(');
+    assert.ok(railAt !== -1);
+    assert.match(rail.slice(railAt, rail.indexOf('})', railAt)), /resumeOpen/);
+  });
+
+  it('filters the job prompt and the pending prompt before openPrompt', () => {
+    const route = readFileSync(join(import.meta.dirname, '../../app/api/checkout/status/route.ts'), 'utf8');
+    const job = route.indexOf('shopperPrompt(');
+    const pending = route.indexOf('shopperPrompt(', job + 1);
+    const open = route.indexOf('openPrompt(');
+    assert.ok(job !== -1 && pending > job && job < open);
   });
 });

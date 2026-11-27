@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { STARTERS } from '../agent/prompt.ts';
+import { STARTERS, stateBanner } from '../agent/prompt.ts';
 import {
   CITY_ASK,
+  canonicalCity,
   cityFromAnswer,
   earlyCityAsk,
   EARLY_LOCATION_ASK,
@@ -72,5 +73,119 @@ describe('earlyCityAsk', () => {
     assert.equal(isCityQuestion(CITY_ASK), true);
     rememberCity(state, [{ role: 'assistant', content: [{ type: 'text', text: CITY_ASK }] }], 'Villa Crespo');
     assert.equal(state.city, 'Villa Crespo');
+  });
+
+  it('stores CABA as Ciudad de Buenos Aires and leaves any other city', () => {
+    for (const text of ['caba', 'CABA', 'C.A.B.A.', ' ciudad  de buenos aires ', 'Ciudad de Buenos Aíres']) {
+      assert.equal(canonicalCity(text), 'Ciudad de Buenos Aires', text);
+      assert.equal(cityFromAnswer(text), 'Ciudad de Buenos Aires', text);
+    }
+    assert.equal(cityFromAnswer('Rosario'), 'Rosario');
+    assert.equal(canonicalCity('  Rosario  '), 'Rosario');
+    assert.equal(earlyCityAsk({ hasLocation: false, hasCity: true, knownPostal: true }), null);
+    const state: { city?: string; getCity: () => string | undefined; setCity: (city: string) => void } = {
+      getCity: () => state.city,
+      setCity: (city) => {
+        state.city = city;
+      },
+    };
+    rememberCity(state, [{ role: 'assistant', content: [{ type: 'text', text: CITY_ASK }] }], 'caba');
+    assert.equal(state.city, 'Ciudad de Buenos Aires');
+  });
+
+  it('stores the first locality when the snapshot says the city question went out and the transcript is empty', () => {
+    const prior = ['CP 1425. Quiero leche, pan lactal y manteca.'];
+    const box = (asked: boolean) => {
+      const state: {
+        city?: string;
+        getCity: () => string | undefined;
+        setCity: (city: string) => void;
+        getCityAsked: () => boolean;
+      } = {
+        getCity: () => state.city,
+        setCity: (city) => {
+          state.city = city;
+        },
+        getCityAsked: () => asked,
+      };
+      return state;
+    };
+
+    const kept = box(true);
+    rememberCity(kept, [], 'Villa Crespo', prior);
+    assert.equal(kept.city, 'Villa Crespo');
+
+    const missed = box(false);
+    rememberCity(missed, [], 'Villa Crespo', prior);
+    assert.equal(missed.city, undefined);
+
+    const list = box(true);
+    rememberCity(list, [], 'leche, pan', prior);
+    assert.equal(list.city, undefined);
+
+    assert.equal(earlyCityAsk({ hasLocation: false, hasCity: true, knownPostal: true }), null);
+  });
+
+  it('stores the CABA alias on the first reply when the transcript and pending postal are gone', () => {
+    for (const text of ['caba', 'CABA', 'C.A.B.A.', 'ciudad de buenos aires']) {
+      const state: { city?: string; getCity: () => string | undefined; setCity: (city: string) => void } = {
+        getCity: () => state.city,
+        setCity: (city) => {
+          state.city = city;
+        },
+      };
+      rememberCity(state, [], text, ['1414']);
+      assert.equal(state.city, 'Ciudad de Buenos Aires', text);
+      assert.equal(canonicalCity(text), 'Ciudad de Buenos Aires', text);
+    }
+  });
+
+  it('stores caba after a model-worded city question when a postal code is pending', () => {
+    const state: {
+      city?: string;
+      postal?: string;
+      getCity: () => string | undefined;
+      setCity: (city: string) => void;
+      getPendingPostal: () => string | undefined;
+    } = {
+      postal: '1425',
+      getCity: () => state.city,
+      setCity: (city) => {
+        state.city = city;
+      },
+      getPendingPostal: () => state.postal,
+    };
+    rememberCity(
+      state,
+      [{ role: 'assistant', content: [{ type: 'text', text: '¿En qué ciudad estás para ubicar la sucursal?' }] }],
+      'caba',
+    );
+    assert.equal(state.city, 'Ciudad de Buenos Aires');
+    const list: typeof state = {
+      postal: '1425',
+      getCity: () => list.city,
+      setCity: (city) => {
+        list.city = city;
+      },
+      getPendingPostal: () => list.postal,
+    };
+    rememberCity(
+      list,
+      [{ role: 'assistant', content: [{ type: 'text', text: '¿En qué ciudad estás para ubicar la sucursal?' }] }],
+      'leche, pan',
+    );
+    assert.equal(list.city, undefined);
+  });
+
+  it('names a known city and pending postal code before a retailer is set', () => {
+    assert.equal(stateBanner({}), '[session: no supermarket or postal code set yet]');
+    assert.equal(
+      stateBanner({ postalCode: '1425', city: 'Ciudad de Buenos Aires' }),
+      '[session: no supermarket or postal code set yet, CP 1425, city Ciudad de Buenos Aires]',
+    );
+    assert.equal(
+      stateBanner({ retailer: 'dia', postalCode: '1425', city: 'Rosario' }),
+      '[session: dia, CP 1425, Rosario, cart empty]',
+    );
   });
 });

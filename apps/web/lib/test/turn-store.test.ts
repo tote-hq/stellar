@@ -118,8 +118,24 @@ test('coto cache and searches round-trip, and an older turn still decodes', () =
   assert.equal(back?.cache.coto?.c1?.name, 'Yerba');
   assert.equal(back?.cache.diaPairs?.[0]?.diaSkuId, 'd1');
   assert.equal(back?.cache.cotoRealDia?.buyer, 'GABC');
+  turn.cache.cotoPay = true;
+  const withPay = decodeTurn(JSON.parse(JSON.stringify(encodeTurn(turn))) as unknown);
+  assert.equal(withPay?.cache.cotoPay, true);
+  assert.equal(older.cache.cotoPay, undefined);
   assert.equal(back?.cache.searches?.[0]?.available, 1);
   assert.equal(encodeTurn(turn).v, 1);
+
+  turn.cache.compared = ['d1', 'd2'];
+  const withCompared = decodeTurn(JSON.parse(JSON.stringify(encodeTurn(turn))) as unknown);
+  assert.deepEqual(withCompared?.cache.compared, ['d1', 'd2']);
+  assert.equal(older.cache.compared, undefined);
+
+  turn.cache.shown = ['c1', 'd9'];
+  const withShown = decodeTurn(JSON.parse(JSON.stringify(encodeTurn(turn))) as unknown);
+  assert.deepEqual(withShown?.cache.shown, ['c1', 'd9']);
+  assert.equal(older.cache.shown, undefined);
+  const absent = decodeTurn({ v: 1, messages: [], products: [] });
+  assert.equal(absent?.cache.shown, undefined);
 });
 
 test('an empty conversation round trips to an empty one, not to undefined', () => {

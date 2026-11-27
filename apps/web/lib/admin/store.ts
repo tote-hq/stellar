@@ -46,7 +46,7 @@ export interface AdminStore {
   }): Promise<'ok' | 'conflict'>;
   pendingPrompt(orderId: string): Promise<PendingPrompt | null>;
   answerPrompt(orderId: string, answer: string): Promise<boolean>;
-  notifyOnce(kind: string, orderId: string | null, body: string): Promise<void>;
+  notifyOnce(kind: string, orderId: string, body: string): Promise<void>;
 }
 
 const postgresStore: AdminStore = {

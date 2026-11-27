@@ -76,6 +76,12 @@ interface StoredTurn {
   /** Día pairs and the chain-pick snapshot. Optional arrays, never a Map. */
   diaPairs?: DiaPair[];
   cotoRealDia?: CotoRealDia;
+  /** Día sku ids already on a search row. Optional array, never a Map. */
+  compared?: string[];
+  /** Ids drawn on a search card. Optional array, never a Map. */
+  shown?: string[];
+  /** This request's Coto admission. Optional on `v: 1`. */
+  cotoPay?: boolean;
 }
 
 export function encodeTurn(turn: Turn): StoredTurn {
@@ -93,7 +99,20 @@ export function encodeTurn(turn: Turn): StoredTurn {
     ...(turn.cache.searches ? { searches: turn.cache.searches } : {}),
     ...(turn.cache.diaPairs ? { diaPairs: turn.cache.diaPairs } : {}),
     ...(turn.cache.cotoRealDia ? { cotoRealDia: turn.cache.cotoRealDia } : {}),
+    ...(turn.cache.compared ? { compared: turn.cache.compared } : {}),
+    ...(turn.cache.shown ? { shown: turn.cache.shown } : {}),
+    ...(typeof turn.cache.cotoPay === 'boolean' ? { cotoPay: turn.cache.cotoPay } : {}),
   };
+}
+
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string' || !item || item.length > 64) continue;
+    out.push(item);
+  }
+  return out.length ? out : undefined;
 }
 
 function asCompareCard(value: unknown): CompareCard | undefined {
@@ -155,6 +174,8 @@ export function decodeTurn(raw: unknown): Turn | undefined {
   const searches = asSearches(s.searches);
   const diaPairs = decodeDiaPairs(s.diaPairs);
   const cotoRealDia = decodeCotoRealDia(s.cotoRealDia);
+  const compared = asStringArray(s.compared);
+  const shown = asStringArray(s.shown);
 
   return {
     messages: s.messages,
@@ -170,6 +191,9 @@ export function decodeTurn(raw: unknown): Turn | undefined {
       ...(searches ? { searches } : {}),
       ...(diaPairs ? { diaPairs } : {}),
       ...(cotoRealDia ? { cotoRealDia } : {}),
+      ...(compared ? { compared } : {}),
+      ...(shown ? { shown } : {}),
+      ...(typeof s.cotoPay === 'boolean' ? { cotoPay: s.cotoPay } : {}),
     },
   };
 }

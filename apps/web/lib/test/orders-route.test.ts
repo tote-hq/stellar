@@ -5,6 +5,7 @@ import { after, describe, it } from 'node:test';
 import { Keypair } from '@stellar/stellar-sdk';
 
 import { POST } from '../../app/api/orders/route.ts';
+import type { CheckoutRecord } from '../checkout/store.ts';
 import { WALLET_PROOF_TTL_MS, walletProofMessage } from '../wallet-proof.ts';
 
 /**
@@ -62,7 +63,7 @@ const ask = (body: unknown) =>
     }),
   );
 
-describe('reading back what a wallet bought', () => {
+describe('reading back what a wallet bought', { concurrency: false }, () => {
   it('RULE: a public address alone buys nothing', async () => {
     // The whole reason this is not a GET with an address in the query string.
     await withEnv({ DATABASE_URL: UNUSED_DB }, async () => {
@@ -103,6 +104,53 @@ describe('reading back what a wallet bought', () => {
       // they did wrong.
       assert.match(body.message, /venció/);
     });
+  });
+
+  it('keeps a refunded order refunded when a stale write has no outcome', async () => {
+    const saved = process.env.DATABASE_URL;
+    delete process.env.DATABASE_URL;
+    try {
+      const { checkoutStore } = await import('../checkout/store.ts');
+      const { ordersOf } = await import('../checkout/escrow-server.ts');
+      const orderId = 'e7'.repeat(32);
+      const buyer = 'G' + 'B'.repeat(55);
+      const refunded: CheckoutRecord = {
+        orderId,
+        buyer,
+        amount: '1000000',
+        amountCents: 100,
+        basketHash: 'cd'.repeat(32),
+        arsPerUsd: 1000,
+        totalDisplay: '$ 5.170',
+        retailer: 'coto',
+        lines: [{ name: 'Leche', skuId: '1', quantity: 1, lineTotal: '$ 1.000' }],
+        handoffUrl: null,
+        createdAt: Date.now(),
+        openSig: 'open-sig',
+        outcome: 'refunded',
+        closeSig: 'close-sig',
+        error: 'No pudimos agregar el producto.',
+        phase: 'shop',
+      };
+      await checkoutStore().set(refunded);
+      const stale: CheckoutRecord = { ...refunded, phase: 'needs_human' };
+      delete stale.outcome;
+      delete stale.closeSig;
+      delete stale.error;
+      await checkoutStore().set(stale);
+      const listed = await ordersOf(buyer);
+      const row = listed.find((order) => order.orderId === orderId);
+      assert.equal(row?.status, 'refunded');
+      assert.notEqual(row?.status, 'open');
+      const stored = await checkoutStore().get(orderId);
+      assert.equal(stored?.outcome, 'refunded');
+      assert.equal(stored?.closeSig, 'close-sig');
+      assert.equal(stored?.error, 'No pudimos agregar el producto.');
+      assert.equal(stored?.phase, 'needs_human');
+    } finally {
+      if (saved === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = saved;
+    }
   });
 
 });
