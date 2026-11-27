@@ -56,15 +56,24 @@ describe('admin Pedidos rows', () => {
     assert.equal(rest[1]?.buyer, 'Luis');
   });
 
-  it('shows order, client and time, and Listo still marks one read', () => {
+  it('shows the Pedidos table in a scroll region, and Listo still marks one read', () => {
     const page = readFileSync(new URL('../../app/admin-portal/page.tsx', import.meta.url), 'utf8');
+    assert.match(page, /<table/);
+    assert.match(page, />Estado</);
+    assert.match(page, />Pedido</);
+    assert.match(page, />Cliente</);
+    assert.match(page, />Hora</);
+    assert.match(page, />Listo</);
+    assert.match(page, /data-testid="admin-notifications-scroll"/);
+    assert.match(page, /overflowY: 'auto'/);
+    assert.match(page, /maxHeight: 'calc\(100dvh - 8rem\)'/);
+    assert.match(page, /2px solid var\(--chg-sunflower\)/);
+    assert.match(page, /2px solid var\(--ok\)/);
+    assert.doesNotMatch(page, /note\.readAt \? null/);
     assert.match(page, /data-testid="admin-notification"/);
     assert.match(page, /data-testid="admin-notification-order"/);
     assert.match(page, /data-testid="admin-notification-client"/);
     assert.match(page, /data-testid="admin-notification-time"/);
-    assert.match(page, /\{note\.buyer \?/);
-    assert.match(page, /data-testid="admin-notification-client"/);
-    assert.match(page, /Cliente \{note\.buyer\}/);
     assert.doesNotMatch(page, /sin cliente/);
     assert.match(page, /overflowWrap: 'anywhere'/);
     assert.match(page, /timeZone: 'America\/Argentina\/Buenos_Aires'/);
