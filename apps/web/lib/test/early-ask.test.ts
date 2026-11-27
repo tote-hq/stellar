@@ -93,6 +93,39 @@ describe('earlyCityAsk', () => {
     assert.equal(state.city, 'Ciudad de Buenos Aires');
   });
 
+  it('stores the first locality when the snapshot says the city question went out and the transcript is empty', () => {
+    const prior = ['CP 1425. Quiero leche, pan lactal y manteca.'];
+    const box = (asked: boolean) => {
+      const state: {
+        city?: string;
+        getCity: () => string | undefined;
+        setCity: (city: string) => void;
+        getCityAsked: () => boolean;
+      } = {
+        getCity: () => state.city,
+        setCity: (city) => {
+          state.city = city;
+        },
+        getCityAsked: () => asked,
+      };
+      return state;
+    };
+
+    const kept = box(true);
+    rememberCity(kept, [], 'Villa Crespo', prior);
+    assert.equal(kept.city, 'Villa Crespo');
+
+    const missed = box(false);
+    rememberCity(missed, [], 'Villa Crespo', prior);
+    assert.equal(missed.city, undefined);
+
+    const list = box(true);
+    rememberCity(list, [], 'leche, pan', prior);
+    assert.equal(list.city, undefined);
+
+    assert.equal(earlyCityAsk({ hasLocation: false, hasCity: true, knownPostal: true }), null);
+  });
+
   it('stores the CABA alias on the first reply when the transcript and pending postal are gone', () => {
     for (const text of ['caba', 'CABA', 'C.A.B.A.', 'ciudad de buenos aires']) {
       const state: { city?: string; getCity: () => string | undefined; setCity: (city: string) => void } = {

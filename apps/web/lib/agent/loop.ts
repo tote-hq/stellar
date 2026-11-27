@@ -321,6 +321,7 @@ export async function runTurn(
       Boolean(session.state.getPendingPostal()) || transcriptHasPostal(turn.messages, userText),
   });
   if (cityAsk) {
+    session.state.markCityAsked();
     turn.messages.push(
       { role: 'user', content: shopperTurn(userText, stateBanner({}), image) },
       { role: 'assistant', content: [{ type: 'text', text: cityAsk }] },

@@ -43,6 +43,12 @@ export interface SessionSnapshot {
    * so a snapshot from before this field restores as it did.
    */
   city?: string;
+  /**
+   * The fixed city question went out and is still waiting for an answer.
+   * Omitted when unset, like `city`, so a snapshot from before this field
+   * restores as it did.
+   */
+  cityAsked?: true;
 }
 
 export interface SessionState {
@@ -51,6 +57,9 @@ export interface SessionState {
   getLocation(): LocationContext | undefined;
   getCity(): string | undefined;
   setCity(city: string): void;
+  /** The city question was sent and is still unanswered. */
+  markCityAsked(): void;
+  getCityAsked(): boolean;
   /** Postal code seen before the city answer. Not part of the snapshot. */
   notePostal(code: string): void;
   getPendingPostal(): string | undefined;
@@ -83,6 +92,7 @@ function copyCoto(lines: readonly CotoLineSnap[]): CotoLineSnap[] {
 export function createSessionState(): SessionState {
   let location: LocationContext | undefined;
   let city: string | undefined;
+  let cityAsked = false;
   let pendingPostal: string | undefined;
   let order: OrderRetailer | undefined;
   let cotoLines: CotoLineSnap[] = [];
@@ -116,6 +126,7 @@ export function createSessionState(): SessionState {
         cotoLines = [];
       }
       location = ctx;
+      cityAsked = false;
     },
 
     requireLocation,
@@ -123,8 +134,15 @@ export function createSessionState(): SessionState {
     getCity: () => city,
     setCity(next) {
       const trimmed = next.trim();
-      if (trimmed) city = trimmed;
+      if (trimmed) {
+        city = trimmed;
+        cityAsked = false;
+      }
     },
+    markCityAsked() {
+      cityAsked = true;
+    },
+    getCityAsked: () => cityAsked,
     notePostal(code) {
       const trimmed = code.trim();
       if (trimmed) pendingPostal = trimmed;
@@ -192,11 +210,13 @@ export function createSessionState(): SessionState {
       ...(order ? { order } : {}),
       ...(cotoLines.length ? { coto: copyCoto(cotoLines) } : {}),
       ...(city ? { city } : {}),
+      ...(cityAsked ? { cityAsked: true as const } : {}),
     }),
 
     restore(snap) {
       location = snap.location;
       city = typeof snap.city === 'string' && snap.city.trim() ? snap.city.trim() : undefined;
+      cityAsked = snap.cityAsked === true;
       pendingPostal = undefined;
       carts.clear();
       for (const [retailer, cartId] of Object.entries(snap.carts ?? {})) {
