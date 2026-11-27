@@ -334,6 +334,30 @@ describe('coto real quote', () => {
     assert.match(modal, /fieldRef === 'pickup_branch'/);
   });
 
+  it('closes a resume-only modal when the order is gone and keeps Pay behind resumeOpen', () => {
+    const modal = readFileSync(join(import.meta.dirname, '../../components/CotoRealModal.tsx'), 'utf8');
+    assert.match(modal, /resumeOnly \? 'closed'/);
+    const freshAt = modal.indexOf("resume === 'fresh'");
+    const lockAt = modal.indexOf('data-testid="coto-real-lock"');
+    const closedAt = modal.indexOf('data-testid="coto-real-closed"');
+    assert.ok(freshAt !== -1 && lockAt > freshAt && closedAt > lockAt);
+    const chat = readFileSync(join(import.meta.dirname, '../../components/Chat.tsx'), 'utf8');
+    assert.match(chat, /cotoResumeProbe\(/);
+    let from = 0;
+    for (let n = 0; n < 2; n += 1) {
+      const at = chat.indexOf('cotoPayGate(', from);
+      assert.ok(at !== -1);
+      const slice = chat.slice(at, chat.indexOf('});', at));
+      assert.match(slice, /resumeOpen/);
+      from = at + 'cotoPayGate('.length;
+    }
+    assert.equal(chat.indexOf('cotoPayGate(', from), -1);
+    const rail = readFileSync(join(import.meta.dirname, '../../components/CartRail.tsx'), 'utf8');
+    const railAt = rail.indexOf('cotoPayGate(');
+    assert.ok(railAt !== -1);
+    assert.match(rail.slice(railAt, rail.indexOf('})', railAt)), /resumeOpen/);
+  });
+
   it('filters the job prompt and the pending prompt before openPrompt', () => {
     const route = readFileSync(join(import.meta.dirname, '../../app/api/checkout/status/route.ts'), 'utf8');
     const job = route.indexOf('shopperPrompt(');

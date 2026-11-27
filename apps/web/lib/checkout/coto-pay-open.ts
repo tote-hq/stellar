@@ -10,6 +10,31 @@ export interface CotoOpenCart {
   retailer: string;
 }
 
+/** True only when a signed-in read-only Coto chat may ask the resume route. */
+export function cotoResumeProbe(args: {
+  readOnly: boolean;
+  retailer: string | null | undefined;
+  orderState: string | null | undefined;
+  address: string | null | undefined;
+}): boolean {
+  return Boolean(args.readOnly && args.retailer === 'coto' && args.orderState !== 'paid' && args.address);
+}
+
+/**
+ * The session id a pay click may hand the modal.
+ * A resumable chat uses its stored id. A read-only chat uses it only when an
+ * open order was confirmed. The id is never invented here.
+ */
+export function cotoSessionFor(args: {
+  resumable: boolean;
+  resumeOrderId: string | null;
+  storedSessionId: string | null;
+}): string | null {
+  if (!args.storedSessionId) return null;
+  if (args.resumable || args.resumeOrderId) return args.storedSessionId;
+  return null;
+}
+
 export function cotoPayOpen<T extends CotoOpenCart>(args: {
   cart: T | null | undefined;
   sessionId: string | null;

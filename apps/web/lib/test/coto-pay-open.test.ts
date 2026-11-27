@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
-import { cotoPayOpen, openCotoOrder, restoreActiveChat, type OpenCotoRow } from '../checkout/coto-pay-open.ts';
+import {
+  cotoPayOpen,
+  cotoResumeProbe,
+  cotoSessionFor,
+  openCotoOrder,
+  restoreActiveChat,
+  type OpenCotoRow,
+} from '../checkout/coto-pay-open.ts';
 
 const coto = { retailer: 'coto', cartId: 'coto-1' };
 
@@ -42,6 +49,38 @@ describe('cotoPayOpen', () => {
     const opened = cotoPayOpen({ cart: cardCart, sessionId: 'live', storedSessionId: null });
     assert.equal(opened?.cart, cardCart);
     assert.notEqual(opened?.cart, other);
+  });
+});
+
+describe('cotoResumeProbe', () => {
+  const open = { readOnly: true, retailer: 'coto', orderState: 'open', address: 'GBUYER' };
+
+  it('is true only for a signed-in read-only Coto chat that is not paid', () => {
+    assert.equal(cotoResumeProbe(open), true);
+    assert.equal(cotoResumeProbe({ ...open, readOnly: false }), false);
+    assert.equal(cotoResumeProbe({ ...open, retailer: 'dia' }), false);
+    assert.equal(cotoResumeProbe({ ...open, orderState: 'paid' }), false);
+    assert.equal(cotoResumeProbe({ ...open, address: null }), false);
+    assert.equal(cotoResumeProbe({ ...open, address: '' }), false);
+  });
+});
+
+describe('cotoSessionFor', () => {
+  it('returns the stored id for a resumable chat or a confirmed resume order', () => {
+    assert.equal(cotoSessionFor({ resumable: true, resumeOrderId: null, storedSessionId: 'stored' }), 'stored');
+    assert.equal(cotoSessionFor({ resumable: false, resumeOrderId: 'ord', storedSessionId: 'stored' }), 'stored');
+    assert.equal(cotoSessionFor({ resumable: false, resumeOrderId: null, storedSessionId: 'stored' }), null);
+    assert.equal(cotoSessionFor({ resumable: true, resumeOrderId: 'ord', storedSessionId: null }), null);
+  });
+
+  it('opens the modal for a read-only chat only when a resume order has a stored session', () => {
+    const withOrder = cotoSessionFor({ resumable: false, resumeOrderId: 'ord', storedSessionId: 'stored' });
+    assert.deepEqual(cotoPayOpen({ cart: coto, sessionId: null, storedSessionId: withOrder }), {
+      cart: coto,
+      sessionId: 'stored',
+    });
+    const without = cotoSessionFor({ resumable: false, resumeOrderId: null, storedSessionId: 'stored' });
+    assert.equal(cotoPayOpen({ cart: coto, sessionId: null, storedSessionId: without }), null);
   });
 });
 

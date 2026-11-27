@@ -72,4 +72,20 @@ describe('cotoPayGate', () => {
       'waiting',
     );
   });
+
+  it('lets a confirmed open order through a read-only chat', () => {
+    assert.equal(cotoPayGate({ ...base, readOnly: true, resumeOpen: true }), 'pay');
+    assert.equal(cotoPayGate({ ...base, readOnly: true, resumeOpen: true, orderState: 'paid' }), 'paid');
+    assert.equal(cotoPayGate({ ...base, readOnly: true, resumeOpen: true, admission: 'denied' }), 'not_admitted');
+    assert.equal(cotoPayGate({ ...base, readOnly: false, resumeOpen: true }), 'pay');
+    assert.equal(
+      cotoPayGate({
+        ...base,
+        readOnly: false,
+        resumeOpen: true,
+        cart: { lines: [], total: { centavos: 0 } },
+      }),
+      'no_total',
+    );
+  });
 });
