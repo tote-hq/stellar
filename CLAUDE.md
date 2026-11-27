@@ -459,7 +459,7 @@ shopper confirms the existing switch dialog. The cart card then draws through
 ## Before you commit
 
 ```
-npm test                        # 847: mcp 221 · trust 1 · web 625
+npm test                        # 856: mcp 221 · trust 1 · web 634
 npm run typecheck -w @changuito/web
 npm run build
 ```

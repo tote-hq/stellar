@@ -40,10 +40,11 @@ async function load(req: Request) {
 export async function PUT(req: Request): Promise<Response> {
   const got = await load(req);
   if (!got.ok) return got.res;
-  if (cotoRealRecord(got.rec) && !(await admitCotoRequest(got.rec.buyer))) {
-    return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
-  }
-  if (cotoCheckoutBlocked(got.rec.retailer) && !cotoDemoPayRecord(got.rec)) {
+  if (cotoRealRecord(got.rec)) {
+    if (!(await admitCotoRequest(got.rec.buyer))) {
+      return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
+    }
+  } else if (cotoCheckoutBlocked(got.rec.retailer) && !cotoDemoPayRecord(got.rec)) {
     return Response.json({ error: 'Ese súper no se puede pagar desde acá.' }, { status: 400 });
   }
   const rec = await recoverOpenAttempt(got.rec);
