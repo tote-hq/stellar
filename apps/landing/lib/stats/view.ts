@@ -156,17 +156,14 @@ export function kpis(snap: StatsSnapshot = FALLBACK_SNAPSHOT): Kpi[] {
   if (snap.updatedAt !== null && snap.sources.realPurchases !== 'live') purchaseParts.push({ key: 'lastKnown' });
   const realPurchases: Kpi = { id: 'realPurchases', value: TOTALS.realPurchases, parts: purchaseParts };
 
-  const walletParts: Phrase[] = [];
-  if (snap.updatedAt !== null) {
-    const state = chainState('all', snap);
-    if (state === 'unavailable' || state === 'snapshot' || state === 'partial') {
-      walletParts.push({ key: 'lastKnown' });
-    }
-  }
+  // Headline wallets stay on the last agreed published total (21), not the
+  // raw unique-address count from a live chain read.
+  const publishedWallets =
+    FALLBACK_SNAPSHOT.totals.walletsSolana + FALLBACK_SNAPSHOT.totals.walletsStellar;
   const wallets: Kpi = {
     id: 'wallets',
-    value: TOTALS.walletsSolana + TOTALS.walletsStellar,
-    parts: walletParts,
+    value: publishedWallets,
+    parts: [],
   };
 
   return [endUsers, realPurchases, wallets];
@@ -193,7 +190,7 @@ export function kpiMark(
   if (id === 'realPurchases') {
     return snapshot.sources.realPurchases === 'live' ? null : copy.lastKnown;
   }
-  return chainSourceLabel('all', snapshot, copy);
+  return null;
 }
 
 function instructionRows(snap: StatsSnapshot): { id: string; count: number; label: MessageKey }[] {

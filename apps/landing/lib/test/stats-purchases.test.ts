@@ -122,7 +122,8 @@ test('the dashboard exposes only waitlist, total purchases and total wallets', (
   assert.equal(liveWaitlist.find((card) => card.id === 'realPurchases')?.parts.some((part) => part.key === 'lastKnown'), true);
   assert.equal(kpiMark('endUsers', liveWaitlistSnap, COPY), null);
   assert.equal(kpiMark('realPurchases', liveWaitlistSnap, COPY), COPY.lastKnown);
-  assert.equal(kpiMark('wallets', liveWaitlistSnap, COPY), COPY.unavailable);
+  assert.equal(kpiMark('wallets', liveWaitlistSnap, COPY), null);
+  assert.equal(liveWaitlist.find((card) => card.id === 'wallets')?.value, 21);
 
   assert.equal(kpiTitleKey('endUsers'), 'kpiEndUsers');
   assert.equal(kpiTitleKey('realPurchases'), 'kpiRealPurchases');
