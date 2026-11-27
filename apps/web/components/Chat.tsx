@@ -6,6 +6,7 @@ import type { Cart } from '@changuito/mcp/types';
 
 import { starters } from '../lib/agent/prompt';
 import { cotoPayGate } from '../lib/checkout/coto-pay-gate.ts';
+import { cotoPayOpen, restoreActiveChat } from '../lib/checkout/coto-pay-open.ts';
 import { composerControls } from '../lib/composer.ts';
 import {
   buildCartMessage,
@@ -22,7 +23,7 @@ import type { ChatImage } from '../lib/chat-image.ts';
 import { canRetry, searchRowAt, type Block, type CardAddOutcome, type ChatState } from '../lib/chat-state';
 import { prepareImage } from '../lib/prepare-image';
 import { useDictation, type DictationError } from '../lib/use-dictation';
-import type { Receipt } from '../lib/chat-store.ts';
+import { isResumable, loadChat, type Receipt } from '../lib/chat-store.ts';
 import { INTL_LOCALE, type Lang } from '../lib/lang.ts';
 import {
   FREE_TURNS,
@@ -237,7 +238,9 @@ function ChatCore({
     checkoutPath?: 'solo_dia' | 'solo_coto' | 'dual';
     receiptLines?: { name: string; quantity: number; lineTotal: string }[];
   } | null>(null);
-  const [cotoModal, setCotoModal] = useState<Cart | null>(null);
+  // Cart plus the session captured at the click. After a pane remount the live
+  // id is empty until resume, and the mount must not read it again later.
+  const [cotoModal, setCotoModal] = useState<{ cart: Cart; sessionId: string } | null>(null);
   /** Which pay started. Cleared if the modal closes before escrow open. */
   const [payLock, setPayLock] = useState<null | 'dia' | 'coto'>(null);
   const payOpened = useRef(false);
@@ -252,6 +255,20 @@ function ChatCore({
   // storage. Published after each turn rather than on every delta: a save per
   // token would be one JSON.stringify of the whole transcript per character.
   const shop = useShop();
+  const openCoto = useCallback(
+    (cart: Cart | null | undefined) => {
+      const activeId = shop?.activeChatId ?? null;
+      const stored = activeId ? loadChat(activeId) : null;
+      const storedSessionId = stored && isResumable(stored) ? stored.sessionId : null;
+      const opened = cotoPayOpen({
+        cart,
+        sessionId: currentSessionId(),
+        storedSessionId,
+      });
+      if (opened) setCotoModal(opened);
+    },
+    [shop?.activeChatId, currentSessionId],
+  );
   const publish = shop?.publish;
   useEffect(() => {
     if (!publish || state.streaming) return;
@@ -296,13 +313,13 @@ function ChatCore({
         cart: shop.cart,
       });
       if (gate !== 'pay') return;
-      setCotoModal(shop.cart);
+      openCoto(shop.cart);
       return;
     }
     if (!shop.canOrder || shop.dualCheckout) return;
     track('payment_start', { flow: 'rail' });
     setPaying({ cart: shop.cart, handoffUrl: shop.handoffUrl ?? undefined });
-  }, [payRequest, shop]);
+  }, [payRequest, shop, openCoto]);
 
   // The provider asks, this answers. Both halves of a restore land together —
   // transcript and session id — which is the whole point of CLAUDE.md §4.
@@ -316,8 +333,31 @@ function ChatCore({
     setPhoto(null);
     setPhotoNote(null);
     setPaying(null);
+    setCotoModal(null);
     ack();
   }, [request, ack, resume, reset]);
+
+  // HumanGate can unmount this pane while ShopProvider still holds the chat.
+  // One empty mount reopens it. A reload still starts fresh: activeChatId is
+  // null until the shopper picks a title.
+  const paneRestored = useRef(false);
+  useEffect(() => {
+    if (paneRestored.current) return;
+    paneRestored.current = true;
+    if (!shop) return;
+    const activeChatId = shop.activeChatId;
+    if (
+      !restoreActiveChat({
+        activeChatId,
+        blockCount: state.blocks.length,
+        pending: Boolean(shop.request),
+      }) ||
+      !activeChatId
+    ) {
+      return;
+    }
+    shop.openChat(activeChatId);
+  }, [shop, state.blocks.length]);
 
   // One chat is one order. Re-checked at /api/deposit, because a rule about
   // money does not get to live in a browser — but refusing here is what stops
@@ -700,9 +740,7 @@ function ChatCore({
                     // A Coto card pays the live basket when the gate says pay.
                     b.cart.retailer === 'coto'
                       ? gate === 'pay'
-                        ? () => {
-                            if (shop?.cart?.retailer === 'coto') setCotoModal(shop.cart);
-                          }
+                        ? () => openCoto(liveBasket)
                         : undefined
                       : canOrder && !b.dualCheckout && b.orderable !== false
                       ? (cart) => {
@@ -1101,10 +1139,10 @@ function ChatCore({
         </Modal>
       ) : null}
 
-      {cotoModal && currentSessionId() ? (
+      {cotoModal ? (
         <CotoRealModal
-          cart={cotoModal}
-          sessionId={currentSessionId() as string}
+          cart={cotoModal.cart}
+          sessionId={cotoModal.sessionId}
           postalCode={state.snapshot?.location?.postalCode}
           city={state.snapshot?.city}
           onClose={() => setCotoModal(null)}
