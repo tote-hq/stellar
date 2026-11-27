@@ -1,60 +1,20 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import {
+  LANG_KEY,
   THEME_KEY,
-  format,
   formatInt,
   messages,
+  parseLang,
   parseTheme,
-  phraseLine,
   type Lang,
   type ThemeName,
 } from '../../lib/stats/i18n';
-import {
-  HOME_URL,
-  contractHref,
-  contractId,
-  shortId,
-  txHref,
-  type StatsSnapshot,
-} from '../../lib/stats/metrics';
-import {
-  barRatio,
-  chainSourceLabel,
-  chartBars,
-  engineeringMeters,
-  engineeringTests,
-  kpiTitleKey,
-  kpis,
-  meterPeak,
-  networkMeters,
-  networkNameKey,
-  parseMode,
-  parseNetwork,
-  parseRange,
-  plotTop,
-  pointsFor,
-  pointsInRange,
-  recentTxs,
-  seriesPeak,
-  sourceLabel,
-  sumSeries,
-  visibleChains,
-  type Chain,
-  type ChartMode,
-  type Kpi,
-  type Meter,
-  type NetworkFilter,
-  type RangeId,
-  type SeriesKind,
-} from '../../lib/stats/view';
+import { HOME_URL, type StatsSnapshot } from '../../lib/stats/metrics';
+import { kpiMark, kpiTitleKey, kpis, type Kpi } from '../../lib/stats/view';
 import styles from './stats.module.css';
-
-type Panel = 'overview' | 'transactions';
-
-const lang: Lang = 'en';
 
 function readStorage(key: string): string | null {
   try {
@@ -70,69 +30,6 @@ function writeStorage(key: string, value: string): void {
   } catch {
     // Private mode still keeps the choice for this view.
   }
-}
-
-function parsePanel(value: string | null | undefined): Panel {
-  return value === 'transactions' ? 'transactions' : 'overview';
-}
-
-function Segmented<T extends string>({
-  label,
-  labelId,
-  value,
-  options,
-  onChange,
-  testId,
-}: {
-  label?: string;
-  labelId?: string;
-  value: T;
-  options: readonly { value: T; label: string }[];
-  onChange: (next: T) => void;
-  testId: string;
-}) {
-  const refs = useRef<Partial<Record<T, HTMLButtonElement | null>>>({});
-  return (
-    <div
-      role="radiogroup"
-      aria-label={labelId ? undefined : label}
-      aria-labelledby={labelId}
-      className={styles.segment}
-      data-testid={testId}
-    >
-      {options.map((option) => {
-        const checked = option.value === value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={checked}
-            tabIndex={checked ? 0 : -1}
-            data-testid={`${testId}-${option.value}`}
-            ref={(node) => {
-              refs.current[option.value] = node;
-            }}
-            onClick={() => onChange(option.value)}
-            onKeyDown={(event) => {
-              const index = options.findIndex((item) => item.value === value);
-              let next = index;
-              if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (index + 1) % options.length;
-              else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (index - 1 + options.length) % options.length;
-              else return;
-              event.preventDefault();
-              const chosen = options[next];
-              if (!chosen) return;
-              onChange(chosen.value);
-              refs.current[chosen.value]?.focus();
-            }}
-          >
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
-  );
 }
 
 function ThemeIcon({ theme }: { theme: ThemeName }) {
@@ -163,22 +60,6 @@ function ThemeIcon({ theme }: { theme: ThemeName }) {
   );
 }
 
-function DownloadIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-      <path d="M12 4v10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M8 10l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M5 19h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function chainLabel(chain: Chain, t: ReturnType<typeof messages>): string {
-  if (chain === 'solana') return t.legendSolana;
-  if (chain === 'stellar') return t.legendStellar;
-  return t.legendSeeker;
-}
-
 function StaleMark({ label }: { label: string }) {
   return (
     <span className={styles.stale}>
@@ -188,219 +69,12 @@ function StaleMark({ label }: { label: string }) {
   );
 }
 
-function ChartCard({
-  kind,
-  title,
-  range,
-  mode,
-  filter,
-  snapshot,
-}: {
-  kind: SeriesKind;
-  title: string;
-  range: RangeId;
-  mode: ChartMode;
-  filter: NetworkFilter;
-  snapshot: StatsSnapshot;
-}) {
-  const t = messages(lang);
-  const titleId = useId();
-  const bars = chartBars(kind, range, filter, mode, snapshot);
-  const chains = visibleChains(filter);
-  const top = plotTop(seriesPeak(bars, filter));
-  const total = sumSeries(pointsInRange(pointsFor(kind, 'day', snapshot), range, snapshot.asOf), filter);
-  const [active, setActive] = useState<number | null>(null);
-  const ticks = [top, Math.round(top / 2), 0];
-  const staleLabelForChain = chainSourceLabel(filter, snapshot, t);
-  const stale = staleLabelForChain !== null;
-
-  function tipFor(index: number): string {
-    const bar = bars[index];
-    if (!bar) return '';
-    if (chains.length === 2) {
-      return format(t.colTip, {
-        label: bar.label,
-        leftName: t.legendSolana,
-        left: formatInt(bar.solana, lang),
-        rightName: t.legendStellar,
-        right: formatInt(bar.stellar, lang),
-      });
-    }
-    const chain = chains[0] ?? 'solana';
-    return format(t.colTipOne, {
-      label: bar.label,
-      name: chainLabel(chain, t),
-      count: formatInt(bar[chain], lang),
-    });
-  }
-
-  return (
-    <article className={styles.card} data-testid={`stats-chart-${kind}`} aria-labelledby={titleId}>
-      <h3 id={titleId} className={styles.chartTitle}>
-        {title}
-        {stale && staleLabelForChain ? <StaleMark label={staleLabelForChain} /> : null}
-      </h3>
-      <p className={styles.chartTotal}>{formatInt(total, lang)}</p>
-      {bars.length === 0 ? (
-        <p className={styles.empty}>{t.emptyChart}</p>
-      ) : (
-        <div className={styles.plot}>
-          <div className={styles.yAxis} aria-hidden="true">
-            {ticks.map((tick, index) => (
-              <span key={`${index}-${tick}`}>{formatInt(tick, lang)}</span>
-            ))}
-          </div>
-          <div className={styles.canvas}>
-            <div className={styles.grid} aria-hidden="true">
-              <span />
-              <span />
-              <span />
-            </div>
-            <div className={styles.columns}>
-              {bars.map((bar, index) => (
-                <div className={styles.column} key={bar.label}>
-                  <button
-                    type="button"
-                    className={styles.hit}
-                    aria-label={tipFor(index)}
-                    onMouseEnter={() => setActive(index)}
-                    onMouseLeave={() => setActive(null)}
-                    onFocus={() => setActive(index)}
-                    onBlur={() => setActive(null)}
-                  >
-                    {chains.map((chain) => (
-                      <span
-                        key={chain}
-                        className={styles.bar}
-                        style={{
-                          height: `${barRatio(bar[chain], top) * 100}%`,
-                          background: `var(--bar-${chain})`,
-                          ['--bar-ink' as string]: `var(--bar-${chain}-ink)`,
-                        }}
-                      />
-                    ))}
-                  </button>
-                  <span className={styles.xlabel}>{bar.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-      <ul className={styles.legend}>
-        {chains.map((chain) => (
-          <li key={chain}>
-            <span
-              className={styles.dot}
-              style={{
-                background: `var(--bar-${chain})`,
-                ['--bar-ink' as string]: `var(--bar-${chain}-ink)`,
-              }}
-              aria-hidden="true"
-            />
-            {chainLabel(chain, t)}
-          </li>
-        ))}
-      </ul>
-      <p className={styles.readout}>{active === null ? '' : tipFor(active)}</p>
-    </article>
-  );
-}
-
-function MeterList({ rows }: { rows: readonly Meter[] }) {
-  const peak = plotTop(meterPeak(rows));
-  return (
-    <div className={styles.meters}>
-      {rows.map((row) => {
-        const label = row.label ? phraseLine([row.label], lang) : (row.labelText ?? '');
-        const detail = phraseLine([row.detail], lang);
-        return (
-          <div key={row.id} className={styles.meter}>
-            <div className={styles.meterTop}>
-              <span className={styles.meterLabel}>{label}</span>
-              <span className={styles.meterDetail}>{detail}</span>
-            </div>
-            <div className={styles.track} aria-hidden="true">
-              <div
-                className={styles.fill}
-                style={{
-                  width: `${barRatio(row.value, peak) * 100}%`,
-                  background: `var(--bar-${row.tone})`,
-                }}
-              />
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function writeFilters(filter: NetworkFilter, range: RangeId, panel: Panel, mode: ChartMode) {
-  const params = new URLSearchParams(window.location.search);
-  const assign = (key: string, value: string, omit: string) => {
-    if (value === omit) params.delete(key);
-    else params.set(key, value);
-  };
-  assign('network', filter, 'all');
-  assign('range', range, 'all');
-  assign('view', panel, 'overview');
-  assign('mode', mode, 'daily');
-  const qs = params.toString();
-  const next = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`;
-  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-  if (next !== current) window.history.replaceState(null, '', next);
-}
-
 export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
   const [theme, setTheme] = useState<ThemeName>('light');
-  const [filter, setFilter] = useState<NetworkFilter>('all');
-  const [range, setRange] = useState<RangeId>('all');
-  const [panel, setPanel] = useState<Panel>('overview');
-  const [mode, setMode] = useState<ChartMode>('daily');
-  const [urlReady, setUrlReady] = useState(false);
-  const t = messages(lang);
-  const networkLabelId = useId();
-  const rangeLabelId = useId();
-  const tabLabelId = useId();
-  const modeLabelId = useId();
-
+  const [lang, setLang] = useState<Lang>('en');
   useEffect(() => {
     setTheme(parseTheme(readStorage(THEME_KEY)));
-  }, []);
-
-  useEffect(() => {
-    const previous = document.documentElement.lang;
-    document.documentElement.lang = 'en';
-    return () => {
-      document.documentElement.lang = previous;
-    };
-  }, []);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    setFilter(parseNetwork(params.get('network')));
-    setRange(parseRange(params.get('range')));
-    setPanel(parsePanel(params.get('view')));
-    setMode(parseMode(params.get('mode')));
-    setUrlReady(true);
-  }, []);
-
-  useEffect(() => {
-    if (!urlReady) return;
-    writeFilters(filter, range, panel, mode);
-  }, [urlReady, filter, range, panel, mode]);
-
-  useEffect(() => {
-    const onPop = () => {
-      const params = new URLSearchParams(window.location.search);
-      setFilter(parseNetwork(params.get('network')));
-      setRange(parseRange(params.get('range')));
-      setPanel(parsePanel(params.get('view')));
-      setMode(parseMode(params.get('mode')));
-    };
-    window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
+    setLang(parseLang(readStorage(LANG_KEY)));
   }, []);
 
   function chooseTheme(next: ThemeName) {
@@ -408,20 +82,13 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
     writeStorage(THEME_KEY, next);
   }
 
-  function resetFilters() {
-    setFilter('all');
-    setRange('all');
-    setPanel('overview');
-    setMode('daily');
+  function chooseLang(next: Lang) {
+    setLang(next);
+    writeStorage(LANG_KEY, next);
   }
 
-  const cards = kpis(filter, snapshot);
-  const txs = recentTxs(filter, snapshot);
-  const rangeLabel =
-    range === '7d' ? t.range7d : range === '30d' ? t.range30d : range === '90d' ? t.range90d : t.rangeAll;
-  const pristine = filter === 'all' && range === 'all' && panel === 'overview' && mode === 'daily';
-  const chainMark = chainSourceLabel(filter, snapshot, t);
-  const prsLabel = snapshot.updatedAt === null ? null : sourceLabel(snapshot.sources.github, t.lastKnown, t.unavailable);
+  const t = messages(lang);
+  const cards = kpis(snapshot);
 
   return (
     <div className={styles.shell} data-theme={theme} data-testid="stats-screen" lang={lang}>
@@ -439,17 +106,15 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
           <span className={styles.badge}>{t.badge}</span>
         </div>
         <div className={styles.tools}>
-          <a
-            className={`${styles.export} ${styles.tip}`}
-            data-testid="stats-export"
-            href={`/stats/export?network=${filter}&range=${range}&mode=${mode}`}
-            aria-label={t.exportCsv}
+          <button
+            type="button"
+            className={styles.lang}
+            data-testid="stats-lang"
+            aria-label={lang === 'en' ? t.langToEs : t.langToEn}
+            onClick={() => chooseLang(lang === 'en' ? 'es' : 'en')}
           >
-            <DownloadIcon />
-            <span className={styles.tooltip} role="tooltip" aria-hidden="true">
-              {t.exportCsv}
-            </span>
-          </a>
+            {lang === 'en' ? t.langEs : t.langEn}
+          </button>
           <button
             type="button"
             className={styles.theme}
@@ -463,207 +128,13 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
         </div>
       </header>
       <main id="metrics" tabIndex={-1} className={styles.main}>
-        <p className={styles.srOnly} aria-live="polite">
-          {format(t.filterStatus, { network: t[networkNameKey(filter)], range: rangeLabel })}
-        </p>
         <section className={styles.hero}>
           <h1>{t.heroTitle}</h1>
-          <div className={styles.filters} role="region" aria-label={t.filtersLabel} data-testid="stats-filters">
-            <div className={styles.filterGroup}>
-              <span className={styles.filterLabel} id={networkLabelId}>
-                {t.networkLabel}
-              </span>
-              <Segmented
-                labelId={networkLabelId}
-                value={filter}
-                options={[
-                  { value: 'all', label: t.netAll },
-                  { value: 'stellar', label: t.netStellar },
-                  { value: 'solana', label: t.netSolana },
-                  { value: 'seeker', label: t.netSeeker },
-                ]}
-                onChange={setFilter}
-                testId="stats-network"
-              />
-            </div>
-            <div className={styles.filterGroup}>
-              <span className={styles.filterLabel} id={rangeLabelId}>
-                {t.rangeLabel}
-              </span>
-              <Segmented
-                labelId={rangeLabelId}
-                value={range}
-                options={[
-                  { value: '7d', label: t.range7d },
-                  { value: '30d', label: t.range30d },
-                  { value: '90d', label: t.range90d },
-                  { value: 'all', label: t.rangeAll },
-                ]}
-                onChange={setRange}
-                testId="stats-range"
-              />
-            </div>
-            <button
-              type="button"
-              className={styles.reset}
-              data-testid="stats-reset"
-              onClick={resetFilters}
-              disabled={pristine}
-              aria-label={t.resetFilters}
-            >
-              {t.reset}
-            </button>
-          </div>
         </section>
         <section className={styles.kpis} aria-label={t.kpiRegion} data-testid="stats-kpis">
           {cards.map((card) => (
-            <article key={card.id} className={styles.card} data-testid={`stats-kpi-${card.id}`}>
-              <h2 className={styles.kpiLabel}>
-                {t[kpiTitleKey(card.id)]}
-                {card.id === 'endUsers' || !chainMark ? null : <StaleMark label={chainMark} />}
-              </h2>
-              <p className={styles.kpiValue}>{formatInt(card.value, lang)}</p>
-              <p className={styles.kpiDetail}>{phraseLine(card.parts, lang)}</p>
-            </article>
+            <KpiCard key={card.id} card={card} snapshot={snapshot} lang={lang} />
           ))}
-        </section>
-        <section aria-labelledby="stats-growth" data-testid="stats-growth">
-          <div className={styles.sectionHead}>
-            <h2 id="stats-growth" className={styles.kicker}>
-              {panel === 'overview' ? t.growth : t.recent}
-            </h2>
-            <div className={styles.sectionTools}>
-              <div className={styles.filterGroup}>
-                <span className={styles.filterLabel} id={tabLabelId}>
-                  {t.tabLabel}
-                </span>
-                <Segmented
-                  labelId={tabLabelId}
-                  value={panel}
-                  options={[
-                    { value: 'overview', label: t.tabOverview },
-                    { value: 'transactions', label: t.tabTransactions },
-                  ]}
-                  onChange={setPanel}
-                  testId="stats-tab"
-                />
-              </div>
-              {panel === 'overview' ? (
-                <div className={styles.filterGroup}>
-                  <span className={styles.filterLabel} id={modeLabelId}>
-                    {t.modeLabel}
-                  </span>
-                  <Segmented
-                    labelId={modeLabelId}
-                    value={mode}
-                    options={[
-                      { value: 'daily', label: t.modeDaily },
-                      { value: 'cumulative', label: t.modeCumulative },
-                    ]}
-                    onChange={setMode}
-                    testId="stats-mode"
-                  />
-                </div>
-              ) : null}
-            </div>
-          </div>
-          {panel === 'overview' ? (
-            <div className={styles.overview}>
-              <ChartCard
-                kind="tx"
-                title={t.chartTx}
-                range={range}
-                mode={mode}
-                filter={filter}
-                snapshot={snapshot}
-              />
-              <ChartCard
-                kind="carts"
-                title={t.chartCarts}
-                range={range}
-                mode={mode}
-                filter={filter}
-                snapshot={snapshot}
-              />
-              <article className={styles.card} data-testid="stats-by-network">
-                <h3 className={styles.cardTitle}>{t.byNetwork}</h3>
-                <MeterList rows={networkMeters(filter, snapshot)} />
-              </article>
-              <article className={styles.card} data-testid="stats-engineering">
-                <h3 className={styles.cardTitle}>{t.engineering}</h3>
-                <div className={styles.minis}>
-                  <div className={styles.mini}>
-                    <p className={styles.miniLabel}>{t.passingTests}</p>
-                    <p className={styles.miniValue}>{formatInt(engineeringTests(filter), lang)}</p>
-                    <p className={styles.miniScope}>{t.testsScope}</p>
-                  </div>
-                  <div className={styles.mini}>
-                    <p className={styles.miniLabel}>
-                      {t.mergedPrs}
-                      {prsLabel ? <StaleMark label={prsLabel} /> : null}
-                    </p>
-                    <p className={styles.miniValue}>{formatInt(snapshot.totals.mergedPrs, lang)}</p>
-                    <p className={styles.miniScope}>{t.prsScope}</p>
-                  </div>
-                </div>
-                <MeterList rows={engineeringMeters(filter)} />
-              </article>
-            </div>
-          ) : (
-            <article className={styles.card}>
-              {txs.length === 0 ? (
-                <p className={styles.empty}>{t.emptyTx}</p>
-              ) : (
-                <div className={styles.tableWrap}>
-                  <table className={styles.table} data-testid="stats-tx-table">
-                    <thead>
-                      <tr>
-                        <th scope="col">{t.colNetwork}</th>
-                        <th scope="col">{t.colTx}</th>
-                        <th scope="col">{t.colContract}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {txs.map((tx) => {
-                        const id = shortId(tx.hash);
-                        const program = shortId(contractId(tx.network));
-                        const networkLabel = tx.network === 'solana' ? t.chainSolana : t.chainStellar;
-                        return (
-                          <tr key={tx.hash} data-testid={`stats-tx-${tx.hash.slice(0, 8)}`}>
-                            <td>
-                              <span className={styles.netBadge} data-tone={tx.network}>
-                                {networkLabel}
-                              </span>
-                            </td>
-                            <td>
-                              <a
-                                href={txHref(tx)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                aria-label={format(t.linkLabel, { id, hint: t.newTab })}
-                              >
-                                {id}
-                              </a>
-                            </td>
-                            <td>
-                              <a
-                                href={contractHref(tx.network)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                aria-label={format(t.linkLabel, { id: program, hint: t.newTab })}
-                              >
-                                {program}
-                              </a>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </article>
-          )}
         </section>
       </main>
       <footer className={styles.footer} data-testid="stats-footer">
@@ -671,5 +142,27 @@ export function StatsDashboard({ snapshot }: { snapshot: StatsSnapshot }) {
         <span className={styles.footerWord}>{t.brand}</span>
       </footer>
     </div>
+  );
+}
+
+function KpiCard({
+  card,
+  snapshot,
+  lang,
+}: {
+  card: Kpi;
+  snapshot: StatsSnapshot;
+  lang: Lang;
+}) {
+  const t = messages(lang);
+  const mark = kpiMark(card.id, snapshot, t);
+  return (
+    <article className={styles.card} data-testid={`stats-kpi-${card.id}`}>
+      <h2 className={styles.kpiLabel}>
+        {t[kpiTitleKey(card.id)]}
+        {mark ? <StaleMark label={mark} /> : null}
+      </h2>
+      <p className={styles.kpiValue}>{formatInt(card.value, lang)}</p>
+    </article>
   );
 }

@@ -680,17 +680,21 @@ marked unavailable and keeps its published number. No secret is required:
 - merged PRs, from the public GitHub search
 
 A source that fails or misses the deadline keeps its last published value,
-and the page says the source is unavailable. The waitlist figure stays on
-that published value either way. Postgres, when configured, is under the
-same deadline.
+and the page says the source is unavailable. The waitlist figure is live
+when `STATS_WAITLIST_COUNT_URL` is set (and `WAITLIST_WEBHOOK_SECRET` is
+present); otherwise it stays on the published value. Real purchases are the
+live `settled` count on the Stellar testnet escrow (no extra secret). If
+that read fails, the last published count stays. Postgres, when configured,
+is under the same deadline.
 
-Optional, server-only, and only if you want app accounts and delivered orders.
-Set them as Secrets, never in the repo and never as `NEXT_PUBLIC_`:
+Optional, server-only, and only if you want app accounts or a live waitlist
+total. Set them as Secrets, never in the repo and never as `NEXT_PUBLIC_`:
 
 | Name | For |
 |---|---|
-| `STATS_STELLAR_DATABASE_URL` | read-only Postgres: `chat` accounts and `orders` with status `done` |
+| `STATS_STELLAR_DATABASE_URL` | read-only Postgres: `chat` accounts |
 | `STATS_SOLANA_DATABASE_URL` | read-only Postgres: `profile` rows on devnet |
+| `STATS_WAITLIST_COUNT_URL` | HTTPS Apps Script `doGet` that returns `{ count }`. Auth reuses `WAITLIST_WEBHOOK_SECRET` as the `secret` query parameter. Unset, the published waitlist figure stays |
 
 `STATS_SOLANA_RPC_URL` and `STATS_STELLAR_DEPOSIT_ADDRESS` are optional
 overrides of the public defaults in `lib/stats/live.ts`. Leave them unset.

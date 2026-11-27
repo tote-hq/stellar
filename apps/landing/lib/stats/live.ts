@@ -5,8 +5,10 @@
  * devnet JSON-RPC for the escrow program, Stellar Expert for Soroban contract
  * events, Horizon for Stellar transactions. Product numbers come from
  * Postgres (`STATS_STELLAR_DATABASE_URL`, `STATS_SOLANA_DATABASE_URL`):
- * app accounts and delivered orders. The waitlist figure stays on the
- * last published value. When a source is missing or fails, that part
+ * app accounts. Real purchases are the live `settled` count on the Stellar
+ * testnet escrow; they are not read from Postgres. The waitlist figure is
+ * live when `STATS_WAITLIST_COUNT_URL` is set; otherwise it stays on the last
+ * published value. When a source is missing or fails, that part
  * keeps its published value and the snapshot says the source is unavailable.
  * Nothing here throws out of loadLiveSnapshot.
  *
@@ -218,6 +220,8 @@ export interface ChainRead {
   settledUsdc: number;
   /** Bodies whose program logs were read. Zero means instruction totals were not scanned. */
   parsed: number;
+  /** True when the Stellar escrow event list was fetched (settled is then a live count). */
+  escrowEvents?: boolean;
 }
 
 interface SolSig {
@@ -544,14 +548,68 @@ export async function readStellar(deps: LiveDeps): Promise<ChainRead> {
   read.recent = ordered.slice(0, RECENT_PER_CHAIN).map(([hash]) => ({ network: 'stellar', hash }));
   // Event totals are the instruction scan. Solana uses `parsed` for transaction bodies.
   read.parsed = 1;
+  read.escrowEvents = escrow !== null;
   return read;
 }
 
 // -------------------------------------------------------------- product --
 
-/** The published waitlist figure. Signups are not counted from the database. */
-export async function readWaitlist(_deps: LiveDeps): Promise<number | null> {
-  return null;
+/**
+ * Live waitlist total from the Apps Script count endpoint.
+ * Unset, unparsable, or non-HTTPS `STATS_WAITLIST_COUNT_URL` returns null
+ * so the published snapshot stays. Auth reuses `WAITLIST_WEBHOOK_SECRET`.
+ * Apps Script does not reliably see headers, so the secret is sent as a
+ * `secret` query parameter. The response must be JSON `{ count }` only.
+ */
+export async function readWaitlist(deps: LiveDeps): Promise<number | null> {
+  const target = waitlistCountTarget(deps.env);
+  if (!target) return null;
+  try {
+    const url = new URL(target.url);
+    if (target.secret) url.searchParams.set('secret', target.secret);
+    const payload = await getJson(deps, url.toString());
+    return waitlistCountFrom(payload);
+  } catch (error) {
+    console.error('[stats] waitlist unavailable:', safeError(error));
+    return null;
+  }
+}
+
+export function waitlistCountConfigured(env: LiveDeps['env']): boolean {
+  return httpsUrl(env.STATS_WAITLIST_COUNT_URL) !== undefined;
+}
+
+function httpsUrl(raw: string | undefined): string | undefined {
+  const value = (raw || '').trim();
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:') return undefined;
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function waitlistCountTarget(env: LiveDeps['env']): { url: string; secret: string } | undefined {
+  const url = httpsUrl(env.STATS_WAITLIST_COUNT_URL);
+  if (!url) return undefined;
+  const secret = (env.WAITLIST_WEBHOOK_SECRET || '').trim();
+  if (!secret) {
+    console.error('[stats] waitlist count URL set without WAITLIST_WEBHOOK_SECRET');
+    return undefined;
+  }
+  return { url, secret };
+}
+
+function waitlistCountFrom(payload: unknown): number | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const record = payload as { ok?: unknown; count?: unknown };
+  if (record.ok === false) return null;
+  if (typeof record.count !== 'number' || !Number.isInteger(record.count) || record.count < 0) {
+    return null;
+  }
+  return record.count;
 }
 
 export interface AppDbRead {
@@ -777,7 +835,10 @@ function assembleSnapshot(deps: LiveDeps, box: ReadBox): StatsSnapshot {
     endUsers: waitlist ?? b.endUsers,
     // The published 30-day delta is pinned to the snapshot day, so a live page never repeats it.
     endUsersDelta30d: null,
-    realOrders: db?.delivered ?? b.realOrders,
+    // Completed purchases: successful escrow settles. Stellar is live when
+    // events were read; Solana settles are added when instruction bodies
+    // were parsed. Do not use Postgres `orders.status = 'done'`.
+    realPurchases: (stl?.escrowEvents ? stl.settled : b.realPurchases) + (solIx ? solIx.settled : 0),
     txSolana: sol ? sol.txs : b.txSolana,
     txStellar: stl ? stl.txs : b.txStellar,
     txDelta30d:
@@ -820,9 +881,10 @@ function assembleSnapshot(deps: LiveDeps, box: ReadBox): StatsSnapshot {
     sources: {
       solana: sol ? 'live' : 'unavailable',
       stellar: stl ? 'live' : 'unavailable',
-      waitlist: waitlist === null ? 'snapshot' : 'live',
+      waitlist: !waitlistCountConfigured(deps.env) ? 'snapshot' : waitlist !== null ? 'live' : 'unavailable',
       appDb: !dbConfigured(deps) ? 'snapshot' : db ? 'live' : 'unavailable',
       github: prs === null ? 'unavailable' : 'live',
+      realPurchases: stl?.escrowEvents ? 'live' : 'unavailable',
     },
   };
 }

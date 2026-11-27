@@ -45,9 +45,11 @@ export const STELLAR_TREASURY = 'GBKJHIKIZONKCCV2JVOGUDXEOPTQUZ2OKYZNV3R3LDALNZH
 export const STELLAR_DEMO_WALLET = 'GDFF477UQUWOFIHSOEXPPOD5GPUSEW6OLGZB5FCPS6AFRAOPTMINA55X';
 
 export const TOTALS: Totals = {
-  endUsers: 30,
-  endUsersDelta30d: 30,
-  realOrders: 1,
+  /** Last confirmed waitlist total; a live count URL replaces this when set. */
+  endUsers: 52,
+  endUsersDelta30d: null,
+  /** Last verified settled escrow count (completed purchases). Stellar testnet is 11. */
+  realPurchases: 11,
   txSolana: 59,
   txStellar: 26,
   txDelta30d: 59,
@@ -71,7 +73,8 @@ export interface Totals {
   endUsers: number;
   /** Null when the live source cannot say how many joined in the window. */
   endUsersDelta30d: number | null;
-  realOrders: number;
+  /** Settled Stellar testnet escrows; each is a real supermarket purchase paid in ARS. */
+  realPurchases: number;
   txSolana: number;
   txStellar: number;
   txDelta30d: number;
@@ -106,6 +109,7 @@ export interface Sources {
   waitlist: SourceState;
   appDb: SourceState;
   github: SourceState;
+  realPurchases: SourceState;
 }
 
 /**
@@ -208,7 +212,7 @@ export const FALLBACK_SNAPSHOT: StatsSnapshot = {
   txDay: TX_DAY,
   cartDay: CART_DAY,
   recentTxs: RECENT_TXS,
-  sources: { solana: 'snapshot', stellar: 'snapshot', waitlist: 'snapshot', appDb: 'snapshot', github: 'snapshot' },
+  sources: { solana: 'snapshot', stellar: 'snapshot', waitlist: 'snapshot', appDb: 'snapshot', github: 'snapshot', realPurchases: 'snapshot' },
 };
 
 /** Month buckets (labelled MM/YY, dated the 1st) rolled up from day buckets. */
