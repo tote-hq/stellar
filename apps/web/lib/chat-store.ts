@@ -297,9 +297,10 @@ function packSearchCompare(
 /**
  * The snapshot is handed back to the agent verbatim on the next turn, so
  * unlike everything else here it is packed in full rather than trimmed:
- * `sellers`, `salesChannel` and `degraded` are what make prices match what
- * the shopper will actually pay, and a restored snapshot missing them would
- * be a lie the agent then acts on. Still field by field — it is a location,
+ * `sellers`, `salesChannel`, `degraded` and `undeliverable` are what make
+ * prices and availability match what the shopper will actually pay, and a
+ * restored snapshot missing them would be a lie the agent then acts on.
+ * Still field by field — it is a location,
  * a map of cart ids, and — when the shopper has picked — the order and the
  * Coto line ids. Prices are not stored on those lines.
  */
@@ -320,6 +321,7 @@ function packSnapshot(s: SessionSnapshot): SessionSnapshot {
       salesChannel: l.salesChannel,
       degraded: l.degraded,
       ...(l.regionId === undefined ? {} : { regionId: l.regionId }),
+      ...(l.undeliverable ? { undeliverable: true } : {}),
       ...(l.note === undefined ? {} : { note: l.note }),
     };
   }
@@ -650,6 +652,7 @@ function asSnapshot(v: unknown): SessionSnapshot | null {
       };
       const regionId = str(loc.regionId);
       if (regionId !== null) location.regionId = regionId;
+      if (loc.undeliverable === true) location.undeliverable = true;
       const note = str(loc.note);
       if (note !== null) location.note = note;
       out.location = location;

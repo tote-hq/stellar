@@ -148,13 +148,16 @@ export class VtexAdapter implements RetailerAdapter {
       const r = regions?.[0];
       if (r?.id) {
         const sellers: Seller[] = (r.sellers ?? []).map((s) => ({ id: s.id, name: s.name || s.id }));
-        // An id with no sellers is not a delivery region. Storing it would
-        // show a national catalog the store cannot deliver.
+        // No sellers means this store does not deliver here. regionId stays
+        // unset, and undeliverable stops search from using national stock.
+        // A missing region id, and a failed regions call, leave it unset and
+        // keep those national defaults.
         if (sellers.length === 0) {
           return {
             ...common,
             sellers: [],
             degraded: true,
+            undeliverable: true,
             note: `${this.displayName} has no store that delivers to ${postalCode}.`,
           };
         }
@@ -175,6 +178,9 @@ export class VtexAdapter implements RetailerAdapter {
   }
 
   async search(query: string, ctx: LocationContext, opts: SearchOptions = {}): Promise<Product[]> {
+    // Seller-less is not the same as a missing region. Without this, search
+    // sends only the sales channel and Día answers with national stock.
+    if (ctx.undeliverable) return [];
     const limit = Math.min(opts.limit ?? 12, 50);
     const offset = opts.offset ?? 0;
     const p = new URLSearchParams({ query, locale: this.locale });

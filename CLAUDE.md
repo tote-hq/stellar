@@ -413,7 +413,7 @@ offers Armar and says she can keep typing. Armar adds the pick, one per type.
 was computed on. They are not what Armar adds when they differ from the pick.
 The gap and the 20% fee are drawn on the close table, after a cart exists.
 
-A build-cart turn is `buildCartMessage` or the Spanish or English Armar ask. On that turn `search_products` still runs, and the cache writes and the note stay, but the search is quiet: no `search_compare` card is emitted, and `render_products` is refused. Día regions are asked with the four-digit core of the postal code. A region whose sellers list is empty is not a delivery region: `resolveLocation` stores no `regionId` and returns `degraded: true`.
+A build-cart turn is `buildCartMessage` or the Spanish or English Armar ask. On that turn `search_products` still runs, and the cache writes and the note stay, but the search is quiet: no `search_compare` card is emitted, and `render_products` is refused. Día regions are asked with the four-digit core of the postal code. A region whose sellers list is empty is not a delivery region: `resolveLocation` stores no `regionId`, sets `undeliverable`, and search returns no products. A missing region id, or a failed regions call, still uses national defaults.
 
 A Coto basket is lines held on the session snapshot (`order`, `coto`) and
 priced from `CotoCatalog.getProduct` on every read. The id is a stable

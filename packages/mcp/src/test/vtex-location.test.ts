@@ -54,6 +54,37 @@ describe('VTEX regions use the four-digit postal code', () => {
     assert.doesNotMatch(ctx.note ?? '', /national defaults/);
   });
 
+  it('returns no available products after a seller-less region', async () => {
+    const stock = {
+      products: [
+        {
+          productId: '1',
+          productName: 'Arroz',
+          items: [
+            {
+              itemId: 'sku-1',
+              name: 'Arroz',
+              sellers: [
+                { sellerId: '1', commertialOffer: { Price: 1000, AvailableQuantity: 10000 } },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      if (url.includes('product-search')) return json(stock);
+      return json([{ id: 'U1cj', sellers: [] }]);
+    };
+    const adapter = dia();
+    const ctx = await adapter.resolveLocation('9410');
+    assert.equal(ctx.undeliverable, true);
+    assert.equal(ctx.regionId, undefined);
+    const hits = await adapter.search('arroz', ctx);
+    assert.equal(hits.length, 0);
+  });
+
   it('keeps a bare code that has sellers', async () => {
     const urls: string[] = [];
     globalThis.fetch = async (input) => {
