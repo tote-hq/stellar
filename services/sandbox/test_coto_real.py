@@ -1,8 +1,6 @@
 """Coto real worker: phase order, AV5 log, 60s refund, no card in the result."""
 
 import asyncio
-import hashlib
-import hmac
 import json
 import os
 import unittest
@@ -19,6 +17,7 @@ from coto_real import (
     phase_order_ok,
     public_job,
     run_coto_real,
+    screen_url,
     viewer_url,
     watch_coto_viewer,
 )
@@ -216,6 +215,10 @@ class CotoRealTest(unittest.TestCase):
         self.assertFalse(consume_screen_ticket(token, "other-job", 1_001))
         self.assertTrue(consume_screen_ticket(token, open_job["job_id"], 1_001))
         self.assertFalse(consume_screen_ticket(token, open_job["job_id"], 1_001))
+        done = {"job_id": "cd" * 16, "status": "done", "phase": "placed", "mode": "coto_real"}
+        done_token = issue_screen_ticket(done, 1_000)
+        self.assertRegex(done_token, r"^[A-Za-z0-9_-]{40,64}$")
+        self.assertTrue(consume_screen_ticket(done_token, done["job_id"], 1_001))
         self.assertIsNone(issue_screen_ticket({"status": "done", "phase": "placed"}, 1_000))
         leaked = issue_screen_ticket(open_job, 2_000)
         logs = []
@@ -242,10 +245,42 @@ class CotoRealTest(unittest.TestCase):
             clock["t"] += 1_000
             if clock["t"] >= 2_000:
                 job["status"] = "failed"
+                # screen_open ignores status. The watcher returns only when
+                # the job is no longer coto_real.
+                job["mode"] = "closed"
 
         asyncio.run(watch_coto_viewer(job, tick, lambda: clock["t"]))
         self.assertEqual(job["viewer_seen"], 1_000)
         self.assertEqual(job["status"], "failed")
+
+    def test_screen_url_names_the_job_and_carries_no_expiry(self):
+        url = screen_url("abc", "https://sandbox.example")
+        query = parse_qs(urlsplit(url).query)
+        self.assertEqual(query["job"], ["abc"])
+        self.assertEqual(query["part"], ["screen"])
+        self.assertNotIn("exp", query)
+        self.assertNotIn("sig", query)
+        self.assertNotIn("exp=", url)
+        self.assertNotIn("sig=", url)
+
+    def test_watch_leaves_viewer_seen_alone_after_needs_human_and_stays_while_coto_real(self):
+        job = {
+            "job_id": "ab" * 16,
+            "status": "done",
+            "phase": "placed",
+            "mode": "coto_real",
+            "viewer_seen": 7,
+        }
+        sleeps = {"n": 0}
+
+        async def tick(_seconds):
+            sleeps["n"] += 1
+            if sleeps["n"] >= 3:
+                job.pop("mode")
+
+        asyncio.run(watch_coto_viewer(job, tick, lambda: 9_000))
+        self.assertEqual(job["viewer_seen"], 7)
+        self.assertGreaterEqual(sleeps["n"], 3)
 
     def test_viewer_js_does_not_open_a_socket_without_a_connect_message(self):
         src = (Path(__file__).parent / "viewer" / "viewer.js").read_text()
@@ -596,7 +631,7 @@ class CotoRealPostTest(unittest.IsolatedAsyncioTestCase):
 
 @unittest.skipUnless(_sandbox_deps(), "sandbox dependencies are not installed; uv run python -m unittest")
 class CotoViewerRouteTest(unittest.IsolatedAsyncioTestCase):
-    async def test_signature_renews_while_needs_human_and_stops_when_terminal(self):
+    async def test_job_viewer_opens_a_placed_coto_job_and_404s_an_unknown_one(self):
         import io
         from contextlib import redirect_stdout
 
@@ -604,39 +639,47 @@ class CotoViewerRouteTest(unittest.IsolatedAsyncioTestCase):
 
         import server
 
-        server.TOKEN = "viewer-test-token"
-        os.environ["SANDBOX_PUBLIC_URL"] = "https://sandbox.example"
         job_id = "cd" * 16
         server.jobs[job_id] = {
             "job_id": job_id,
             "mode": "coto_real",
-            "status": "running",
-            "phase": "needs_human",
-            "viewer_exp": 1,
+            "status": "done",
+            "phase": "placed",
         }
         try:
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                body = await server.job_viewer(job_id)
-            query = parse_qs(urlsplit(body["url"]).query)
-            exp = int(query["exp"][0])
-            expected = hmac.new(
-                server.TOKEN.encode(), f"{job_id}.{exp}".encode(), hashlib.sha256,
-            ).hexdigest()
-            self.assertEqual(query["sig"], [expected])
-            self.assertEqual(query["part"], ["screen"])
-            self.assertEqual(body["job_id"], job_id)
-            self.assertRegex(body["ticket"], r"^[A-Za-z0-9_-]{40,64}$")
-            self.assertNotIn(body["ticket"], body["url"])
-            self.assertNotIn(body["ticket"], buf.getvalue())
-            self.assertGreater(server.jobs[job_id]["viewer_seen"], 1)
-            server.jobs[job_id]["status"] = "failed"
-            server.jobs[job_id]["phase"] = "payment"
-            with self.assertRaises(HTTPException) as caught:
-                await server.job_viewer(job_id)
-            self.assertEqual(caught.exception.status_code, 404)
+            with patch.dict(os.environ, {"SANDBOX_PUBLIC_URL": "https://sandbox.example"}):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    body = await server.job_viewer(job_id)
+                query = parse_qs(urlsplit(body["url"]).query)
+                self.assertEqual(query["job"], [job_id])
+                self.assertEqual(query["part"], ["screen"])
+                self.assertNotIn("exp", query)
+                self.assertNotIn("sig", query)
+                self.assertEqual(body["job_id"], job_id)
+                self.assertTrue(body["url"].startswith("https://sandbox.example/viewer/"))
+                self.assertRegex(body["ticket"], r"^[A-Za-z0-9_-]{40,64}$")
+                self.assertNotIn(body["ticket"], body["url"])
+                self.assertNotIn(body["ticket"], buf.getvalue())
+                self.assertNotIn("viewer_seen", server.jobs[job_id])
+                self.assertNotIn("viewer_exp", server.jobs[job_id])
+                live_id = "ef" * 16
+                server.jobs[live_id] = {
+                    "job_id": live_id,
+                    "mode": "coto_real",
+                    "status": "running",
+                    "phase": "needs_human",
+                }
+                live = await server.job_viewer(live_id)
+                self.assertNotIn("exp=", live["url"])
+                self.assertNotIn("sig=", live["url"])
+                self.assertGreater(server.jobs[live_id]["viewer_seen"], 1)
+                with self.assertRaises(HTTPException) as caught:
+                    await server.job_viewer("missing-job")
+                self.assertEqual(caught.exception.status_code, 404)
         finally:
             server.jobs.pop(job_id, None)
+            server.jobs.pop("ef" * 16, None)
 
 
 class _GotoPage:
