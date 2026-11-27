@@ -90,6 +90,8 @@ describe('cotoCheckoutBlocked', () => {
     earlier(start, 'cotoRealRecord(rec)', 'startJob(');
     earlier(open, 'cotoRealRecord(got.rec)', 'recoverOpenAttempt(');
     earlier(channels, 'cotoRealRecord(rec)', 'prepareOpen(');
+    assert.match(channels, /\} else if \(rec && cotoCheckoutBlocked\(rec\.retailer\)/);
+    assert.match(open, /\} else if \(cotoCheckoutBlocked\(got\.rec\.retailer\)/);
     assert.equal(settleBasis({ retailer: 'dia', mode: 'mock' }), 'basis|sandbox-order-placed');
     assert.equal(settleBasis({ retailer: 'dia', mode: 'demo' }), 'basis|demo-reached-payment');
     assert.equal(settleBasis({ retailer: 'dia' }), 'basis|sandbox-order-placed');

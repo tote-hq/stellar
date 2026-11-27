@@ -25,7 +25,7 @@ export function cotoDemoPayRecord(
   );
 }
 
-/** A real Coto checkout. Open, start, and channels refuse it until a later worker. */
+/** A real Coto checkout. Start, open, and channels let an admitted one through and refuse one that is not admitted. */
 export function cotoRealRecord(
   rec: { checkoutKind?: string | null } | null | undefined,
 ): boolean {
