@@ -361,7 +361,7 @@ export async function readCotoViewerOutcome(
   } catch {
     return { viewer: null, reason: 'unreachable' };
   }
-  // The sandbox answers 404 when the phase is not needs_human.
+  // The sandbox answers 404 when the job is unknown to the sandbox.
   if (res.status === 404) return { viewer: null, reason: 'closed' };
   if (!res.ok) return { viewer: null, reason: 'unreachable' };
   let body: { url?: unknown; ticket?: unknown; job_id?: unknown };

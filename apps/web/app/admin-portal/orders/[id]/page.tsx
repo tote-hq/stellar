@@ -132,9 +132,7 @@ export default function AdminOrder({ params }: { params: Promise<{ id: string }>
           sandbox="allow-scripts allow-same-origin"
           style={{ width: '100%', height: 'min(70dvh, 760px)', minHeight: 380, border: '1px solid #64748b' }}
         />
-      ) : (
-        <p>La pantalla solo se abre mientras la firma sigue adentro de 60 segundos.</p>
-      )}
+      ) : null}
     </main>
   );
 }

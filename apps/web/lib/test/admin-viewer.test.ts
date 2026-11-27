@@ -60,7 +60,7 @@ describe('admin Coto viewer', { concurrency: false }, () => {
     assert.match(page, /referrerPolicy="origin"/);
     assert.match(page, /sandbox="allow-scripts allow-same-origin"/);
     assert.match(page, /viewerConnectMessage/);
-    assert.match(page, /La pantalla solo se abre mientras la firma sigue adentro de 60 segundos/);
+    assert.doesNotMatch(page, /La pantalla solo se abre mientras la firma sigue adentro de 60 segundos/);
     assert.match(page, /role="status"/);
     assert.match(page, /data-testid="admin-viewer-status"/);
     assert.match(page, /La pantalla no respondió\. Probá de nuevo\./);
@@ -132,11 +132,19 @@ describe('admin Coto viewer', { concurrency: false }, () => {
     const id = 'ab'.repeat(32);
     const ticket = 'a'.repeat(43);
     const liveUrl = 'https://sandbox.example/viewer/?job=job1&part=screen';
-    let mode: 'throw' | 'missing' | 'closed' | 'live' = 'throw';
+    let mode: 'throw' | 'missing' | 'closed' | 'live' | 'placed' = 'throw';
     const fetchMock = mock.method(globalThis, 'fetch', async () => {
       if (mode === 'throw') throw new Error('network');
       if (mode === 'missing') return Response.json({ url: 12 });
       if (mode === 'closed') return new Response('closed', { status: 404 });
+      if (mode === 'placed') {
+        return Response.json({
+          url: 'https://sandbox.example/viewer/?job=job1&part=screen',
+          ticket,
+          job_id: 'job1',
+          phase: 'placed',
+        });
+      }
       return Response.json({ url: liveUrl, ticket, job_id: 'job1' });
     });
     try {
@@ -182,6 +190,15 @@ describe('admin Coto viewer', { concurrency: false }, () => {
       assert.equal(body.ticket, ticket);
       assert.equal(body.jobId, 'job1');
       assert.equal(body.reason, undefined);
+
+      mode = 'placed';
+      const placed = await (await ask()).json() as { url?: string; ticket?: string; jobId?: string };
+      const placedUrl = 'https://sandbox.example/viewer/?job=job1&part=screen';
+      assert.equal(placed.url, placedUrl);
+      assert.equal(placed.ticket, ticket);
+      assert.equal(placed.jobId, 'job1');
+      assert.equal(placed.url?.includes('exp='), false);
+      assert.equal(placed.url?.includes('sig='), false);
     } finally {
       fetchMock.mock.restore();
       __setAdminStoreForTests(null);

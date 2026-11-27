@@ -413,7 +413,18 @@ class CotoRelayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.opened, [])
         self.assertTrue(consume_screen_ticket(ticket, own['job_id'], now + 1))
 
-    async def test_an_expired_ticket_a_wrong_origin_and_a_terminal_job_are_refused(self):
+    async def test_a_coto_socket_opens_for_a_job_past_needs_human(self):
+        from coto_real import issue_screen_ticket
+
+        job = self._job(status='done', phase='placed')
+        ticket = issue_screen_ticket(job, int(time.time() * 1000))
+        ws = _Socket(self.origin, ['changuito.viewer', ticket])
+        with patch('manual.asyncio.open_connection', self._open):
+            await asyncio.wait_for(self.sessions.relay(ws, job['job_id'], job), 2)
+        self.assertEqual(self.opened, [('127.0.0.1', 5901)])
+        self.assertEqual(ws.accepted, 'changuito.viewer')
+
+    async def test_an_expired_ticket_a_wrong_origin_and_an_unknown_ticket_are_refused(self):
         from coto_real import issue_screen_ticket
 
         past = int(time.time() * 1000) - 120_000
@@ -423,15 +434,15 @@ class CotoRelayTests(unittest.IsolatedAsyncioTestCase):
         wrong = self._job('dd' * 16)
         wrong_ticket = issue_screen_ticket(wrong, int(time.time() * 1000))
         wrong_ws = _Socket('https://evil.example', ['changuito.viewer', wrong_ticket])
-        terminal = self._job('ee' * 16, status='done', phase='placed')
-        terminal_ws = _Socket(self.origin, ['changuito.viewer', 'a' * 43])
+        unknown = self._job('ee' * 16, status='done', phase='placed')
+        unknown_ws = _Socket(self.origin, ['changuito.viewer', 'a' * 43])
         with patch('manual.asyncio.open_connection', self._open):
             await self.sessions.relay(expired_ws, expired_job['job_id'], expired_job)
             await self.sessions.relay(wrong_ws, wrong['job_id'], wrong)
-            await self.sessions.relay(terminal_ws, terminal['job_id'], terminal)
+            await self.sessions.relay(unknown_ws, unknown['job_id'], unknown)
         self.assertEqual(expired_ws.codes, [1008])
         self.assertEqual(wrong_ws.codes, [1008])
-        self.assertEqual(terminal_ws.codes, [1008])
+        self.assertEqual(unknown_ws.codes, [1008])
         self.assertEqual(self.opened, [])
 
     async def test_a_dia_relay_without_a_session_still_refuses_and_does_not_open_vnc(self):

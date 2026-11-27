@@ -310,21 +310,20 @@ async def answer(job_id: str, body: ShopperAnswer) -> dict:
 
 @app.get("/jobs/{job_id}/viewer", dependencies=[Depends(auth)])
 async def job_viewer(job_id: str) -> dict:
-    from coto_real import issue_screen_ticket, viewer_open, viewer_url
+    from coto_real import issue_screen_ticket, screen_open, screen_url, viewer_open
 
     job = jobs.get(job_id)
-    if not isinstance(job, dict) or job.get("mode") != "coto_real" or not viewer_open(job):
+    if not screen_open(job):
         raise HTTPException(404, "viewer closed")
     now = int(time.time() * 1000)
     ticket = issue_screen_ticket(job, now)
     if not ticket:
         raise HTTPException(404, "viewer closed")
-    exp = now + 60_000
-    job["viewer_exp"] = exp
-    job["viewer_seen"] = now
+    if viewer_open(job):
+        job["viewer_seen"] = now
     origin = os.environ.get("SANDBOX_PUBLIC_URL") or "https://sandbox.local"
     return {
-        "url": viewer_url(job_id, TOKEN, origin, exp, part="screen"),
+        "url": screen_url(job_id, origin),
         "ticket": ticket,
         "job_id": job_id,
     }

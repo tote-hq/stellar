@@ -19,6 +19,8 @@ from typing import Awaitable, Callable
 POLL_S = 1.0
 NEEDS_HUMAN_MS = 60_000
 NEEDS_SHOPPER_MS = 600_000
+# Fetch-to-connect only. How long the screen stays up is the socket, not this window.
+SCREEN_TICKET_MS = 60_000
 HIDDEN_RESULT = {"admin_viewer_url", "viewerUrl", "adminViewerUrl", "ticket", "street", "pan", "password", "cvv"}
 
 
@@ -57,16 +59,21 @@ def viewer_open(job) -> bool:
     return isinstance(job, dict) and job.get("status") == "running" and job.get("phase") == "needs_human"
 
 
+def screen_open(job) -> bool:
+    """The admin screen is any Coto job the sandbox still holds. Phase does not matter."""
+    return isinstance(job, dict) and job.get("mode") == "coto_real"
+
+
 def issue_screen_ticket(job, now: int) -> str | None:
-    """Single-use screen ticket. Only while the operator still needs the Coto screen."""
-    if not viewer_open(job):
+    """Single-use, job-bound ticket. A fresh one is issued on every open click."""
+    if not screen_open(job):
         return None
     dead = [key for key, (_job_id, exp) in _SCREEN_TICKETS.items() if exp <= now]
     for key in dead:
         _SCREEN_TICKETS.pop(key, None)
     token = secrets.token_urlsafe(32)
     digest = hashlib.sha256(token.encode()).hexdigest()
-    _SCREEN_TICKETS[digest] = (str(job.get("job_id") or ""), now + NEEDS_HUMAN_MS)
+    _SCREEN_TICKETS[digest] = (str(job.get("job_id") or ""), now + SCREEN_TICKET_MS)
     return token
 
 
@@ -86,12 +93,23 @@ def consume_screen_ticket(ticket: str, job_id: str, now: int) -> bool:
 
 
 async def watch_coto_viewer(job, sleep: Sleep | None = None, now_ms: Now | None = None) -> None:
-    """Renews viewer_seen once a second while a socket is up, and returns when the screen closes."""
+    """Renews viewer_seen while the operator still needs the screen.
+
+    After needs_human the task stays up until the socket is cancelled or the
+    job is no longer a Coto job. viewer_seen is what extends the deadline, so
+    it is written only while viewer_open is true.
+    """
     pause = sleep or asyncio.sleep
     clock = now_ms or (lambda: int(time.time() * 1000))
-    while viewer_open(job):
-        job["viewer_seen"] = clock()
+    while screen_open(job):
+        if viewer_open(job):
+            job["viewer_seen"] = clock()
         await pause(1)
+
+
+def screen_url(job_id: str, origin: str) -> str:
+    """Admin screen address. No expiry and no signature: nothing checks either."""
+    return f"{origin.rstrip('/')}/viewer/?job={job_id}&part=screen"
 
 
 def viewer_url(job_id: str, token: str, origin: str, exp: int, part: str = "") -> str:

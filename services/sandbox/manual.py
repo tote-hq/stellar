@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from coto_real import consume_screen_ticket, viewer_open, watch_coto_viewer
+from coto_real import consume_screen_ticket, screen_open, watch_coto_viewer
 from manual_store import ManualStore
 
 
@@ -218,7 +218,7 @@ class ManualSessions:
         job_id = str(job.get('job_id') or '')
         ticket = protocols[1] if len(protocols) == 2 and protocols[0] == 'changuito.viewer' else ''
         now = int(time.time() * 1000)
-        if (ws.headers.get('origin') != origin or not ticket or not viewer_open(job)
+        if (ws.headers.get('origin') != origin or not ticket or not screen_open(job)
                 or not consume_screen_ticket(ticket, job_id, now)):
             await ws.close(code=1008)
             return

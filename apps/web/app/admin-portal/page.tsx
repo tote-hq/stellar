@@ -9,6 +9,22 @@ interface Note {
   body: string;
   createdAt: string;
   readAt: string | null;
+  buyer?: string | null;
+}
+
+const NOTE_TIME = new Intl.DateTimeFormat('es-AR', {
+  timeZone: 'America/Argentina/Buenos_Aires',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+function noteTime(createdAt: string): string {
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return createdAt;
+  return NOTE_TIME.format(date);
 }
 
 export default function AdminDesk() {
@@ -40,8 +56,24 @@ export default function AdminDesk() {
       <h1>Pedidos</h1>
       <ul>
         {notes.map((note) => (
-          <li key={note.id}>
+          <li key={note.id} data-testid="admin-notification" style={{ margin: '0 0 1rem', color: 'inherit' }}>
             {note.orderId ? <a href={`/orders/${note.orderId}`}>{note.body}</a> : <span>{note.body}</span>}
+            {note.orderId ? (
+              <p
+                data-testid="admin-notification-order"
+                style={{ fontFamily: 'ui-monospace, monospace', overflowWrap: 'anywhere', margin: '0.25rem 0' }}
+              >
+                Pedido {note.orderId}
+              </p>
+            ) : null}
+            {note.buyer ? (
+              <p data-testid="admin-notification-client" style={{ margin: '0.25rem 0' }}>
+                Cliente {note.buyer}
+              </p>
+            ) : null}
+            <time data-testid="admin-notification-time" dateTime={note.createdAt} style={{ display: 'block' }}>
+              {noteTime(note.createdAt)}
+            </time>
             {note.readAt ? null : (
               <button
                 type="button"
