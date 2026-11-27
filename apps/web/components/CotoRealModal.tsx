@@ -51,6 +51,39 @@ export function CotoRealModal({
   const [orderId, setOrderId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<StatusView['prompt']>(null);
   const [promptAnswer, setPromptAnswer] = useState('');
+  // pending: header only. open: the locked order's question. fresh: a new checkout.
+  const [resume, setResume] = useState<'pending' | 'open' | 'fresh'>('pending');
+
+  useEffect(() => {
+    if (!wallet.address) {
+      setResume('fresh');
+      return;
+    }
+    let stop = false;
+    const pull = async () => {
+      try {
+        const res = await fetchAs(
+          { address: wallet.address, sign: wallet.accessToken },
+          '/api/checkout/coto-real/resume',
+        );
+        const body = (await res.json()) as { orderId?: string | null; fulfillment?: string };
+        if (stop) return;
+        if (res.ok && body.orderId) {
+          setOrderId(body.orderId);
+          setFulfillment(body.fulfillment === 'pickup' ? 'pickup' : 'home');
+          setResume('open');
+          return;
+        }
+        setResume('fresh');
+      } catch {
+        if (!stop) setResume('fresh');
+      }
+    };
+    void pull();
+    return () => {
+      stop = true;
+    };
+  }, [wallet.accessToken, wallet.address]);
 
   useEffect(() => {
     if (!orderId || !wallet.address) return;
@@ -64,7 +97,7 @@ export function CotoRealModal({
         const body = (await res.json()) as StatusView;
         if (stop || !res.ok) return;
         if (body.note) setNote(body.note);
-        if (body.prompt) setPrompt(body.prompt);
+        setPrompt(body.prompt ?? null);
         if (body.error) setError(body.error);
         if (body.stage === 'done') {
           const done = modalCopy(lang).done(body.storeOrderId ?? '');
@@ -178,6 +211,8 @@ export function CotoRealModal({
         </header>
         <p>{copy.disclosure}</p>
         <p>{copy.never}</p>
+        {resume === 'fresh' ? (
+          <>
         <fieldset data-testid="checkout-fulfillment">
           <legend>{copy.mode}</legend>
           <label>
@@ -243,59 +278,6 @@ export function CotoRealModal({
         >
           {copy.usePostal}
         </button>
-        {error === HOME_MINIMUM_COPY ? (
-          <p role="alert" data-testid="checkout-home-minimum">
-            {HOME_MINIMUM_COPY}
-          </p>
-        ) : error ? (
-          <p role="alert" data-testid="coto-real-error">
-            {error}
-          </p>
-        ) : null}
-        {prompt ? (
-          <form
-            data-testid="checkout-prompt"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!orderId || !promptAnswer.trim()) return;
-              void fetchAs({ address: wallet.address, sign: wallet.accessToken }, '/api/checkout/prompt', {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ orderId, answer: promptAnswer.trim() }),
-              }).then(() => setPrompt(null));
-            }}
-          >
-            <p>{prompt.label}</p>
-            {prompt.options && prompt.options.length > 0 ? (
-              prompt.options.map((option) => (
-                <label key={option.value}>
-                  <input
-                    type="radio"
-                    name="prompt"
-                    value={option.value}
-                    data-testid="checkout-prompt-input"
-                    onChange={() => setPromptAnswer(option.value)}
-                  />
-                  {option.label}
-                  {option.suggested ? ' · sugerida' : ''}
-                </label>
-              ))
-            ) : (
-              <input
-                data-testid="checkout-prompt-input"
-                value={promptAnswer}
-                onChange={(event) => setPromptAnswer(event.target.value)}
-                style={{ minHeight: 44 }}
-              />
-            )}
-            <button type="submit" data-testid="checkout-prompt-submit" style={{ minHeight: 44, minWidth: 44 }}>
-              Enviar
-            </button>
-          </form>
-        ) : null}
-        {note ? (
-          <p data-testid="coto-real-status">{note}</p>
-        ) : null}
         {quote ? (
           <ul data-testid="coto-real-lines">
             <li>
@@ -335,6 +317,63 @@ export function CotoRealModal({
         >
           {quote ? copy.lockCta(quote.amountDisplay) : copy.lockCta('')}
         </button>
+          </>
+        ) : null}
+        {error === HOME_MINIMUM_COPY ? (
+          <p role="alert" data-testid="checkout-home-minimum">
+            {HOME_MINIMUM_COPY}
+          </p>
+        ) : error ? (
+          <p role="alert" data-testid="coto-real-error">
+            {error}
+          </p>
+        ) : null}
+        {prompt ? (
+          prompt.fieldRef === 'pickup_branch' && !(prompt.options && prompt.options.length > 0) ? null : (
+          <form
+            data-testid="checkout-prompt"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!orderId || !promptAnswer.trim()) return;
+              void fetchAs({ address: wallet.address, sign: wallet.accessToken }, '/api/checkout/prompt', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ orderId, answer: promptAnswer.trim() }),
+              }).then(() => setPrompt(null));
+            }}
+          >
+            <p>{prompt.label}</p>
+            {prompt.options && prompt.options.length > 0 ? (
+              prompt.options.map((option) => (
+                <label key={option.value}>
+                  <input
+                    type="radio"
+                    name="prompt"
+                    value={option.value}
+                    data-testid="checkout-prompt-input"
+                    onChange={() => setPromptAnswer(option.value)}
+                  />
+                  {option.label}
+                  {option.suggested ? ' · sugerida' : ''}
+                </label>
+              ))
+            ) : prompt.fieldRef === 'pickup_branch' ? null : (
+              <input
+                data-testid="checkout-prompt-input"
+                value={promptAnswer}
+                onChange={(event) => setPromptAnswer(event.target.value)}
+                style={{ minHeight: 44 }}
+              />
+            )}
+            <button type="submit" data-testid="checkout-prompt-submit" style={{ minHeight: 44, minWidth: 44 }}>
+              Enviar
+            </button>
+          </form>
+          )
+        ) : null}
+        {note ? (
+          <p data-testid="coto-real-status">{note}</p>
+        ) : null}
       </div>
     </div>
   );

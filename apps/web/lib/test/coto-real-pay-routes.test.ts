@@ -79,6 +79,7 @@ function channelBody(orderId: string) {
 describe('coto real channels and open', () => {
   let channelsPost: (req: Request) => Promise<Response>;
   let openPut: (req: Request) => Promise<Response>;
+  let resumeGet: (req: Request) => Promise<Response>;
   let cookie: string;
   const previousEnabled = env.COTO_REAL_ENABLED;
 
@@ -87,6 +88,7 @@ describe('coto real channels and open', () => {
     cookie = `${USER_COOKIE}=${encodeURIComponent(await mintUserToken(BUYER, 'session-test-secret'))}`;
     ({ POST: channelsPost } = await import('../../app/api/checkout/channels/route.ts'));
     ({ PUT: openPut } = await import('../../app/api/checkout/open/route.ts'));
+    ({ GET: resumeGet } = await import('../../app/api/checkout/coto-real/resume/route.ts'));
   });
 
   beforeEach(async () => {
@@ -195,6 +197,54 @@ describe('coto real channels and open', () => {
     const res = await putOpen(REAL, TX, false);
     assert.equal(res.status, 401);
     assert.equal((await res.json()).error, SIGN_IN);
+  });
+
+  it('resume without a cookie is 401', async () => {
+    const res = await resumeGet(new Request('https://app.changuito.me/api/checkout/coto-real/resume'));
+    assert.equal(res.status, 401);
+    assert.equal((await res.json()).error, 'Iniciá sesión.');
+  });
+
+  it('resume returns this wallet open pickup order', async () => {
+    const orderId = '44'.repeat(32);
+    await checkoutStore().set(
+      record({
+        orderId,
+        checkoutKind: 'coto_real_v1',
+        openSig: 'sig',
+        jobId: 'job-resume',
+        fulfillment: 'pickup',
+        createdAt: 10,
+      }),
+    );
+    const res = await resumeGet(
+      new Request('https://app.changuito.me/api/checkout/coto-real/resume', { headers: { cookie } }),
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await res.json(), { orderId, fulfillment: 'pickup' });
+  });
+
+  it('resume returns null when only another wallet has an open order', async () => {
+    const mine = '44'.repeat(32);
+    const prior = await checkoutStore().get(mine);
+    if (prior) await checkoutStore().set({ ...prior, outcome: 'settled' });
+    await checkoutStore().set(
+      record({
+        orderId: '55'.repeat(32),
+        buyer: Keypair.random().publicKey(),
+        checkoutKind: 'coto_real_v1',
+        openSig: 'sig',
+        jobId: 'job-other',
+        fulfillment: 'pickup',
+        createdAt: 11,
+      }),
+    );
+    const res = await resumeGet(
+      new Request('https://app.changuito.me/api/checkout/coto-real/resume', { headers: { cookie } }),
+    );
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { orderId: null });
   });
 
   it('channels prepare still reaches prepareOpen for a Día record', async () => {

@@ -11,6 +11,29 @@ JEV_MODEL = "jev-1.13.0"
 PICKUP_LABEL = "¿En qué sucursal retirás?"
 
 
+def pickup_branches(rows: list) -> list[dict]:
+    """Rows scraped off the pickup screen. No invented names.
+
+    A row with no name and no address is dropped. The first row for a
+    name wins, and the page order of the rest is kept.
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip()
+        address = str(row.get("address") or "").strip()
+        if not name and not address:
+            continue
+        if name and name in seen:
+            continue
+        if name:
+            seen.add(name)
+        out.append({"name": name, "address": address})
+    return out
+
+
 def _needs(label: str, field_ref: str, options=None) -> dict:
     return {"needs_shopper": {"label": label, "field_ref": field_ref, "options": options}}
 
@@ -44,8 +67,11 @@ def plan_delivery(screen: dict, order: dict, client=None) -> dict:
         chosen = order.get("pickup_branch")
         if isinstance(chosen, str) and chosen.strip():
             return {"fills": [{"field": "pickup_branch", "value": chosen.strip()}], "save": True}
-        branches = screen.get("branches") or []
-        return _needs(PICKUP_LABEL, "pickup_branch", _suggested(branches, str(order.get("city") or "")))
+        branches = pickup_branches(screen.get("branches") or [])
+        options = _suggested(branches, str(order.get("city") or ""))
+        if options:
+            return _needs(PICKUP_LABEL, "pickup_branch", options)
+        return {"needs_human": True}
     if kind in ("new_address", "saved_addresses", "fields"):
         if kind == "saved_addresses" and not screen.get("new_address"):
             return {"needs_human": True}

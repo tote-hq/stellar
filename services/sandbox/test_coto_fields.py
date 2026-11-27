@@ -2,7 +2,7 @@
 
 import unittest
 
-from coto_fields import JEV_MODEL, MEAT_STOCK, plan_delivery
+from coto_fields import JEV_MODEL, MEAT_STOCK, PICKUP_LABEL, pickup_branches, plan_delivery
 
 
 class FakeJev:
@@ -53,6 +53,47 @@ class CotoFieldsTest(unittest.TestCase):
         )
         self.assertEqual(saved["fills"][0]["value"], "ABASTO")
         self.assertTrue(saved["save"])
+
+    def test_pickup_suggests_only_the_branch_whose_address_contains_the_city(self):
+        plan = plan_delivery(
+            {"kind": "pickup", "branches": [
+                {"name": "Villa Crespo", "address": "Thames 100, Villa Crespo"},
+                {"name": "Abasto", "address": "Av. Corrientes 3200"},
+            ]},
+            {"fulfillment": "pickup", "city": "Villa Crespo"},
+        )
+        options = plan["needs_shopper"]["options"]
+        self.assertEqual(plan["needs_shopper"]["label"], PICKUP_LABEL)
+        self.assertEqual(len(options), 2)
+        self.assertTrue(options[0]["suggested"])
+        self.assertFalse(options[1]["suggested"])
+        self.assertNotIn("selected", options[0])
+        self.assertNotIn("selected", options[1])
+        self.assertNotIn("selected", plan)
+        self.assertNotIn("fills", plan)
+
+    def test_pickup_with_no_branches_asks_a_person_and_names_no_store(self):
+        plan = plan_delivery(
+            {"kind": "pickup", "branches": []},
+            {"fulfillment": "pickup", "city": "Villa Crespo"},
+        )
+        self.assertTrue(plan.get("needs_human"))
+        self.assertNotIn("needs_shopper", plan)
+        self.assertNotIn("Villa Crespo", str(plan))
+        self.assertNotIn("Abasto", str(plan))
+
+    def test_pickup_branches_drops_blanks_and_keeps_the_first_name(self):
+        rows = pickup_branches([
+            {"name": "  Villa Crespo ", "address": " Thames 100 "},
+            {"name": " ", "address": " "},
+            {"name": "Villa Crespo", "address": "duplicada"},
+            {"name": "Abasto", "address": "Corrientes 3200"},
+            "nope",
+        ])
+        self.assertEqual(rows, [
+            {"name": "Villa Crespo", "address": "Thames 100"},
+            {"name": "Abasto", "address": "Corrientes 3200"},
+        ])
 
     def test_meat_uses_the_exact_stock_line_and_does_not_call_jev(self):
         client = FakeJev()
