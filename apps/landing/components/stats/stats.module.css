@@ -316,17 +316,17 @@
 
 .kpis {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-top: 22px;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin-top: 28px;
 }
 
 .card {
   background: var(--surface);
   border: 1.5px solid var(--border);
-  border-radius: 20px;
+  border-radius: 24px;
   box-shadow: var(--shadow);
-  padding: 18px 18px 16px;
+  padding: 22px 22px 20px;
   min-width: 0;
 }
 
@@ -344,7 +344,7 @@
 .kpiValue {
   margin: 8px 0 0;
   color: var(--text);
-  font-size: clamp(1.8rem, 3vw, 2.35rem);
+  font-size: clamp(2.4rem, 5vw, 3.4rem);
   font-weight: 800;
   letter-spacing: -0.045em;
   line-height: 1;
@@ -787,11 +787,13 @@
   }
 }
 
-@media (min-width: 1200px) {
+@media (min-width: 800px) {
   .kpis {
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(3, 1fr);
   }
+}
 
+@media (min-width: 1200px) {
   .header {
     padding-inline: 28px;
   }

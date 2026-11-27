@@ -45,9 +45,10 @@ export const STELLAR_TREASURY = 'GBKJHIKIZONKCCV2JVOGUDXEOPTQUZ2OKYZNV3R3LDALNZH
 export const STELLAR_DEMO_WALLET = 'GDFF477UQUWOFIHSOEXPPOD5GPUSEW6OLGZB5FCPS6AFRAOPTMINA55X';
 
 export const TOTALS: Totals = {
-  endUsers: 30,
-  endUsersDelta30d: 30,
-  /** Last verified Stellar testnet settled count (real ARS supermarket purchases). */
+  /** Last confirmed waitlist total; a live count URL replaces this when set. */
+  endUsers: 52,
+  endUsersDelta30d: null,
+  /** Last verified settled escrow count (completed purchases). Stellar testnet is 11. */
   realPurchases: 11,
   txSolana: 59,
   txStellar: 26,

@@ -835,9 +835,10 @@ function assembleSnapshot(deps: LiveDeps, box: ReadBox): StatsSnapshot {
     endUsers: waitlist ?? b.endUsers,
     // The published 30-day delta is pinned to the snapshot day, so a live page never repeats it.
     endUsersDelta30d: null,
-    // Live supermarket purchases: Stellar settled escrows only. Do not use
-    // Postgres `orders.status = 'done'` (db.delivered) for this figure.
-    realPurchases: stl?.escrowEvents ? stl.settled : b.realPurchases,
+    // Completed purchases: successful escrow settles. Stellar is live when
+    // events were read; Solana settles are added when instruction bodies
+    // were parsed. Do not use Postgres `orders.status = 'done'`.
+    realPurchases: (stl?.escrowEvents ? stl.settled : b.realPurchases) + (solIx ? solIx.settled : 0),
     txSolana: sol ? sol.txs : b.txSolana,
     txStellar: stl ? stl.txs : b.txStellar,
     txDelta30d:

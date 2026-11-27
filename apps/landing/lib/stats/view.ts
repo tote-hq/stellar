@@ -1,8 +1,7 @@
 /**
  * Turns the snapshot into what a filter, a range and a chart mode show.
- * The waitlist and the real-purchases figures are product numbers, so those
- * cards stay put when a network is selected. Chain counts move. Seeker has
- * no published rows, so that filter is zeros rather than a split we do not have.
+ * The public dashboard only uses the three headline KPIs (waitlist, total
+ * purchases, total wallets). Chart helpers stay for the CSV export.
  */
 
 import { format, type MessageKey } from './i18n.ts';
@@ -30,7 +29,7 @@ export interface Phrase {
 }
 
 export interface Kpi {
-  id: 'endUsers' | 'realPurchases' | 'transactions' | 'carts' | 'wallets';
+  id: 'endUsers' | 'realPurchases' | 'wallets';
   value: number;
   parts: Phrase[];
 }
@@ -143,89 +142,58 @@ export function visibleChains(filter: NetworkFilter): Chain[] {
   return ['solana', 'stellar'];
 }
 
-const SEEKER_PARTS: Phrase[] = [{ key: 'seekerEmpty' }];
-
-export function kpis(filter: NetworkFilter, snap: StatsSnapshot = FALLBACK_SNAPSHOT): Kpi[] {
+/**
+ * The three headline figures on /stats. Totals are always across networks.
+ * Subtitles stay empty so the cards read as a number plus an optional stale mark.
+ */
+export function kpis(snap: StatsSnapshot = FALLBACK_SNAPSHOT): Kpi[] {
   const TOTALS = snap.totals;
   const userParts: Phrase[] = [];
-  if (TOTALS.endUsersDelta30d !== null) userParts.push({ key: 'delta', vars: { count: TOTALS.endUsersDelta30d } });
-  if (TOTALS.appAccounts !== null) userParts.push({ key: 'appAccounts', vars: { count: TOTALS.appAccounts } });
   if (snap.updatedAt !== null && snap.sources.waitlist !== 'live') userParts.push({ key: 'lastKnown' });
   const endUsers: Kpi = { id: 'endUsers', value: TOTALS.endUsers, parts: userParts };
-  // Real purchases are Stellar settled escrows (ARS supermarket payments).
-  // The box stays put when a network is selected. last-known applies only
-  // when the escrow event read failed.
-  const purchaseParts: Phrase[] = [{ key: 'realPurchaseNote' }];
+
+  const purchaseParts: Phrase[] = [];
   if (snap.updatedAt !== null && snap.sources.realPurchases !== 'live') purchaseParts.push({ key: 'lastKnown' });
   const realPurchases: Kpi = { id: 'realPurchases', value: TOTALS.realPurchases, parts: purchaseParts };
 
-  const transactions: Kpi =
-    filter === 'seeker'
-      ? { id: 'transactions', value: 0, parts: SEEKER_PARTS }
-      : filter === 'solana'
-        ? {
-            id: 'transactions',
-            value: TOTALS.txSolana,
-            parts: [{ key: 'chainSolana' }, { key: 'delta', vars: { count: TOTALS.txDelta30d } }],
-          }
-        : filter === 'stellar'
-          ? {
-              id: 'transactions',
-              value: TOTALS.txStellar,
-              parts: [{ key: 'chainStellar' }],
-            }
-          : {
-              id: 'transactions',
-              value: TOTALS.txSolana + TOTALS.txStellar,
-              parts: [
-                { key: 'txSplit', vars: { solana: TOTALS.txSolana, stellar: TOTALS.txStellar } },
-                { key: 'delta', vars: { count: TOTALS.txDelta30d } },
-              ],
-            };
+  const walletParts: Phrase[] = [];
+  if (snap.updatedAt !== null) {
+    const state = chainState('all', snap);
+    if (state === 'unavailable' || state === 'snapshot' || state === 'partial') {
+      walletParts.push({ key: 'lastKnown' });
+    }
+  }
+  const wallets: Kpi = {
+    id: 'wallets',
+    value: TOTALS.walletsSolana + TOTALS.walletsStellar,
+    parts: walletParts,
+  };
 
-  const carts: Kpi =
-    filter === 'seeker'
-      ? { id: 'carts', value: 0, parts: SEEKER_PARTS }
-      : filter === 'solana'
-        ? {
-            id: 'carts',
-            value: TOTALS.cartsSolana,
-            parts: [{ key: 'chainSolana' }, { key: 'usdc', vars: { amount: TOTALS.settledUsdc } }],
-          }
-        : filter === 'stellar'
-          ? {
-              id: 'carts',
-              value: TOTALS.cartsStellar,
-              parts: [{ key: 'mints', vars: { count: TOTALS.stellarMints } }],
-            }
-          : {
-              id: 'carts',
-              value: TOTALS.cartsSolana + TOTALS.cartsStellar,
-              parts: [
-                { key: 'cartSplit', vars: { solana: TOTALS.cartsSolana, stellar: TOTALS.cartsStellar } },
-                { key: 'settled', vars: { count: TOTALS.settled } },
-                { key: 'usdc', vars: { amount: TOTALS.settledUsdc } },
-              ],
-            };
+  return [endUsers, realPurchases, wallets];
+}
 
-  const wallets: Kpi =
-    filter === 'seeker'
-      ? { id: 'wallets', value: 0, parts: SEEKER_PARTS }
-      : filter === 'solana'
-        ? { id: 'wallets', value: TOTALS.walletsSolana, parts: [{ key: 'chainShortSolana' }] }
-        : filter === 'stellar'
-          ? { id: 'wallets', value: TOTALS.walletsStellar, parts: [{ key: 'chainShortStellar' }] }
-          : {
-              id: 'wallets',
-              value: TOTALS.walletsSolana + TOTALS.walletsStellar,
-              parts: [
-                { key: 'walletSplit', vars: { solana: TOTALS.walletsSolana, stellar: TOTALS.walletsStellar } },
-                { key: 'buyers', vars: { count: TOTALS.buyers } },
-                { key: 'infra', vars: { count: TOTALS.infra } },
-              ],
-            };
-
-  return [endUsers, realPurchases, transactions, carts, wallets];
+/** Visible stale label for a headline card. Live cards stay unmarked. */
+export function kpiMark(
+  id: Kpi['id'],
+  snapshot: StatsSnapshot,
+  copy: {
+    lastKnown: string;
+    unavailable: string;
+    partialUnavailable: string;
+    chainShortSolana: string;
+    chainShortStellar: string;
+  },
+): string | null {
+  if (snapshot.updatedAt === null) return null;
+  // Waitlist and purchases still show the last published number, so a missed
+  // live read is labeled as last known rather than as a missing figure.
+  if (id === 'endUsers') {
+    return snapshot.sources.waitlist === 'live' ? null : copy.lastKnown;
+  }
+  if (id === 'realPurchases') {
+    return snapshot.sources.realPurchases === 'live' ? null : copy.lastKnown;
+  }
+  return chainSourceLabel('all', snapshot, copy);
 }
 
 function instructionRows(snap: StatsSnapshot): { id: string; count: number; label: MessageKey }[] {
@@ -336,8 +304,6 @@ export function networkNameKey(filter: NetworkFilter): MessageKey {
 export function kpiTitleKey(id: Kpi['id']): MessageKey {
   if (id === 'endUsers') return 'kpiEndUsers';
   if (id === 'realPurchases') return 'kpiRealPurchases';
-  if (id === 'transactions') return 'kpiTx';
-  if (id === 'carts') return 'kpiCarts';
   return 'kpiWallets';
 }
 
