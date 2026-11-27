@@ -33,9 +33,12 @@ export function viewerReadyFromFrame(
   return event.source === frameWindow && event.origin === origin && event.data?.type === 'changuito-viewer-ready';
 }
 
+export type AdminViewerReason = 'closed' | 'unreachable';
+
 export function adminViewerBody(
   viewer: { url: string; ticket: string; jobId: string } | null,
-): { url: null } | { url: string; ticket: string; jobId: string } {
-  if (!viewer) return { url: null };
+  reason?: AdminViewerReason,
+): { url: null; reason?: AdminViewerReason } | { url: string; ticket: string; jobId: string } {
+  if (!viewer) return reason ? { url: null, reason } : { url: null };
   return { url: viewer.url, ticket: viewer.ticket, jobId: viewer.jobId };
 }

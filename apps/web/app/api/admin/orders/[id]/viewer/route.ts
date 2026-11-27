@@ -1,6 +1,6 @@
 import { isAdmin, requireAdmin } from '../../../../../../lib/admin/guard.ts';
 import { adminViewerBody } from '../../../../../../lib/admin/viewer-connect.ts';
-import { readCotoViewer } from '../../../../../../lib/checkout/sandbox.ts';
+import { readCotoViewerOutcome } from '../../../../../../lib/checkout/sandbox.ts';
 import { checkoutStore } from '../../../../../../lib/checkout/store.ts';
 
 export const runtime = 'nodejs';
@@ -15,8 +15,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   const { id } = await ctx.params;
   const rec = await checkoutStore().get(id);
   if (!rec?.jobId || rec.jobId === 'none') {
-    return Response.json(adminViewerBody(null), { headers: PRIVATE });
+    return Response.json(adminViewerBody(null, 'closed'), { headers: PRIVATE });
   }
-  const viewer = await readCotoViewer(rec.jobId);
-  return Response.json(adminViewerBody(viewer), { headers: PRIVATE });
+  const outcome = await readCotoViewerOutcome(rec.jobId);
+  if (!outcome.viewer) return Response.json(adminViewerBody(null, outcome.reason), { headers: PRIVATE });
+  return Response.json(adminViewerBody(outcome.viewer), { headers: PRIVATE });
 }

@@ -319,25 +319,64 @@ export interface CotoViewer {
   jobId: string;
 }
 
+/** How long the admin route waits for the sandbox screen before answering. */
+export const COTO_VIEWER_FETCH_MS = 5_000;
+
+export type CotoViewerFailure = 'closed' | 'unreachable';
+
+export type CotoViewerOutcome =
+  | { viewer: CotoViewer }
+  | { viewer: null; reason: CotoViewerFailure };
+
 /**
  * Signed while the operator still needs the Coto screen. Not stored.
  * A URL whose origin is not the sandbox is dropped.
+ * A timeout, an abort, or a network error is null.
  */
 export async function readCotoViewer(
   jobId: string,
   env: NodeJS.ProcessEnv = process.env,
+  timeoutMs: number = COTO_VIEWER_FETCH_MS,
 ): Promise<CotoViewer | null> {
+  const outcome = await readCotoViewerOutcome(jobId, env, timeoutMs);
+  return outcome.viewer;
+}
+
+/** Same read as `readCotoViewer`, plus why a screen is missing. */
+export async function readCotoViewerOutcome(
+  jobId: string,
+  env: NodeJS.ProcessEnv = process.env,
+  timeoutMs: number = COTO_VIEWER_FETCH_MS,
+): Promise<CotoViewerOutcome> {
   const expected = sandboxOrigin(env);
-  if (!expected) return null;
+  if (!expected) return { viewer: null, reason: 'unreachable' };
   const { base, headers } = remote(env);
-  const res = await fetch(`${base}/jobs/${encodeURIComponent(jobId)}/viewer`, { headers, cache: 'no-store' });
-  if (!res.ok) return null;
-  const body = (await res.json()) as { url?: unknown; ticket?: unknown; job_id?: unknown };
-  if (typeof body.url !== 'string' || typeof body.ticket !== 'string' || typeof body.job_id !== 'string') return null;
+  let res: Response;
   try {
-    if (new URL(body.url).origin !== expected) return null;
+    res = await fetch(`${base}/jobs/${encodeURIComponent(jobId)}/viewer`, {
+      headers,
+      cache: 'no-store',
+      signal: AbortSignal.timeout(timeoutMs),
+    });
   } catch {
-    return null;
+    return { viewer: null, reason: 'unreachable' };
   }
-  return { url: body.url, ticket: body.ticket, jobId: body.job_id };
+  // The sandbox answers 404 when the phase is not needs_human.
+  if (res.status === 404) return { viewer: null, reason: 'closed' };
+  if (!res.ok) return { viewer: null, reason: 'unreachable' };
+  let body: { url?: unknown; ticket?: unknown; job_id?: unknown };
+  try {
+    body = (await res.json()) as { url?: unknown; ticket?: unknown; job_id?: unknown };
+  } catch {
+    return { viewer: null, reason: 'unreachable' };
+  }
+  if (typeof body.url !== 'string' || typeof body.ticket !== 'string' || typeof body.job_id !== 'string') {
+    return { viewer: null, reason: 'unreachable' };
+  }
+  try {
+    if (new URL(body.url).origin !== expected) return { viewer: null, reason: 'unreachable' };
+  } catch {
+    return { viewer: null, reason: 'unreachable' };
+  }
+  return { viewer: { url: body.url, ticket: body.ticket, jobId: body.job_id } };
 }

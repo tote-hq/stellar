@@ -276,6 +276,9 @@ describe('GET /api/checkout/status closes the escrow', () => {
     escrow.settles = [];
     escrow.refunds = [];
     jobs.clear();
+    // A stored outcome is terminal, so a fresh record cannot wipe the last
+    // test's settle. Drop the row, then write the one this test starts from.
+    (globalThis as { __chgCheckouts?: Map<string, CheckoutRecord> }).__chgCheckouts?.delete(ORDER);
     await store.set(record());
   });
 
