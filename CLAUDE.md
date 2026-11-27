@@ -214,6 +214,10 @@ restored blocks do not collide with new ones. A chat the server can no longer
 continue comes back **read-only** rather than pretending, which is what
 `isResumable` is for. Do not re-add the id to storage on its own.
 
+`HumanGate` can unmount the chat pane under a live `ShopProvider`. A pane that
+mounts empty while `activeChatId` is set reopens that chat through `openChat`,
+never `resume` on its own.
+
 **Three stores hold a conversation, and they are not redundant.** Redis
 (`turn-store.ts`) is the working store the hop loop reads up to twelve times a
 turn, at a one hour TTL. localStorage (`chat-store.ts`) is what the shopper
@@ -455,7 +459,7 @@ shopper confirms the existing switch dialog. The cart card then draws through
 ## Before you commit
 
 ```
-npm test                        # 814: mcp 220 · trust 1 · web 593
+npm test                        # 847: mcp 221 · trust 1 · web 625
 npm run typecheck -w @changuito/web
 npm run build
 ```
