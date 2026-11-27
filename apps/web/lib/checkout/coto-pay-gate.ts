@@ -1,7 +1,8 @@
 /**
  * Which Coto pay control to show.
  *
- * Paid, then read-only, then the comparison, then admission, then the total.
+ * Paid, then read-only (unless an open order resumes), then the comparison,
+ * then admission, then the total.
  * `pay` is the button. Every other name is a phrase and not a button.
  * No relative imports: the test loads this file under strip-types.
  */
@@ -27,11 +28,13 @@ export function cotoPayGate(args: {
   admission: CotoAdmission;
   orderState: string;
   readOnly: boolean;
+  /** An open order the resume route confirmed. A writable chat ignores it. */
+  resumeOpen?: boolean;
   dualCheckout: boolean;
   cart: CotoPayCart | null | undefined;
 }): CotoPayGateName {
   if (args.orderState === 'paid') return 'paid';
-  if (args.readOnly) return 'read_only';
+  if (args.readOnly && !args.resumeOpen) return 'read_only';
   if (args.dualCheckout) return 'dual_checkout';
   if (args.admission === 'pending') return 'waiting';
   if (args.admission === 'failed') return 'fetch_failed';

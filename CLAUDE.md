@@ -106,6 +106,7 @@ fingerprint has changed since the last card. Four parts hold it up:
   an optional `cotoPay` on the turn (not a `v` bump). The client still applies
   its own admission state, so `orderable: true` does not show Pay to an
   account that is not admitted. Pay on any Coto card charges the live basket.
+  A read-only chat (past the hour) still offers Pay on a Coto card only when the resume route returns an open order, and that modal resumes the order and never quotes or locks; the agent session is not resumed.
   The gate phrase replaces the generic "cannot be paid yet" line. A Día cart
   without a link still does not draw. The link rule exists because a Día
   card's action is that link. `dualCheckout` is stamped only while no chain
@@ -459,7 +460,7 @@ shopper confirms the existing switch dialog. The cart card then draws through
 ## Before you commit
 
 ```
-npm test                        # 864: mcp 221 · trust 1 · web 642
+npm test                        # 869: mcp 221 · trust 1 · web 647
 npm run typecheck -w @changuito/web
 npm run build
 ```

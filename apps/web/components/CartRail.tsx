@@ -129,6 +129,7 @@ function RailBasket({ cart }: { cart: Cart }) {
           admission: shop?.cotoAdmission ?? 'pending',
           orderState: shop?.orderState ?? 'none',
           readOnly: Boolean(shop?.readOnly),
+          resumeOpen: Boolean(shop?.cotoResumeOrderId),
           dualCheckout: Boolean(shop?.dualCheckout),
           cart,
         })

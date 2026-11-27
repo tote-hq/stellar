@@ -6,7 +6,8 @@ import type { Cart } from '@changuito/mcp/types';
 
 import { starters } from '../lib/agent/prompt';
 import { cotoPayGate } from '../lib/checkout/coto-pay-gate.ts';
-import { cotoPayOpen, restoreActiveChat } from '../lib/checkout/coto-pay-open.ts';
+import { cotoPayOpen, cotoResumeProbe, cotoSessionFor, restoreActiveChat } from '../lib/checkout/coto-pay-open.ts';
+import { fetchAs } from '../lib/fetch-as.ts';
 import { composerControls } from '../lib/composer.ts';
 import {
   buildCartMessage,
@@ -240,7 +241,7 @@ function ChatCore({
   } | null>(null);
   // Cart plus the session captured at the click. After a pane remount the live
   // id is empty until resume, and the mount must not read it again later.
-  const [cotoModal, setCotoModal] = useState<{ cart: Cart; sessionId: string } | null>(null);
+  const [cotoModal, setCotoModal] = useState<{ cart: Cart; sessionId: string; resumeOnly: boolean } | null>(null);
   /** Which pay started. Cleared if the modal closes before escrow open. */
   const [payLock, setPayLock] = useState<null | 'dia' | 'coto'>(null);
   const payOpened = useRef(false);
@@ -259,15 +260,25 @@ function ChatCore({
     (cart: Cart | null | undefined) => {
       const activeId = shop?.activeChatId ?? null;
       const stored = activeId ? loadChat(activeId) : null;
-      const storedSessionId = stored && isResumable(stored) ? stored.sessionId : null;
+      const resumeOrderId = shop?.cotoResumeOrderId ?? null;
+      const storedSessionId = cotoSessionFor({
+        resumable: stored ? isResumable(stored) : false,
+        resumeOrderId,
+        storedSessionId: stored?.sessionId ?? null,
+      });
       const opened = cotoPayOpen({
         cart,
         sessionId: currentSessionId(),
         storedSessionId,
       });
-      if (opened) setCotoModal(opened);
+      if (opened) {
+        setCotoModal({
+          ...opened,
+          resumeOnly: Boolean(shop?.readOnly) && Boolean(resumeOrderId),
+        });
+      }
     },
-    [shop?.activeChatId, currentSessionId],
+    [shop?.activeChatId, shop?.cotoResumeOrderId, shop?.readOnly, currentSessionId],
   );
   const publish = shop?.publish;
   useEffect(() => {
@@ -280,6 +291,34 @@ function ChatCore({
   const payRequest = shop?.payRequest ?? 0;
   const seenPay = useRef(payRequest);
   const setCotoAdmission = shop?.setCotoAdmission;
+  const setCotoResumeOrderId = shop?.setCotoResumeOrderId;
+  useEffect(() => {
+    if (!setCotoResumeOrderId) return;
+    const readOnlyChat = Boolean(shop?.readOnly);
+    const retailer = shop?.cart?.retailer;
+    const orderState = shop?.orderState;
+    if (!cotoResumeProbe({ readOnly: readOnlyChat, retailer, orderState, address }) || !address || !sign) {
+      setCotoResumeOrderId(null);
+      return;
+    }
+    let gone = false;
+    fetchAs({ address, sign }, '/api/checkout/coto-real/resume')
+      .then(async (res) => {
+        if (gone) return;
+        if (!res.ok) {
+          setCotoResumeOrderId(null);
+          return;
+        }
+        const body = (await res.json()) as { orderId?: string | null };
+        setCotoResumeOrderId(body.orderId ? body.orderId : null);
+      })
+      .catch(() => {
+        if (!gone) setCotoResumeOrderId(null);
+      });
+    return () => {
+      gone = true;
+    };
+  }, [address, shop?.readOnly, shop?.activeChatId, shop?.cart?.retailer, shop?.orderState, setCotoResumeOrderId, sign]);
   useEffect(() => {
     if (!setCotoAdmission) return;
     setCotoAdmission('pending');
@@ -309,6 +348,7 @@ function ChatCore({
         admission: shop.cotoAdmission,
         orderState: shop.orderState,
         readOnly: shop.readOnly,
+        resumeOpen: Boolean(shop.cotoResumeOrderId),
         dualCheckout: shop.dualCheckout,
         cart: shop.cart,
       });
@@ -717,6 +757,7 @@ function ChatCore({
                       admission: shop?.cotoAdmission ?? 'pending',
                       orderState: shop?.orderState ?? 'none',
                       readOnly,
+                      resumeOpen: Boolean(shop?.cotoResumeOrderId),
                       dualCheckout: Boolean(shop?.dualCheckout),
                       cart: liveBasket,
                     })
@@ -1143,6 +1184,7 @@ function ChatCore({
         <CotoRealModal
           cart={cotoModal.cart}
           sessionId={cotoModal.sessionId}
+          resumeOnly={cotoModal.resumeOnly}
           postalCode={state.snapshot?.location?.postalCode}
           city={state.snapshot?.city}
           onClose={() => setCotoModal(null)}

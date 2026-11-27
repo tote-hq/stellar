@@ -22,12 +22,15 @@ export function CotoRealModal({
   postalCode,
   city: cityProp,
   onClose,
+  resumeOnly = false,
 }: {
   cart: Cart;
   sessionId: string;
   postalCode?: string;
   city?: string;
   onClose: () => void;
+  /** Resume the open order only. Never quote, lock, or show the address form. */
+  resumeOnly?: boolean;
 }) {
   const lang = useLang();
   const wallet = useWallet();
@@ -52,11 +55,13 @@ export function CotoRealModal({
   const [prompt, setPrompt] = useState<StatusView['prompt']>(null);
   const [promptAnswer, setPromptAnswer] = useState('');
   // pending: header only. open: the locked order's question. fresh: a new checkout.
-  const [resume, setResume] = useState<'pending' | 'open' | 'fresh'>('pending');
+  // closed: resume-only, and the order is no longer open.
+  const [resume, setResume] = useState<'pending' | 'open' | 'fresh' | 'closed'>('pending');
 
   useEffect(() => {
+    const missed = resumeOnly ? 'closed' : 'fresh';
     if (!wallet.address) {
-      setResume('fresh');
+      setResume(missed);
       return;
     }
     let stop = false;
@@ -74,16 +79,16 @@ export function CotoRealModal({
           setResume('open');
           return;
         }
-        setResume('fresh');
+        setResume(missed);
       } catch {
-        if (!stop) setResume('fresh');
+        if (!stop) setResume(missed);
       }
     };
     void pull();
     return () => {
       stop = true;
     };
-  }, [wallet.accessToken, wallet.address]);
+  }, [resumeOnly, wallet.accessToken, wallet.address]);
 
   useEffect(() => {
     if (!orderId || !wallet.address) return;
@@ -319,6 +324,14 @@ export function CotoRealModal({
         </button>
           </>
         ) : null}
+        {resume === 'closed' ? (
+          <>
+            <p data-testid="coto-real-closed">{copy.resumeGone}</p>
+            <button type="button" className="btn" style={{ minHeight: 44 }} onClick={onClose}>
+              {copy.close}
+            </button>
+          </>
+        ) : null}
         {error === HOME_MINIMUM_COPY ? (
           <p role="alert" data-testid="checkout-home-minimum">
             {HOME_MINIMUM_COPY}
@@ -438,6 +451,7 @@ function modalCopy(lang: Lang) {
       pending: 'We received the wallet approval and we are still confirming the lock.',
       working: 'We are placing the Coto order.',
       done: (id: string) => (id ? `Coto order ${id} is placed.` : 'The Coto order is placed.'),
+      resumeGone: 'This order is no longer open. Start a new chat to order something else.',
     };
   }
   return {
@@ -468,5 +482,6 @@ function modalCopy(lang: Lang) {
     pending: 'Recibimos la aprobación de tu billetera y todavía estamos confirmando el bloqueo.',
     working: 'Estamos haciendo el pedido en Coto.',
     done: (id: string) => (id ? `Pedido de Coto ${id} listo.` : 'El pedido de Coto quedó listo.'),
+    resumeGone: 'Este pedido ya no está abierto. Empezá un chat nuevo para pedir otra cosa.',
   };
 }

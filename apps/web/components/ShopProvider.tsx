@@ -96,6 +96,9 @@ interface ShopValue {
   /** Where the Coto admission fetch is. The server decides `allowed`. */
   cotoAdmission: 'pending' | 'failed' | 'allowed' | 'denied';
   setCotoAdmission: (next: 'pending' | 'failed' | 'allowed' | 'denied') => void;
+  /** Open Coto order the resume route confirmed for this read-only chat, or null. */
+  cotoResumeOrderId: string | null;
+  setCotoResumeOrderId: (next: string | null) => void;
 }
 
 const ShopContext = createContext<ShopValue | null>(null);
@@ -114,6 +117,7 @@ export function ShopProvider({ children }: { children: ReactNode }) {
   const [payRequest, setPayRequest] = useState(0);
   const [dualCheckout, setDualCheckout] = useState(false);
   const [cotoAdmission, setCotoAdmission] = useState<'pending' | 'failed' | 'allowed' | 'denied'>('pending');
+  const [cotoResumeOrderId, setCotoResumeOrderId] = useState<string | null>(null);
   const requestPay = useCallback(() => setPayRequest((n) => n + 1), []);
 
   // After hydration, never during render: reading storage while rendering
@@ -201,6 +205,7 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     setOrderState('none');
     setReceipt(null);
     setReadOnly(false);
+    setCotoResumeOrderId(null);
     setHistoryOpen(false);
     setRequest({ kind: 'new', token: Date.now() });
   }, []);
@@ -229,6 +234,7 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     setOrderState(chat.orderState);
     setReceipt(chat.receipt);
     setReadOnly(!live);
+    setCotoResumeOrderId(null);
     setHistoryOpen(false);
     // `sessionId: null` when it is not resumable, so the chat component cannot
     // accidentally send into a session the server has forgotten. The store
@@ -277,11 +283,13 @@ export function ShopProvider({ children }: { children: ReactNode }) {
       dualCheckout,
       cotoAdmission,
       setCotoAdmission,
+      cotoResumeOrderId,
+      setCotoResumeOrderId,
     }),
     [
       chats, activeChatId, cart, handoffUrl, orderState, receipt, readOnly,
       publish, openChat, newChat, forgetChat, settle, request, ack, historyOpen,
-      payRequest, requestPay, dualCheckout, cotoAdmission,
+      payRequest, requestPay, dualCheckout, cotoAdmission, cotoResumeOrderId,
     ],
   );
 
