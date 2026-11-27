@@ -126,6 +126,11 @@ describe('admin usdc source route', () => {
     assert.match(page, /role="status"/);
     assert.match(page, /role="alert"/);
     assert.match(page, /minHeight: 44/);
+    assert.match(page, /useState<Card>\(loadingCard\)/);
+    assert.match(page, /Cargando…/);
+    assert.match(page, /No se pudo leer la configuración\. Se usa el USDC de prueba\./);
+    assert.match(page, /Reintentar/);
+    assert.match(page, /phase !== 'ready'/);
     assert.doesNotMatch(page, /GBBD47/);
     assert.doesNotMatch(page, /GA5ZSE/);
   });

@@ -48,6 +48,10 @@
  * fetched. A contract holder reads Circle's SAC, derived from the published
  * code and issuer, and that is the only extra round trip.
  *
+ * That extra read has its own try. If it throws, the response is still 200
+ * and `usdc` is the mock balance. `line.failed` is set so the widget paints
+ * "-" with the Circle unit, and never the mock number under that label.
+ *
  * ## There is no `funded` field, and its absence is the decision
  *
  * There was one. It meant "holds at least MIN_XLM, so it can pay a fee", and
@@ -112,7 +116,14 @@ export interface BalanceResponse {
    * Absent on mock, so the body matches the response this route had before.
    * Not what checkout spends.
    */
-  line?: { source: 'circle'; usdc: string; usdcDisplay: string; trustline: TrustlineState };
+  line?: {
+    source: 'circle';
+    usdc: string;
+    usdcDisplay: string;
+    trustline: TrustlineState;
+    /** Set when the Circle read failed. `usdc` above is still the mock balance. */
+    failed?: boolean;
+  };
 }
 
 export async function GET(req: Request): Promise<Response> {
@@ -179,25 +190,38 @@ export async function GET(req: Request): Promise<Response> {
     };
 
     // Mainnet never reads the flag. A forged or missing cookie is a guest.
+    // The Circle read is isolated: a throw here must not 502 the mock balance
+    // that checkout and the pay modal still read from this body.
     if (network === 'testnet') {
       const signedIn = (await readLoggedInUser(req)).ok;
       if ((await getUsdcSource(signedIn)) === 'circle') {
-        if (kind === 'contract') {
-          const held = await tokenBalance(address, network, circleTestnetContractId());
+        try {
+          if (kind === 'contract') {
+            const held = await tokenBalance(address, network, circleTestnetContractId());
+            body.line = {
+              source: 'circle',
+              usdc: held.toString(),
+              usdcDisplay: formatUsdc(held),
+              trustline: 'not-needed',
+            };
+          } else {
+            const circle = { code: CIRCLE_TESTNET_USDC.code, issuer: CIRCLE_TESTNET_USDC.issuer };
+            const held = classicBalance(balances, circle.code, circle.issuer);
+            body.line = {
+              source: 'circle',
+              usdc: held.toString(),
+              usdcDisplay: formatUsdc(held),
+              trustline: trustlineFor(balances, circle),
+            };
+          }
+        } catch (err) {
+          console.error('[balance] circle', err instanceof Error ? err.message : String(err));
           body.line = {
             source: 'circle',
-            usdc: held.toString(),
-            usdcDisplay: formatUsdc(held),
+            usdc: '0',
+            usdcDisplay: '-',
             trustline: 'not-needed',
-          };
-        } else {
-          const circle = { code: CIRCLE_TESTNET_USDC.code, issuer: CIRCLE_TESTNET_USDC.issuer };
-          const held = classicBalance(balances, circle.code, circle.issuer);
-          body.line = {
-            source: 'circle',
-            usdc: held.toString(),
-            usdcDisplay: formatUsdc(held),
-            trustline: trustlineFor(balances, circle),
+            failed: true,
           };
         }
       }

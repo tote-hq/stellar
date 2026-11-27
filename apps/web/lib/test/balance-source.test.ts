@@ -163,6 +163,24 @@ describe('balance route source', () => {
     assert.notEqual(sacId, DEPLOYMENTS.testnet.usdcId);
   });
 
+  it('a failed Circle SAC read keeps the mock balance and marks the line failed', async () => {
+    __setConfigForTests({ usdc_source_guest: 'circle' });
+    chain.failBalances.add(sacId);
+    const res = await ask(CONTRACT, 'testnet');
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.usdc, MOCK_UNITS.toString());
+    assert.equal(body.usdcDisplay, '250.00');
+    assert.equal(body.line.source, 'circle');
+    assert.equal(body.line.failed, true);
+    const view = balanceLineView(body, 'USDC de prueba', 'es');
+    assert.equal(view.amount, '-');
+    assert.equal(view.unit, circleBalanceCopy('es').unit);
+    assert.notEqual(view.unit, 'USDC de prueba');
+    assert.equal(chain.balanceContracts.includes(sacId), true);
+    assert.equal(chain.balanceContracts.includes(CONTRACT), true);
+  });
+
   it('mainnet does not attach a circle line', async () => {
     __setConfigForTests({ usdc_source_guest: 'circle', usdc_source_signed_in: 'circle' });
     const buyer = Keypair.random().publicKey();

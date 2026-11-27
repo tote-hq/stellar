@@ -436,11 +436,13 @@ export interface BalanceLineView {
  * are the mock ones the response already had, and there is no hint.
  * A Circle trustline that is still closed shows that line's display (zero)
  * and the existing trustline sentence, not the Circle hint.
+ * A failed Circle read (`failed`) shows "-" with the Circle unit, never the
+ * mock amount under that unit and never the Circle amount under the mock one.
  */
 export function balanceLineView(
   data: {
     usdcDisplay: string;
-    line?: { source: 'circle'; usdcDisplay: string; trustline: TrustlineState };
+    line?: { source: 'circle'; usdcDisplay: string; trustline: TrustlineState; failed?: boolean };
   } | null,
   fallbackUnit: string,
   lang: Lang,
@@ -449,6 +451,7 @@ export function balanceLineView(
   const line = data.line?.source === 'circle' ? data.line : undefined;
   if (!line) return { amount: data.usdcDisplay, unit: fallbackUnit, hint: null };
   const copy = circleBalanceCopy(lang);
+  if (line.failed) return { amount: '-', unit: copy.unit, hint: copy.hint };
   return {
     amount: line.usdcDisplay,
     unit: copy.unit,

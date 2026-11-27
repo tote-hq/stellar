@@ -15,7 +15,10 @@ interface Payload {
   usdc_source_signed_in: Row | null;
 }
 
+type Phase = 'loading' | 'ready' | 'error';
+
 interface Card {
+  phase: Phase;
   saved: Source;
   draft: Source;
   updatedAt: string | null;
@@ -46,12 +49,17 @@ function asSource(value: unknown): Source {
   return value === 'circle' ? 'circle' : 'mock';
 }
 
-function blankCard(): Card {
-  return { saved: 'mock', draft: 'mock', updatedAt: null, saving: false, flash: false, writeError: false };
+function loadingCard(): Card {
+  return { phase: 'loading', saved: 'mock', draft: 'mock', updatedAt: null, saving: false, flash: false, writeError: false };
+}
+
+function errorCard(): Card {
+  return { phase: 'error', saved: 'mock', draft: 'mock', updatedAt: null, saving: false, flash: false, writeError: false };
 }
 
 function cardFrom(row: Row | null): Card {
   return {
+    phase: 'ready',
     saved: asSource(row?.value),
     draft: asSource(row?.value),
     updatedAt: row?.updatedAt ?? null,
@@ -71,19 +79,20 @@ function when(iso: string | null): string {
 export default function UsdcSourcePage() {
   const [csrf, setCsrf] = useState('');
   const [expired, setExpired] = useState(false);
-  const [readError, setReadError] = useState(false);
-  const [guest, setGuest] = useState<Card>(blankCard);
-  const [signedIn, setSignedIn] = useState<Card>(blankCard);
+  const [guest, setGuest] = useState<Card>(loadingCard);
+  const [signedIn, setSignedIn] = useState<Card>(loadingCard);
 
   const load = useCallback(async () => {
-    setReadError(false);
+    setGuest(loadingCard());
+    setSignedIn(loadingCard());
     const session = await fetch('/api/admin/session', { cache: 'no-store' });
     if (session.status === 401) {
       setExpired(true);
       return;
     }
     if (!session.ok) {
-      setReadError(true);
+      setGuest(errorCard());
+      setSignedIn(errorCard());
       return;
     }
     const token = (await session.json()) as { csrf?: string };
@@ -94,7 +103,8 @@ export default function UsdcSourcePage() {
       return;
     }
     if (!res.ok) {
-      setReadError(true);
+      setGuest(errorCard());
+      setSignedIn(errorCard());
       return;
     }
     const body = (await res.json()) as Payload;
@@ -110,7 +120,7 @@ export default function UsdcSourcePage() {
   async function save(key: Key) {
     const current = key === 'usdc_source_guest' ? guest : signedIn;
     const set = key === 'usdc_source_guest' ? setGuest : setSignedIn;
-    if (current.draft === current.saved || current.saving) return;
+    if (current.phase !== 'ready' || current.draft === current.saved || current.saving) return;
     set((card) => ({ ...card, saving: true, writeError: false, flash: false }));
     const res = await fetch('/api/admin/usdc-source', {
       method: 'PUT',
@@ -168,15 +178,6 @@ export default function UsdcSourcePage() {
         </p>
       ) : (
         <>
-      {readError ? (
-        <p role="alert" style={{ color: 'var(--warn-ink)' }}>
-          No se pudo leer la configuración. Se usa el USDC de prueba.{' '}
-          <button type="button" style={TARGET} onClick={() => void load()}>
-            Reintentar
-          </button>
-        </p>
-      ) : null}
-
       <SourceCard
         legend="Sesión sin iniciar"
         name="usdc-guest"
@@ -184,6 +185,7 @@ export default function UsdcSourcePage() {
         card={guest}
         onDraft={(draft) => setGuest((card) => ({ ...card, draft, flash: false }))}
         onSave={() => void save('usdc_source_guest')}
+        onRetry={() => void load()}
       />
       <SourceCard
         legend="Sesión iniciada"
@@ -192,6 +194,7 @@ export default function UsdcSourcePage() {
         card={signedIn}
         onDraft={(draft) => setSignedIn((card) => ({ ...card, draft, flash: false }))}
         onSave={() => void save('usdc_source_signed_in')}
+        onRetry={() => void load()}
       />
         </>
       )}
@@ -206,6 +209,7 @@ function SourceCard({
   card,
   onDraft,
   onSave,
+  onRetry,
 }: {
   legend: string;
   name: string;
@@ -213,8 +217,10 @@ function SourceCard({
   card: Card;
   onDraft: (source: Source) => void;
   onSave: () => void;
+  onRetry: () => void;
 }) {
-  const dirty = card.draft !== card.saved;
+  const dirty = card.phase === 'ready' && card.draft !== card.saved;
+  const canSave = dirty && !card.saving;
   return (
     <fieldset
       data-testid={testId}
@@ -227,6 +233,17 @@ function SourceCard({
       }}
     >
       <legend style={{ fontWeight: 700, padding: '0 0.25rem' }}>{legend}</legend>
+      {card.phase === 'loading' ? (
+        <p data-testid={`${testId}-loading`}>Cargando…</p>
+      ) : card.phase === 'error' ? (
+        <p role="alert" data-testid={`${testId}-error`} style={{ color: 'var(--warn-ink)' }}>
+          No se pudo leer la configuración. Se usa el USDC de prueba.{' '}
+          <button type="button" data-testid={`${testId}-retry`} style={TARGET} onClick={onRetry}>
+            Reintentar
+          </button>
+        </p>
+      ) : (
+        <>
       <label style={ROW}>
         <input
           type="radio"
@@ -252,10 +269,12 @@ function SourceCard({
       <p id={`${testId}-mismatch`} style={{ margin: '0.25rem 0 1rem', color: 'var(--warn-ink)' }}>
         El saldo muestra USDC de Circle, pero el pago todavía usa el USDC de prueba.
       </p>
+        </>
+      )}
       <button
         type="button"
         data-testid={`${testId}-save`}
-        disabled={!dirty || card.saving}
+        disabled={!canSave}
         onClick={onSave}
         style={{
           ...TARGET,
@@ -266,7 +285,7 @@ function SourceCard({
           color: 'var(--chg-espresso)',
           font: 'inherit',
           fontWeight: 700,
-          cursor: !dirty || card.saving ? 'default' : 'pointer',
+          cursor: canSave ? 'pointer' : 'default',
         }}
       >
         {card.saving ? 'Guardando…' : 'Guardar'}
@@ -281,7 +300,7 @@ function SourceCard({
           No se guardó. El valor anterior sigue activo.
         </p>
       ) : null}
-      {card.saved === 'mock' && !dirty ? (
+      {card.phase === 'ready' && card.saved === 'mock' && !dirty ? (
         <p style={{ margin: '0.75rem 0 0', color: 'var(--muted)' }}>Sin cambios: usa el predeterminado</p>
       ) : card.updatedAt ? (
         <p style={{ margin: '0.75rem 0 0', color: 'var(--muted)' }}>

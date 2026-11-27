@@ -37,6 +37,8 @@ export const chain = {
   calls: [] as Call[],
   /** Contract id of each `balance` read, in order. Keyed lookups use `contractId:holder`. */
   balanceContracts: [] as string[],
+  /** Contract ids whose `balance` read throws. Other contracts still answer. */
+  failBalances: new Set<string>(),
   /** Throw from the next simulate/send, to test the failure paths. */
   fail: null as Error | null,
   reset() {
@@ -44,6 +46,7 @@ export const chain = {
     this.balances.clear();
     this.calls = [];
     this.balanceContracts = [];
+    this.failBalances = new Set();
     this.fail = null;
   },
 };
@@ -91,6 +94,7 @@ class UsdcClient {
   async balance({ id }: { id: string }) {
     const contractId = this.options.contractId ?? '';
     chain.balanceContracts.push(contractId);
+    if (chain.failBalances.has(contractId)) throw new Error('balance read failed');
     const keyed = chain.balances.get(`${contractId}:${id}`) ?? chain.balances.get(id) ?? 0n;
     return assembled('balance', id, this.options, keyed);
   }
