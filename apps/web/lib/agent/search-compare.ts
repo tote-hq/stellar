@@ -516,9 +516,19 @@ async function cappedLookup(query: string, searcher: CotoSearcher, ms: number, l
   }
 }
 
+/** A build-cart turn still searches. It does not draw a product grid. */
+function emitCompare(
+  args: { quiet?: boolean; emit: (event: UiEvent) => void },
+  event: UiEvent,
+): void {
+  if (args.quiet) return;
+  args.emit(event);
+}
+
 /**
  * Emit `pending` and start the Coto lookup now. `finish` runs after the Día
  * tool result is in hand. The lookup is already in flight by then.
+ * `quiet` skips both `search_compare` emits. The cache writes and the note stay.
  */
 export function beginDualSearch(args: {
   id: string;
@@ -526,6 +536,8 @@ export function beginDualSearch(args: {
   postalCode?: string;
   cache: RenderCache;
   emit: (event: UiEvent) => void;
+  /** Skip the search card. The note and the cache writes still happen. */
+  quiet?: boolean;
   timeoutMs?: number;
   searcher?: CotoSearcher;
   /** Wider Día pass. In-process, under the search row that is already open. */
@@ -533,7 +545,7 @@ export function beginDualSearch(args: {
   /** Coto line ids on the session, when the cart cache does not name them. */
   cotoLineIds?: readonly string[];
 }): { finish(dia: { products: readonly Product[]; failed: boolean }): Promise<string> } {
-  args.emit({
+  emitCompare(args, {
     t: 'search_compare',
     id: args.id,
     status: 'pending',
@@ -614,7 +626,7 @@ export function beginDualSearch(args: {
       rememberShown(args.cache, [...diaView, ...cotoView].map((item) => item.id));
       const seen = [...seenIds(diaView, diaPass.live), ...seenIds(cotoView, cotoPass.live)];
 
-      args.emit({
+      emitCompare(args, {
         t: 'search_compare',
         id: args.id,
         status: folded.status,
@@ -661,6 +673,8 @@ export function beginChainSearch(args: {
   postalCode?: string;
   cache: RenderCache;
   emit: (event: UiEvent) => void;
+  /** Skip the search card. The note and the cache writes still happen. */
+  quiet?: boolean;
   timeoutMs?: number;
   searcher?: CotoSearcher;
   /** Wider Día pass. In-process, under the search row that is already open. */
@@ -669,7 +683,7 @@ export function beginChainSearch(args: {
   cotoLineIds?: readonly string[];
 }): ChainSearch {
   const chains = [args.chain] as ('dia' | 'coto')[];
-  args.emit({
+  emitCompare(args, {
     t: 'search_compare',
     id: args.id,
     status: 'pending',
@@ -714,7 +728,7 @@ export function beginChainSearch(args: {
         rememberShown(args.cache, cotoView.map((item) => item.id));
         const seen = seenIds(cotoView, pass.live);
         const noPair = cotoView.length === 0 && !down && heldBy !== 'coto';
-        args.emit({
+        emitCompare(args, {
           t: 'search_compare',
           id: args.id,
           status,
@@ -757,7 +771,7 @@ export function beginChainSearch(args: {
       rememberShown(args.cache, diaView.map((item) => item.id));
       const seen = seenIds(diaView, pass.live);
       const noPair = diaView.length === 0 && !pass.failed && heldBy !== 'dia';
-      args.emit({
+      emitCompare(args, {
         t: 'search_compare',
         id: args.id,
         status: pass.failed ? 'dia_error' : 'ok',

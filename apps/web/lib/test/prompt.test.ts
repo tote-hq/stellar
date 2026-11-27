@@ -61,4 +61,14 @@ describe('Coto-only prompt', () => {
       assert.doesNotMatch(prompt, /from the "Pagar" button/);
     }
   });
+
+  it('tells a build-cart turn not to search again or draw a product grid', () => {
+    for (const lang of ['es', 'en'] as const) {
+      const prompt = changuitoPrompt(lang);
+      assert.match(prompt, /Do not search for alternatives and do not call render_products/);
+      assert.match(prompt, /A build-cart turn is the\s+exception: do not call render_products/);
+      assert.match(prompt, /"Quiero seguir en Día\." or "Quiero seguir en Coto\." — call choose_retailer/);
+      assert.match(prompt, /Do not call add_to_cart\. Later searches/);
+    }
+  });
 });

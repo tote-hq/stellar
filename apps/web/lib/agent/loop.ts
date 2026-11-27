@@ -19,6 +19,7 @@ import { anthropicProvider } from './providers/anthropic';
 import { openaiProvider } from './providers/openai';
 import type { HopResult } from './providers/types';
 import { freezeAllowed, freezeCotoReal } from '../checkout/coto-real.ts';
+import { isBuildCartMessage } from '../retailer-choice.ts';
 import { beginChainSearch, beginDualSearch, chainChoiceOn, dualCheckoutStamp, searchMode } from './search-compare';
 import {
   autoRenderCart,
@@ -340,6 +341,9 @@ export async function runTurn(
     content: shopperTurn(userText, sessionBanner(cartUnknown), image),
   });
   const priorAssistant = assistantBeforeLatestUser(turn.messages);
+  // One sentence for the whole turn. A build-cart message still searches, but
+  // the cards stay off: the basket is what this turn draws.
+  const buildTurn = isBuildCartMessage(userText);
 
   // The server's own instructions, then ours. Cached: both are stable for the
   // whole conversation, and they sit ahead of the messages that are not.
@@ -458,6 +462,14 @@ export async function runTurn(
       });
       if (refused) {
         result = refused;
+      } else if (buildTurn && use.name === 'render_products') {
+        result = {
+          type: 'tool_result',
+          tool_use_id: use.id,
+          is_error: true,
+          content:
+            'This turn builds the cart from what was agreed and draws no product grid. Do not call render_products.',
+        };
       } else if (RENDER_TOOL_NAMES.has(use.name)) {
         result = runRenderTool(turn.cache, use, emit);
       } else if (onlyCoto) {
@@ -468,6 +480,7 @@ export async function runTurn(
           postalCode,
           cache: turn.cache,
           emit,
+          quiet: buildTurn,
           cotoLineIds: session.state.cotoLines().map((line) => line.id),
         }).finish();
         result = { type: 'tool_result', tool_use_id: use.id, content: note };
@@ -491,6 +504,7 @@ export async function runTurn(
                 postalCode,
                 cache: turn.cache,
                 emit,
+                quiet: buildTurn,
                 searchDia,
                 cotoLineIds,
               })
@@ -501,6 +515,7 @@ export async function runTurn(
                   postalCode,
                   cache: turn.cache,
                   emit,
+                  quiet: buildTurn,
                   searchDia,
                   cotoLineIds,
                 })

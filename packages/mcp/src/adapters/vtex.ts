@@ -135,15 +135,32 @@ export class VtexAdapter implements RetailerAdapter {
   async resolveLocation(postalCode: string): Promise<LocationContext> {
     const sc = await this.salesChannel();
     const common = { retailer: this.id, country: 'ARG', postalCode, salesChannel: sc };
+    // Día's regions API resolves the bare four-digit code. A CPA such as
+    // C1414ABC returns a region id whose sellers list is empty, and search
+    // then filters every product as unavailable.
+    const regionCode = postalCode.match(/\d{4}/)?.[0] ?? postalCode;
 
     try {
       const regions = await request<VtexRegion[]>(
-        this.base(`/api/checkout/pub/regions?country=ARG&postalCode=${encodeURIComponent(postalCode)}`),
+        this.base(`/api/checkout/pub/regions?country=ARG&postalCode=${encodeURIComponent(regionCode)}`),
         { retries: 1 },
       );
       const r = regions?.[0];
       if (r?.id) {
         const sellers: Seller[] = (r.sellers ?? []).map((s) => ({ id: s.id, name: s.name || s.id }));
+        // No sellers means this store does not deliver here. regionId stays
+        // unset, and undeliverable stops search from using national stock.
+        // A missing region id, and a failed regions call, leave it unset and
+        // keep those national defaults.
+        if (sellers.length === 0) {
+          return {
+            ...common,
+            sellers: [],
+            degraded: true,
+            undeliverable: true,
+            note: `${this.displayName} has no store that delivers to ${postalCode}.`,
+          };
+        }
         return { ...common, regionId: r.id, sellers, degraded: false };
       }
       return {
@@ -161,6 +178,9 @@ export class VtexAdapter implements RetailerAdapter {
   }
 
   async search(query: string, ctx: LocationContext, opts: SearchOptions = {}): Promise<Product[]> {
+    // Seller-less is not the same as a missing region. Without this, search
+    // sends only the sales channel and Día answers with national stock.
+    if (ctx.undeliverable) return [];
     const limit = Math.min(opts.limit ?? 12, 50);
     const offset = opts.offset ?? 0;
     const p = new URLSearchParams({ query, locale: this.locale });

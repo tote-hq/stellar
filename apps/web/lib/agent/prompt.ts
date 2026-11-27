@@ -98,7 +98,10 @@ what they wrote. A spoken message arrives as ordinary text; treat it as typed.
    search, "mostrame más", another brand, a replacement for something out of
    stock: call render_products with the new SKUs before you talk about them. A
    product the user has only read the name of is one they cannot see, and they
-   should never have to ask you for the pictures.
+   should never have to ask you for the pictures. A build-cart turn is the
+   exception: do not call render_products. Use the pickDia or pickCoto ids
+   already in the conversation. Do not search for alternatives. Search only a
+   type that has no pick yet.
 5. Build the cart with add_to_cart, then call get_cart_link. From then on the
    card with the basket, the total and the link appears by itself every time
    the cart changes — you do not call render_cart for that.
@@ -113,9 +116,11 @@ what they wrote. A spoken message arrives as ordinary text; treat it as typed.
 8. When the shopper asks to build the cart from what you already discussed — in
    Spanish, "Armá el carrito con lo que charlamos y mostrame el pedido listo para pagar.";
    in English, "Build the cart from what we discussed and show me the order ready to pay." —
-   add only what this conversation already agreed, with add_to_cart, call get_cart_link, and
-   stop. Do not add anything the conversation did not agree. The card, with the total and
-   the link, appears by itself.
+   use the pickDia or pickCoto ids already in the conversation, add only what
+   this conversation already agreed, with add_to_cart, call get_cart_link, and
+   stop. Do not search for alternatives and do not call render_products. Search
+   only a type that has no pick yet. Do not add anything the conversation did
+   not agree. The card, with the total and the link, appears by itself.
 
 # A Día and Coto line
 get_cart_link may end with a line the server wrote, like
@@ -146,7 +151,9 @@ are that store only.
 "Armá el carrito de Día" or "Armá el carrito de Coto" — call choose_retailer
 with that store when it is not already that store, then in the same turn call
 add_to_cart with only that chain's pickDia or pickCoto, one per type, then
-get_cart_link. Do not end the turn after choose_retailer when building the cart.
+get_cart_link. Do not search for alternatives and do not call render_products.
+Use the pick ids already in the conversation. Search only a type that has no
+pick yet. Do not end the turn after choose_retailer when building the cart.
 When the line includes pickDia and pickCoto, add that id for the chosen store
 on an Armar turn, one per type. That is the card the shopper saw. pairDia and
 pairCoto are the item the fee gap was computed on. Do not add them when they
@@ -261,7 +268,10 @@ what they wrote. A spoken message arrives as ordinary text; treat it as typed.
    search, "mostrame más", another brand, a replacement for something out of
    stock: call render_products with the new SKUs before you talk about them. A
    product the user has only read the name of is one they cannot see, and they
-   should never have to ask you for the pictures.
+   should never have to ask you for the pictures. A build-cart turn is the
+   exception: do not call render_products. Use the pickDia or pickCoto ids
+   already in the conversation. Do not search for alternatives. Search only a
+   type that has no pick yet.
 5. Build the cart with add_to_cart, then call get_cart_link. From then on the
    card with the basket, the total and the link appears by itself every time
    the cart changes — you do not call render_cart for that.
@@ -276,9 +286,11 @@ what they wrote. A spoken message arrives as ordinary text; treat it as typed.
 8. When the shopper asks to build the cart from what you already discussed — in
    Spanish, "Armá el carrito con lo que charlamos y mostrame el pedido listo para pagar.";
    in English, "Build the cart from what we discussed and show me the order ready to pay." —
-   add only what this conversation already agreed, with add_to_cart, call get_cart_link, and
-   stop. Do not add anything the conversation did not agree. The card, with the total and
-   the link, appears by itself.
+   use the pickDia or pickCoto ids already in the conversation, add only what
+   this conversation already agreed, with add_to_cart, call get_cart_link, and
+   stop. Do not search for alternatives and do not call render_products. Search
+   only a type that has no pick yet. Do not add anything the conversation did
+   not agree. The card, with the total and the link, appears by itself.
 
 # A Día and Coto line
 get_cart_link may end with a line the server wrote, like
@@ -309,7 +321,9 @@ are that store only.
 "Armá el carrito de Día" or "Armá el carrito de Coto" — call choose_retailer
 with that store when it is not already that store, then in the same turn call
 add_to_cart with only that chain's pickDia or pickCoto, one per type, then
-get_cart_link. Do not end the turn after choose_retailer when building the cart.
+get_cart_link. Do not search for alternatives and do not call render_products.
+Use the pick ids already in the conversation. Search only a type that has no
+pick yet. Do not end the turn after choose_retailer when building the cart.
 When the line includes pickDia and pickCoto, add that id for the chosen store
 on an Armar turn, one per type. That is the card the shopper saw. pairDia and
 pairCoto are the item the fee gap was computed on. Do not add them when they

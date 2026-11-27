@@ -302,6 +302,7 @@ describe('chat store: the session snapshot', () => {
       degraded: false,
       sellers: [{ id: '1', name: 'Día' }],
       regionId: 'v2.ABC',
+      undeliverable: true,
     },
   };
 
