@@ -79,7 +79,12 @@ export default function AdminDesk() {
 
   return (
     <main data-testid="admin-notifications" style={{ padding: '1.5rem 2rem', color: 'var(--text)' }}>
-      <h1 id="admin-pedidos-title" style={{ margin: '0 0 1rem' }}>Pedidos</h1>
+      <header style={{ display: 'flex', gap: '1.5rem', alignItems: 'center', margin: '0 0 1rem' }}>
+        <h1 id="admin-pedidos-title" style={{ margin: 0 }}>Pedidos</h1>
+        <a href="/usdc" style={{ minHeight: 44, minWidth: 44, display: 'inline-flex', alignItems: 'center' }}>
+          Moneda de prueba
+        </a>
+      </header>
       <div data-testid="admin-notifications-scroll" style={{ overflowY: 'auto', maxHeight: 'calc(100dvh - 8rem)' }}>
         <table
           style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0 8px' }}

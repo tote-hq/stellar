@@ -133,6 +133,40 @@ export async function getRetailerSearch(): Promise<RetailerSearchConfig> {
   return retailerSearch(await getConfig());
 }
 
+/**
+ * Which testnet USDC the balance line names. Checkout, the escrow and the
+ * faucet stay on the mock token under either value.
+ *
+ * `"circle"` is the only Circle reading. A missing key, a missing table, no
+ * database, or any other JSON value reads as mock — the same conservative
+ * direction as the other flags. The two keys are independent: a signed-in
+ * request never looks at the guest row, and the other way around.
+ */
+export type UsdcSource = 'mock' | 'circle';
+
+export function usdcSource(values: Record<string, unknown>, signedIn: boolean): UsdcSource {
+  const key = signedIn ? 'usdc_source_signed_in' : 'usdc_source_guest';
+  return values[key] === 'circle' ? 'circle' : 'mock';
+}
+
+/**
+ * Mainnet never consults the flag, even when the stored values are `"circle"`.
+ * Testnet uses `usdcSource` for the session that is asking.
+ */
+export function usdcLineSource(
+  network: 'testnet' | 'mainnet',
+  values: Record<string, unknown>,
+  signedIn: boolean,
+): UsdcSource {
+  if (network !== 'testnet') return 'mock';
+  return usdcSource(values, signedIn);
+}
+
+/** The session's source. A failed config read is `getConfig`'s warn, then mock. */
+export async function getUsdcSource(signedIn: boolean): Promise<UsdcSource> {
+  return usdcSource(await getConfig(), signedIn);
+}
+
 /** Test-only. A null cache makes the next read hit the table (or read as off). */
 export function __setConfigForTests(values: Record<string, unknown> | null, now = Date.now()): void {
   cached = values === null ? null : { at: now, values };

@@ -5,6 +5,8 @@ import { Keypair } from '@stellar/stellar-sdk';
 
 import { checkoutStore } from '../checkout/store.ts';
 import { __setConfigForTests } from '../config.ts';
+import { contractIds } from '../contract-ids.ts';
+import { CIRCLE_TESTNET_USDC } from '../deployments.ts';
 import type { ComparisonRow } from '../checkout/compare-fee.ts';
 
 /**
@@ -374,6 +376,26 @@ describe('POST /api/checkout/quote compare + Coto accept', () => {
       if (previous === undefined) delete process.env.COTO_REAL_ENABLED;
       else process.env.COTO_REAL_ENABLED = previous;
     }
+  });
+
+  it('both usdc source flags on circle still quotes the mock token', async () => {
+    __setConfigForTests({
+      sandbox_mock: true,
+      chat_dual_checkout_demo: true,
+      retailer_search: { order: ['dia', 'coto'], enabled: { dia: true, coto: true } },
+      usdc_source_guest: 'circle',
+      usdc_source_signed_in: 'circle',
+    });
+    const res = await ask({
+      cart,
+      location: { postalCode: '1425' },
+      handoffUrl: 'https://dia.test/cart',
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    const mock = contractIds('testnet').usdcId;
+    assert.equal(body.usdcMint, mock);
+    assert.equal(JSON.stringify(body).includes(CIRCLE_TESTNET_USDC.issuer), false);
   });
 
   it('Coto quote with missing accepted ids → 400', async () => {

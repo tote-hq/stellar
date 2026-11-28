@@ -93,10 +93,11 @@ export async function decideAdmin(req: {
   // link there, and an empty 404 is what Chrome showed the operator.
   const order = path.match(/^\/orders\/([^/]+)$/);
   const desk = path === '/' || path === '/orders' || path === '/orders/';
-  const document = (req.method === 'GET' || req.method === 'HEAD') && (desk || order);
+  const usdc = path === '/usdc' || path === '/usdc/';
+  const document = (req.method === 'GET' || req.method === 'HEAD') && (desk || order || usdc);
   if (document) {
     if (!session) return login(url.searchParams.get('login') === 'failed');
-    const rewrite = desk ? '/admin-portal' : `/admin-portal/orders/${order?.[1]}`;
+    const rewrite = usdc ? '/admin-portal/usdc' : desk ? '/admin-portal' : `/admin-portal/orders/${order?.[1]}`;
     return { status: 200, rewrite, handled: true };
   }
 

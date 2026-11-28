@@ -129,3 +129,19 @@ export function deployment(net: NetworkId): Deployment {
   }
   return DEPLOYMENTS[net];
 }
+
+/**
+ * Circle's official USDC on Stellar testnet.
+ *
+ * Source: https://developers.circle.com/stablecoins/usdc-contract-addresses
+ * (Stellar Testnet row), read 2026-11-27. The published value is
+ * `USDC-GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5`.
+ * Not part of deployments.json: checkout and the escrow stay on `usdcId`.
+ * A contract id for a smart-wallet holder is derived with
+ * `new Asset(code, issuer).contractId(networkPassphrase)`, not stored here.
+ * `scripts/write-deployments-module.mjs` emits this block so a regenerate keeps it.
+ */
+export const CIRCLE_TESTNET_USDC = {
+  code: 'USDC',
+  issuer: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
+} as const;

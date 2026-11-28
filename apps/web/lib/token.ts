@@ -11,10 +11,11 @@
  * error codes, which are the same on every network — and the ids come from
  * lib/deployments.ts instead.
  */
+import { Asset } from '@stellar/stellar-sdk';
 import { Client as Usdc } from '@changuito/usdc-bindings';
 
 import { contractIds } from './contract-ids.ts';
-import { DEFAULT_NETWORK, deployment, type NetworkId } from './deployments.ts';
+import { CIRCLE_TESTNET_USDC, DEFAULT_NETWORK, deployment, type NetworkId } from './deployments.ts';
 
 export function usdcClient(publicKey?: string, net: NetworkId = DEFAULT_NETWORK): Usdc {
   const d = deployment(net);
@@ -51,4 +52,30 @@ export async function usdcBalance(address: string, net: NetworkId = DEFAULT_NETW
   if (!usdcId) throw new Error(`no hay un token USDC desplegado en ${net}`);
   const tx = await usdcClient(undefined, net).balance({ id: address });
   return tx.result;
+}
+
+/**
+ * The same SEP-41 balance read against a contract id the caller names.
+ *
+ * `usdcBalance` stays on the deployed mock token. A smart wallet holding
+ * Circle's testnet SAC is not that contract, so the balance route passes the
+ * id derived from Circle's code and issuer.
+ */
+export async function tokenBalance(address: string, net: NetworkId, contractId: string): Promise<bigint> {
+  if (!contractId) throw new Error(`no hay un token USDC desplegado en ${net}`);
+  const d = deployment(net);
+  const client = new Usdc({
+    contractId,
+    networkPassphrase: d.networkPassphrase,
+    rpcUrl: d.rpcUrl,
+    publicKey: d.resolver,
+  });
+  const tx = await client.balance({ id: address });
+  return tx.result;
+}
+
+/** Circle's Stellar testnet SAC. Derived, never copied from a second page. */
+export function circleTestnetContractId(): string {
+  const { networkPassphrase } = deployment('testnet');
+  return new Asset(CIRCLE_TESTNET_USDC.code, CIRCLE_TESTNET_USDC.issuer).contractId(networkPassphrase);
 }

@@ -39,6 +39,19 @@
  * holder. The classic line is the answer only where there is no token, which
  * is the mainnet case the paragraph above was written for.
  *
+ * That rule still holds for `usdc`, `usdcDisplay` and `trustline`. They are
+ * the mock token the faucet mints and the checkout spends, under either
+ * config flag. On testnet, when the session's flag is `"circle"`, the body
+ * adds `line`: Circle's testnet USDC, for the wallet widget only. Checkout
+ * and the pay modal keep reading `usdc`. Mainnet never consults the flag.
+ * A G-account's Circle number comes off the Horizon answer this route already
+ * fetched. A contract holder reads Circle's SAC, derived from the published
+ * code and issuer, and that is the only extra round trip.
+ *
+ * That extra read has its own try. If it throws, the response is still 200
+ * and `usdc` is the mock balance. `line.failed` is set so the widget paints
+ * "-" with the Circle unit, and never the mock number under that label.
+ *
  * ## There is no `funded` field, and its absence is the decision
  *
  * There was one. It meant "holds at least MIN_XLM, so it can pay a fee", and
@@ -64,12 +77,14 @@
  * `tx_insufficient_fee`; the honest answer then is to bring the field back,
  * not to widen the error copy.
  */
+import { getUsdcSource } from '../../../lib/config.ts';
 import { contractIds } from '../../../lib/contract-ids.ts';
-import type { NetworkId } from '../../../lib/deployments.ts';
+import { CIRCLE_TESTNET_USDC, type NetworkId } from '../../../lib/deployments.ts';
 import { requireHuman } from '../../../lib/human-gate.ts';
+import { readLoggedInUser } from '../../../lib/login-gate.ts';
 import { networkNotServed, requestNetwork } from '../../../lib/server-network.ts';
 import { accountBalances, addressKind, classicBalance, formatUsdc } from '../../../lib/stellar.ts';
-import { usdcBalance } from '../../../lib/token.ts';
+import { circleTestnetContractId, tokenBalance, usdcBalance } from '../../../lib/token.ts';
 import { trustlineFor, usdcAsset, type TrustlineState } from '../../../lib/trustline.ts';
 
 // XDR encoding is Node, not edge.
@@ -96,6 +111,19 @@ export interface BalanceResponse {
   trustline: TrustlineState;
   /** Echoed so a caller can tell which chain answered. */
   network: NetworkId;
+  /**
+   * Present only on testnet when this session's flag is `"circle"`.
+   * Absent on mock, so the body matches the response this route had before.
+   * Not what checkout spends.
+   */
+  line?: {
+    source: 'circle';
+    usdc: string;
+    usdcDisplay: string;
+    trustline: TrustlineState;
+    /** Set when the Circle read failed. `usdc` above is still the mock balance. */
+    failed?: boolean;
+  };
 }
 
 export async function GET(req: Request): Promise<Response> {
@@ -160,6 +188,45 @@ export async function GET(req: Request): Promise<Response> {
       trustline: kind === 'contract' ? 'not-needed' : trustlineFor(balances, asset),
       network,
     };
+
+    // Mainnet never reads the flag. A forged or missing cookie is a guest.
+    // The Circle read is isolated: a throw here must not 502 the mock balance
+    // that checkout and the pay modal still read from this body.
+    if (network === 'testnet') {
+      const signedIn = (await readLoggedInUser(req)).ok;
+      if ((await getUsdcSource(signedIn)) === 'circle') {
+        try {
+          if (kind === 'contract') {
+            const held = await tokenBalance(address, network, circleTestnetContractId());
+            body.line = {
+              source: 'circle',
+              usdc: held.toString(),
+              usdcDisplay: formatUsdc(held),
+              trustline: 'not-needed',
+            };
+          } else {
+            const circle = { code: CIRCLE_TESTNET_USDC.code, issuer: CIRCLE_TESTNET_USDC.issuer };
+            const held = classicBalance(balances, circle.code, circle.issuer);
+            body.line = {
+              source: 'circle',
+              usdc: held.toString(),
+              usdcDisplay: formatUsdc(held),
+              trustline: trustlineFor(balances, circle),
+            };
+          }
+        } catch (err) {
+          console.error('[balance] circle', err instanceof Error ? err.message : String(err));
+          body.line = {
+            source: 'circle',
+            usdc: '0',
+            usdcDisplay: '-',
+            trustline: 'not-needed',
+            failed: true,
+          };
+        }
+      }
+    }
+
     return Response.json(body, { headers: NO_STORE });
   } catch (err) {
     console.error('[balance]', err instanceof Error ? err.message : String(err));

@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import { NETWORK_IDS } from '../deployments.ts';
 import {
   balanceCopy,
+  circleBalanceCopy,
   modeCopy,
   modeCopyFor,
   modes,
@@ -65,5 +66,6 @@ describe('mode copy', () => {
     assertSameKeys(balanceCopy('es'), balanceCopy('en'), 'balance');
     assertSameKeys(trustlineCopy('es'), trustlineCopy('en'), 'trustline');
     assertSameKeys(receiveCopy('es'), receiveCopy('en'), 'receive');
+    assertSameKeys(circleBalanceCopy('es'), circleBalanceCopy('en'), 'circle');
   });
 });
