@@ -107,8 +107,9 @@ test('the dashboard exposes only waitlist, total purchases and total wallets', (
     sources: { ...FALLBACK_SNAPSHOT.sources, waitlist: 'snapshot' as const, realPurchases: 'live' as const, solana: 'live' as const, stellar: 'live' as const },
     totals: { ...FALLBACK_SNAPSHOT.totals, realPurchases: 11 },
   };
-  assert.equal(staleWaitlist.find((card) => card.id === 'endUsers')?.parts.some((part) => part.key === 'lastKnown'), true);
-  assert.equal(kpiMark('endUsers', staleSnap, COPY), COPY.lastKnown);
+  assert.equal(staleWaitlist.find((card) => card.id === 'endUsers')?.value, 52);
+  assert.equal(staleWaitlist.find((card) => card.id === 'endUsers')?.parts.some((part) => part.key === 'lastKnown'), false);
+  assert.equal(kpiMark('endUsers', staleSnap, COPY), null);
   assert.equal(kpiMark('realPurchases', staleSnap, COPY), null);
   assert.equal(kpiMark('wallets', staleSnap, COPY), null);
 
@@ -117,7 +118,11 @@ test('the dashboard exposes only waitlist, total purchases and total wallets', (
     updatedAt: '2026-11-25T12:00:00.000Z',
     sources: { ...FALLBACK_SNAPSHOT.sources, waitlist: 'live' as const, realPurchases: 'unavailable' as const, solana: 'unavailable' as const, stellar: 'unavailable' as const },
   };
-  const liveWaitlist = kpis(liveWaitlistSnap);
+  const liveWaitlist = kpis({
+    ...liveWaitlistSnap,
+    totals: { ...FALLBACK_SNAPSHOT.totals, endUsers: 40 },
+  });
+  assert.equal(liveWaitlist.find((card) => card.id === 'endUsers')?.value, 52);
   assert.equal(liveWaitlist.find((card) => card.id === 'endUsers')?.parts.some((part) => part.key === 'lastKnown'), false);
   assert.equal(liveWaitlist.find((card) => card.id === 'realPurchases')?.parts.some((part) => part.key === 'lastKnown'), true);
   assert.equal(kpiMark('endUsers', liveWaitlistSnap, COPY), null);
