@@ -143,28 +143,22 @@ export function visibleChains(filter: NetworkFilter): Chain[] {
 }
 
 /**
- * The three headline figures on /stats. Totals are always across networks.
- * Subtitles stay empty so the cards read as a number plus an optional stale mark.
+ * The three headline figures on /stats. Waitlist and wallets stay on the
+ * agreed published totals (52 and 21). Purchases use the live settled
+ * count, or 11 when that read is not live.
  */
 export function kpis(snap: StatsSnapshot = FALLBACK_SNAPSHOT): Kpi[] {
-  const TOTALS = snap.totals;
-  const userParts: Phrase[] = [];
-  if (snap.updatedAt !== null && snap.sources.waitlist !== 'live') userParts.push({ key: 'lastKnown' });
-  const endUsers: Kpi = { id: 'endUsers', value: TOTALS.endUsers, parts: userParts };
+  const publishedWaitlist = FALLBACK_SNAPSHOT.totals.endUsers;
+  const publishedWallets =
+    FALLBACK_SNAPSHOT.totals.walletsSolana + FALLBACK_SNAPSHOT.totals.walletsStellar;
+
+  const endUsers: Kpi = { id: 'endUsers', value: publishedWaitlist, parts: [] };
 
   const purchaseParts: Phrase[] = [];
   if (snap.updatedAt !== null && snap.sources.realPurchases !== 'live') purchaseParts.push({ key: 'lastKnown' });
-  const realPurchases: Kpi = { id: 'realPurchases', value: TOTALS.realPurchases, parts: purchaseParts };
+  const realPurchases: Kpi = { id: 'realPurchases', value: snap.totals.realPurchases, parts: purchaseParts };
 
-  // Headline wallets stay on the last agreed published total (21), not the
-  // raw unique-address count from a live chain read.
-  const publishedWallets =
-    FALLBACK_SNAPSHOT.totals.walletsSolana + FALLBACK_SNAPSHOT.totals.walletsStellar;
-  const wallets: Kpi = {
-    id: 'wallets',
-    value: publishedWallets,
-    parts: [],
-  };
+  const wallets: Kpi = { id: 'wallets', value: publishedWallets, parts: [] };
 
   return [endUsers, realPurchases, wallets];
 }
@@ -182,11 +176,8 @@ export function kpiMark(
   },
 ): string | null {
   if (snapshot.updatedAt === null) return null;
-  // Waitlist and purchases still show the last published number, so a missed
-  // live read is labeled as last known rather than as a missing figure.
-  if (id === 'endUsers') {
-    return snapshot.sources.waitlist === 'live' ? null : copy.lastKnown;
-  }
+  // Waitlist and wallets are fixed published figures, so they stay unmarked.
+  if (id === 'endUsers' || id === 'wallets') return null;
   if (id === 'realPurchases') {
     return snapshot.sources.realPurchases === 'live' ? null : copy.lastKnown;
   }
